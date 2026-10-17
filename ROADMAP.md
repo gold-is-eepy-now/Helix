@@ -79,17 +79,30 @@ The kernel becomes a real program that owns physical and virtual memory.
 
 **Still to do in M3:**
 
-- ⛔ Our own page tables (`map`, `unmap`, `protect`) on x86_64.
 - ⛔ Guard pages and a non-executable stack.
 - ⛔ A dynamically sized frame bitmap (currently a static 128 KiB array caps
   physical RAM at 4 GiB).
 
-## M4 — Interrupts, exceptions and timers
+(Page tables, listed here originally, are done — see M4.)
 
-- IDT setup, CPU exception handlers with readable dumps.
-- APIC/IOAPIC or PIC bring-up.
-- Programmable timer tick.
-- A monotonic clock.
+## M4 — Interrupts, exceptions, timers and paging ✅
+
+- ✅ Our own page tables: `vmm_map` / `vmm_unmap` / `vmm_protect` / `vmm_get_mapping`,
+  walking the four levels, allocating tables from the PMM, splitting 2 MiB
+  huge pages, and flushing the TLB with `invlpg`.
+- ✅ IDT with assembly stubs for the 32 CPU exceptions and 16 IRQs, a uniform
+  interrupt frame, and readable exception reports (vector, name, error code,
+  RIP/CS/RFLAGS, CR2 for page faults).
+- ✅ PIC remap to vectors 32–47, plus mask/unmask/EOI helpers.
+- ✅ PIT channel 0 at 100 Hz driving IRQ0, with a tick counter and derived
+  uptime.
+- ✅ Local-APIC routing so 8259 interrupts reach the CPU (LINT0 ExtINT, TPR 0).
+- ✅ New commands: `vmtest`, `ticks`, `swint`, `pitcount`, `fault`.
+- ✅ Test suite grown to 27 checks, including a deliberate fault caught and
+  reported.
+
+**Still to do:** guard pages and a non-executable stack; APIC/IOAPIC timers;
+per-process address spaces (needs the object manager).
 
 ## M5 — The object manager
 

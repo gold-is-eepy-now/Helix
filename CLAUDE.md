@@ -69,13 +69,16 @@ make BUILD_DIR=/tmp/hb test   # build + boot headlessly and verify the banner
   console (with ANSI colour and input), framebuffer text console (with cursor
   and colour), PS/2 keyboard input, the `helixsh` interactive shell, a command
   table of kernel-resident programs, TSC-calibrated uptime, Limine-backed
-  memory map, CPU identification via CPUID, a **bitmap physical frame
-  allocator** and a **kernel heap** (`kmalloc`/`kfree`), `panic()` and
-  `kprintf()`, and a freestanding string library.
-- **Not implemented:** page tables / guard pages, real interrupt handling, a
-  scheduler, user space, ELF loading, syscalls, the object manager,
-  capabilities, isolated driver services, filesystems, networking, graphics,
-  compatibility layers.
+  memory map, CPU identification via CPUID, a bitmap physical frame allocator,
+  a kernel heap (`kmalloc`/`kfree`), `panic()`/`kprintf()`, a freestanding
+  string library, **our own four-level page tables (`vmm_map`/`vmm_unmap`/
+  `vmm_protect`)**, an **IDT with readable CPU exception handlers**, and a
+  **100 Hz PIT timer interrupt** (PIC remapped; LAPIC LINT0 opened for the
+  8259).
+- **Not implemented:** guard pages, a non-executable stack, APIC/IOAPIC
+  timers, a scheduler, threads, IPC, user space, ELF loading, syscalls, the
+  object manager, capabilities, isolated driver services, filesystems,
+  networking, graphics, compatibility layers.
 
 Do not write documentation or commit messages that imply unimplemented systems
 exist.

@@ -14,17 +14,22 @@
 #include <limine.h>
 
 #include "console.h"
+#include "apic.h"
 #include "fb.h"
 #include "heap.h"
+#include "idt.h"
 #include "io.h"
 #include "keyboard.h"
 #include "memory.h"
 #include "panic.h"
+#include "pic.h"
+#include "pit.h"
 #include "pmm.h"
 #include "shell.h"
 #include "sysinfo.h"
 #include "time.h"
 #include "version.h"
+#include "vmm.h"
 
 /* -------------------------------------------------------------------------
  * Limine protocol requests
@@ -116,6 +121,15 @@ void kmain(void) {
                          : 0;
     heap_init(hhdm_offset);
 
+    /* Virtual memory (our own page tables on top of Limine's) and interrupts. */
+    vmm_init(hhdm_offset);
+    idt_init();
+    pic_remap();
+    apic_allow_pic(hhdm_offset); /* let PIC IRQs through if the LAPIC is on */
+    pit_init(100);      /* 100 Hz system tick */
+    pic_clear_mask(0);  /* unmask IRQ0 (the timer) */
+    cpu_enable_interrupts();
+
     /* 4. Say hello. */
     console_write("HELIX OS\n");
     console_write("Native Object Kernel\n");
@@ -146,6 +160,8 @@ void kmain(void) {
             (unsigned long long)pmm_free_frame_count());
     kprintf("[helix] heap:    %llu KiB reserved\n",
             (unsigned long long)(heap_total_bytes() / 1024u));
+    console_write("[helix] vmm:     page tables active\n");
+    kprintf("[helix] timer:   PIT %u Hz, interrupts on\n", pit_hz());
     console_write("[helix] clock:   ");
     console_write(time_available() ? "TSC calibrated\n" : "unavailable\n");
     console_reset_color();

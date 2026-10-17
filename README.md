@@ -9,10 +9,10 @@ open-source research OS. Linux and BSD compatibility are planned as *runtimes
 that run on top of the Helix kernel*, translating Unix behaviour into Helix's
 native object model. They are not the foundation.
 
-> Status: **Milestone 2 complete — interactive shell with built-in
-> commands (help, sysinfo, cpu, mem, uptime, calc, echo, ...) and a typed bus
-> to it over serial or PS/2, machine-tested.** M1 is also part of that: the
-> kernel boots, prints a banner, and has a real input system on top.
+> Status: **Milestone 4 complete — the kernel owns its page tables
+> (`map`/`unmap`/`protect`), handles CPU exceptions with readable reports, and
+> takes a 100 Hz timer interrupt. 27 machine-checked tests.** M1–M3 built the
+> boot chain, the interactive shell, and physical memory on top of it.
 
 ---
 
@@ -31,17 +31,21 @@ native object model. They are not the foundation.
 | Calibrated time, memory map, firmware detection | ✅ working |
 | Kernel heap (`kmalloc`/`kfree`) + panic/`kprintf` | ✅ working (M3) |
 | Physical frame allocator (bitmap) | ✅ working, machine-tested (M3) |
-| Page tables, guard pages | ⛔ not started (M3 remainder) |
-| Scheduler and user space / ELF / syscalls | ⛔ not started (M4–M9) |
+| Virtual memory: our own page tables (`map`/`unmap`/`protect`) | ✅ working, machine-tested (M4) |
+| IDT + readable CPU exception handlers | ✅ working, machine-tested (M4) |
+| PIC remap + PIT timer interrupt | ✅ working, machine-tested (M4) |
+| Guard pages, non-executable stack | ⛔ not started |
 | Object manager & capabilities | ⛔ not started (M5–M6) |
+| Scheduler, threads, IPC | ⛔ not started (M7–M8) |
+| User space / ELF / syscalls | ⛔ not started (M9) |
 | Isolated driver services, filesystems, networking | ⛔ not started (M10–M12) |
 | Linux / BSD / POSIX compatibility | ⛔ not started (much later) |
 
 See [ROADMAP.md](ROADMAP.md) for the full plan, [docs/02-shell.md](docs/02-shell.md)
-for the shell, and [docs/03-cpython-requirements.md](docs/03-cpython-requirements.md)
-for what it will take to run CPython and Linux/BSD software.
-
-See [ROADMAP.md](ROADMAP.md) for the full plan.
+for the shell, [docs/03-cpython-requirements.md](docs/03-cpython-requirements.md)
+for what it will take to run CPython and Linux/BSD software, and
+[docs/04-paging-interrupts.md](docs/04-paging-interrupts.md) for how virtual
+memory and interrupts work today.
 
 ---
 
@@ -144,6 +148,8 @@ Helix OS 0.2.0 "Kernel Shell"
 [helix] memory:  462 MiB usable
 [helix] pmm:     510 MiB total, 461 MiB free (118064 frames)
 [helix] heap:    260 KiB reserved
+[helix] vmm:     page tables active
+[helix] timer:   PIT 100 Hz, interrupts on
 [helix] clock:   TSC calibrated
 
 Type 'help' for a list of commands, 'sysinfo' for system info.
@@ -151,11 +157,11 @@ Type 'help' for a list of commands, 'sysinfo' for system info.
 helix> 
 ```
 
-`make test` boots the image, drives the shell over a serial socket, checks 23
+`make test` boots the image, drives the shell over a serial socket, checks 27
 behaviours (banner, prompt, `help`, `echo`, `calc`, `cpu`, `mem`, `pmm`,
-`heap`, `memtest`, `uptime`, `sysinfo`, error handling, `color`), and audits
-the framebuffer screenshot for readability. It also saves that screenshot to
-`build/test/shell-screen.png`.
+`heap`, `memtest`, `vmtest`, `ticks`, `uptime`, `sysinfo`, error handling,
+`color`, and a caught CPU exception), and audits the framebuffer screenshot for
+readability. It also saves that screenshot to `build/test/shell-screen.png`.
 
 ---
 

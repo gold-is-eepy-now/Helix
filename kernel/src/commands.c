@@ -20,10 +20,12 @@
 #include "kstring.h"
 #include "memory.h"
 #include "panic.h"
+#include "pit.h"
 #include "pmm.h"
 #include "sysinfo.h"
 #include "time.h"
 #include "version.h"
+#include "vmm.h"
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -258,6 +260,110 @@ static void cmd_memtest(int argc, char **argv) {
     kprintf("  result: %s\n", (ok && before == after) ? "PASS" : "FAIL");
 }
 
+static void cmd_vmtest(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    const uint64_t scratch = 0xFFFF900000000000ULL;
+    bool ok = true;
+
+    kprintf("Virtual memory self-test\n");
+
+    uint64_t phys, flags;
+    if (vmm_get_mapping(scratch, &phys, &flags)) {
+        kprintf("  scratch address already mapped; aborting\n");
+        return;
+    }
+
+    uintptr_t frame = pmm_alloc_frame();
+    if (frame == 0) {
+        kprintf("  alloc frame: FAILED\n");
+        return;
+    }
+    kprintf("  frame %p -> virtual %p\n", frame, scratch);
+
+    if (!vmm_map(scratch, frame, VMM_PRESENT | VMM_WRITE)) {
+        kprintf("  map: FAILED\n");
+        pmm_free_frame(frame);
+        return;
+    }
+    kprintf("  map: ok\n");
+
+    volatile uint64_t *p = (volatile uint64_t *)scratch;
+    p[0] = 0xDEADBEEFCAFEBABEULL;
+    p[1] = 0x0123456789ABCDEFULL;
+    if (p[0] != 0xDEADBEEFCAFEBABEULL || p[1] != 0x0123456789ABCDEFULL) {
+        kprintf("  write/read: FAILED\n");
+        ok = false;
+    } else {
+        kprintf("  write/read: ok\n");
+    }
+
+    if (vmm_get_mapping(scratch, &phys, &flags) && phys == frame && (flags & VMM_WRITE)) {
+        kprintf("  query: ok (phys %p, flags %llx)\n", phys, (unsigned long long)flags);
+    } else {
+        kprintf("  query: FAILED\n");
+        ok = false;
+    }
+
+    if (vmm_protect(scratch, VMM_PRESENT) &&
+        vmm_get_mapping(scratch, &phys, &flags) && !(flags & VMM_WRITE)) {
+        kprintf("  protect (read-only): ok\n");
+    } else {
+        kprintf("  protect: FAILED\n");
+        ok = false;
+    }
+
+    if (vmm_unmap(scratch) && !vmm_get_mapping(scratch, &phys, &flags)) {
+        kprintf("  unmap: ok\n");
+    } else {
+        kprintf("  unmap: FAILED\n");
+        ok = false;
+    }
+
+    pmm_free_frame(frame);
+    kprintf("  result: %s\n", ok ? "PASS" : "FAIL");
+}
+
+static void cmd_ticks(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    kprintf("PIT timer: %u Hz, %llu ticks, %llu ms\n",
+            pit_hz(),
+            (unsigned long long)pit_ticks(),
+            (unsigned long long)pit_uptime_ms());
+}
+
+static void cmd_swint(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    uint64_t before = pit_ticks();
+    __asm__ volatile("int $32"); /* software-trigger vector 32 (IRQ0) */
+    kprintf("software int $32: ticks %llu -> %llu\n",
+            (unsigned long long)before, (unsigned long long)pit_ticks());
+}
+
+static void cmd_pitcount(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    outb(0x43, 0x00); /* latch channel 0 */
+    uint8_t l1 = inb(0x40), h1 = inb(0x40);
+    for (volatile int i = 0; i < 3000000; i++) {
+    }
+    outb(0x43, 0x00);
+    uint8_t l2 = inb(0x40), h2 = inb(0x40);
+    kprintf("PIT channel 0 counter: %u -> %u\n",
+            (unsigned)(l1 | (h1 << 8)), (unsigned)(l2 | (h2 << 8)));
+}
+
+static void cmd_fault(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    kprintf("Triggering a deliberate page fault (null dereference)...\n");
+    volatile uint64_t *null = (volatile uint64_t *)0;
+    *null = 1;
+    kprintf("unreachable\n");
+}
+
 static void cmd_uptime(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -378,6 +484,11 @@ const command_t helix_commands[] = {
     {"pmm",     "physical frame allocator statistics",   cmd_pmm},
     {"heap",    "kernel heap statistics",                cmd_heap},
     {"memtest", "exercise kmalloc/kfree",                cmd_memtest},
+    {"vmtest",  "exercise map/unmap/protect",            cmd_vmtest},
+    {"ticks",   "show the PIT timer tick count",         cmd_ticks},
+    {"swint",   "software-trigger the timer vector",      cmd_swint},
+    {"pitcount","read the raw PIT counter (diagnostic)",  cmd_pitcount},
+    {"fault",   "deliberately trigger a CPU exception",  cmd_fault},
     {"uptime",  "time since boot",                      cmd_uptime},
     {"echo",    "print the arguments back",             cmd_echo},
     {"calc",    "integer calculator: calc 2 + 3",       cmd_calc},

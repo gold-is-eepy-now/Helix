@@ -169,6 +169,10 @@ def main():
             checks.append(ok)
             return ok
 
+        def check_true(label, condition):
+            print(f"[shell-test] {'PASS' if condition else 'FAIL'}: {label}")
+            checks.append(bool(condition))
+
         # --- boot banner ---
         check("boot banner: HELIX OS", "HELIX OS")
         check("boot banner: Boot successful.", "Boot successful.")
@@ -202,6 +206,16 @@ def main():
         check("memtest allocates and frees", "Heap self-test")
         check("memtest passes", "result: PASS")
 
+        ser.send("vmtest\n")
+        check("vmtest maps/unmaps/protects", "result: PASS")
+
+        ser.send("ticks\n")
+        check("PIT timer is ticking", "PIT timer")
+        ser.read_until("ms\n")  # wait for the whole line, not just its prefix
+        m = re.search(r"PIT timer: \d+ Hz, (\d+) ticks", ser.text())
+        check_true("PIT tick count is actually advancing",
+                   m is not None and int(m.group(1)) > 0)
+
         ser.send("uptime\n")
         check("uptime reports seconds", "seconds")
 
@@ -219,13 +233,20 @@ def main():
         ser.send("color on\n")
         check("color on acknowledged", "enabled")
 
-        # --- screenshot of the framebuffer console ---
+        # --- framebuffer screenshot of the working shell ---
         time.sleep(1.0)
+        mon = None
         if os.path.exists(MONITOR_SOCK):
             mon = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             mon.connect(MONITOR_SOCK)
             mon.sendall(f"screendump {PPM}\n".encode())
             time.sleep(1.5)
+
+        # --- deliberate fault: the exception handler must report it ---
+        ser.send("fault\n")
+        check("CPU exception is caught and reported", "CPU EXCEPTION")
+
+        if mon is not None:
             mon.sendall(b"quit\n")
             mon.close()
         time.sleep(1.0)

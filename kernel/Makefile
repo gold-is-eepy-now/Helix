@@ -55,7 +55,16 @@ ifeq ($(TOOLCHAIN),llvm)
     CFLAGS := $(filter-out -mgeneral-regs-only,$(CFLAGS))
 endif
 
-SOURCES := $(wildcard $(SRC_DIR)/*.c)OBJECTS := $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/obj/%.o,$(SOURCES))
+C_SOURCES := $(wildcard $(SRC_DIR)/*.c)
+S_SOURCES := $(wildcard $(SRC_DIR)/*.S)
+OBJECTS := $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/obj/%.o,$(C_SOURCES)) \
+           $(patsubst $(SRC_DIR)/%.S,$(BUILD_DIR)/obj/%.o,$(S_SOURCES))
+
+# Guard against the silent failure mode where the glob finds nothing and the
+# link step quietly produces (or leaves) a kernel built from no sources.
+ifeq ($(strip $(OBJECTS)),)
+$(error No kernel sources found in $(SRC_DIR))
+endif
 
 .PHONY: all clean
 all: $(KERNEL)
@@ -68,6 +77,10 @@ $(KERNEL): $(OBJECTS) linker.ld
 $(BUILD_DIR)/obj/%.o: $(SRC_DIR)/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/obj/%.o: $(SRC_DIR)/%.S
+	@mkdir -p $(dir $@)
+	$(CC) -c $< -o $@
 
 clean:
 	rm -rf $(BUILD_DIR)
