@@ -135,6 +135,14 @@ Everything is built into `build/` by default. You can redirect it:
 make BUILD_DIR=/tmp/helix-build test
 ```
 
+## Heres an image of M4 in action
+
+<img width="1280" height="800" alt="image" src="https://github.com/user-attachments/assets/64cf2673-2118-48d3-97ca-f821537462a9" />
+
+
+
+
+
 ### What a successful boot prints
 
 ```
