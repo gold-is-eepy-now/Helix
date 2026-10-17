@@ -51,7 +51,9 @@ done
 mkdir -p "$(dirname "$IMAGE")"
 
 echo "[mkimage] creating ${SIZE_MB} MiB image: $IMAGE"
-dd if=/dev/zero of="$IMAGE" bs=1M count="$SIZE_MB" status=none
+# bs is given in bytes and stderr is discarded so this works with both GNU dd
+# (Linux) and BSD dd (macOS), which have different option sets.
+dd if=/dev/zero of="$IMAGE" bs=1048576 count="$SIZE_MB" 2>/dev/null
 
 echo "[mkimage] writing GPT + EFI System Partition"
 sgdisk "$IMAGE" -n "1:${PART_START}:${PART_END}" -t 1:ef00 -m 1 >/dev/null

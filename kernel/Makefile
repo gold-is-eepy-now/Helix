@@ -40,8 +40,22 @@ LDFLAGS := -nostdlib -nostartfiles -static -no-pie \
            -Wl,-z,noexecstack \
            -Wl,--build-id=none
 
-SOURCES := $(wildcard $(SRC_DIR)/*.c)
-OBJECTS := $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/obj/%.o,$(SOURCES))
+# Toolchain selection. The host gcc works on Linux. On macOS, Apple's toolchain
+# cannot emit ELF (its ld is Mach-O only), so install a cross-compiler and pass
+# it in:
+#     make CC=x86_64-elf-gcc
+# or use LLVM:
+#     make TOOLCHAIN=llvm
+TOOLCHAIN ?= gcc
+ifeq ($(TOOLCHAIN),llvm)
+    CC := clang --target=x86_64-unknown-none
+    LDFLAGS += -fuse-ld=lld
+    # clang does not accept -mgeneral-regs-only on every version; the explicit
+    # -mno-sse / -mno-mmx / -mno-80387 already keep FPU and SIMD state out.
+    CFLAGS := $(filter-out -mgeneral-regs-only,$(CFLAGS))
+endif
+
+SOURCES := $(wildcard $(SRC_DIR)/*.c)OBJECTS := $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/obj/%.o,$(SOURCES))
 
 .PHONY: all clean
 all: $(KERNEL)

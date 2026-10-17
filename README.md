@@ -70,11 +70,18 @@ helix/
 
 ## Building and running
 
+### Just want to run it?
+
+You do not need a compiler to run Helix. A prebuilt bootable image is
+available as a downloadable attachment: unzip it, install QEMU, and run
+`./run.sh`. The only requirement is QEMU (`brew install qemu` on macOS,
+`sudo apt install qemu-system-x86 ovmf` on Linux).
+
 ### Requirements
 
-- `gcc` (with 64-bit support) and `binutils`
+- A C toolchain that can emit x86_64 **ELF** (see the platform notes below)
 - `make`, `curl`
-- `qemu-system-x86_64` + UEFI firmware (`OVMF`)
+- `qemu-system-x86_64` + UEFI firmware (`OVMF`/EDK2)
 - `gdisk` (`sgdisk`) and `mtools` (`mformat`, `mmd`, `mcopy`) to build the disk
   image
 
@@ -84,6 +91,23 @@ On Debian/Ubuntu:
 sudo apt-get install build-essential qemu-system-x86 ovmf \
                      gdisk mtools curl
 ```
+
+On macOS:
+
+```sh
+brew install x86_64-elf-gcc qemu gdisk mtools
+```
+
+Apple's toolchain **cannot link ELF** — its `ld` is Mach-O only — so the
+kernel cannot be built with the `clang`/`ld` that ship with Xcode. Install the
+cross-compiler and point the build at it:
+
+```sh
+make CC=x86_64-elf-gcc test
+```
+
+(`make TOOLCHAIN=llvm` is also supported if you prefer `brew install llvm`.)
+Firmware paths differ on macOS; `tools/ovmf.sh` finds them automatically.
 
 ### Commands
 
@@ -108,14 +132,24 @@ HELIX OS
 Native Object Kernel
 Boot successful.
 
-[helix] console: serial online + framebuffer 1280x800x32
-[helix] arch: x86_64, long mode
-[helix] state: entering safe idle loop
+Helix OS 0.2.0 "Kernel Shell"
+
+[helix] console: serial + framebuffer
+[helix] memory:  462 MiB usable
+[helix] pmm:     510 MiB total, 461 MiB free (118064 frames)
+[helix] heap:    260 KiB reserved
+[helix] clock:   TSC calibrated
+
+Type 'help' for a list of commands, 'sysinfo' for system info.
+
+helix> 
 ```
 
-`make test` boots the image, captures that serial output, requires the three
-banner lines, and saves a screenshot of the framebuffer console to
-`build/test/screen.png`.
+`make test` boots the image, drives the shell over a serial socket, checks 23
+behaviours (banner, prompt, `help`, `echo`, `calc`, `cpu`, `mem`, `pmm`,
+`heap`, `memtest`, `uptime`, `sysinfo`, error handling, `color`), and audits
+the framebuffer screenshot for readability. It also saves that screenshot to
+`build/test/shell-screen.png`.
 
 ---
 

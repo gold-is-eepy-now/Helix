@@ -24,8 +24,30 @@ MONITOR_SOCK = os.path.join(OUTDIR, "monitor.sock")
 PPM = os.path.join(OUTDIR, "shell-screen.ppm")
 PNG = os.path.join(OUTDIR, "shell-screen.png")
 
-OVMF_CODE = os.environ.get("OVMF_CODE", "/usr/share/OVMF/OVMF_CODE.fd")
-OVMF_VARS_SRC = os.environ.get("OVMF_VARS_SRC", "/usr/share/OVMF/OVMF_VARS.fd")
+def _find_ovmf():
+    """Locate UEFI firmware: environment first, then common Linux/macOS paths."""
+    code = os.environ.get("OVMF_CODE")
+    vars_src = os.environ.get("OVMF_VARS_SRC")
+    if code and vars_src:
+        return code, vars_src
+    candidates = [
+        ("/usr/share/OVMF/OVMF_CODE.fd", "/usr/share/OVMF/OVMF_VARS.fd"),
+        ("/opt/homebrew/share/qemu/edk2-x86_64-code.fd",
+         "/opt/homebrew/share/qemu/edk2-i386-vars.fd"),
+        ("/usr/local/share/qemu/edk2-x86_64-code.fd",
+         "/usr/local/share/qemu/edk2-i386-vars.fd"),
+        ("/usr/share/qemu/edk2-x86_64-code.fd",
+         "/usr/share/qemu/edk2-i386-vars.fd"),
+        ("/usr/share/edk2/x86_64/OVMF_CODE.fd",
+         "/usr/share/edk2/x86_64/OVMF_VARS.fd"),
+    ]
+    for c, v in candidates:
+        if os.path.exists(c) and os.path.exists(v):
+            return c, v
+    return code or candidates[0][0], vars_src or candidates[0][1]
+
+
+OVMF_CODE, OVMF_VARS_SRC = _find_ovmf()
 QEMU_MEM = os.environ.get("QEMU_MEM", "512")
 VARS = os.path.join(OUTDIR, "OVMF_VARS.fd")
 

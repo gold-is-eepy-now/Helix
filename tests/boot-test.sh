@@ -9,6 +9,10 @@
 # Exit status is 0 only if every required line was found.
 set -eu
 
+# Locate UEFI firmware (Linux and macOS paths) unless the environment says.
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+. "$SCRIPT_DIR/../tools/ovmf.sh"
+
 IMAGE="${1:-build/helix.img}"
 BUILD_DIR="${BUILD_DIR:-build}"
 OUTDIR="${OUTDIR:-$BUILD_DIR/test}"
@@ -17,9 +21,18 @@ PPM="$OUTDIR/screen.ppm"
 PNG="$OUTDIR/screen.png"
 VARS="$OUTDIR/OVMF_VARS.fd"
 
-OVMF_CODE="${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE.fd}"
-OVMF_VARS_SRC="${OVMF_VARS_SRC:-/usr/share/OVMF/OVMF_VARS.fd}"
 QEMU_MEM="${QEMU_MEM:-512}"
+
+# `timeout` is GNU coreutils. macOS has it only as `gtimeout` (if coreutils is
+# installed), and may not have it at all. QEMU quits on its own via the monitor
+# below, so this is only a safety net.
+if command -v timeout >/dev/null 2>&1; then
+    TIMEOUT="timeout 60"
+elif command -v gtimeout >/dev/null 2>&1; then
+    TIMEOUT="gtimeout 60"
+else
+    TIMEOUT=""
+fi
 
 mkdir -p "$OUTDIR"
 cp "$OVMF_VARS_SRC" "$VARS"
@@ -32,7 +45,7 @@ echo "[test] booting $IMAGE headlessly..."
     echo "screendump $PPM"
     sleep 3
     echo "quit"
-) | timeout 60 qemu-system-x86_64 \
+) | $TIMEOUT qemu-system-x86_64 \
         -M q35 -m "$QEMU_MEM" \
         -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \
         -drive if=pflash,format=raw,unit=1,file="$VARS" \
