@@ -20,7 +20,7 @@ DEPS_DIR       := $(BUILD_DIR)/deps
 LIMINE_DIR     := $(DEPS_DIR)/limine-binary
 IMAGE          := $(BUILD_DIR)/helix.img
 
-.PHONY: all kernel deps image run test clean
+.PHONY: all kernel deps image iso disks run test clean
 
 all: image
 
@@ -43,6 +43,19 @@ image: kernel deps
 	 IMAGE="$(IMAGE)" \
 	 LIMINE_CONF="$(CURDIR)/limine.conf" \
 	 sh tools/mkimage.sh
+
+# Bootable UEFI CD/DVD image (attach as an optical drive).
+iso: image
+	@BUILD_DIR="$(BUILD_DIR)" \
+	 KERNEL="$(BUILD_DIR)/kernel" \
+	 LIMINE_DIR="$(LIMINE_DIR)" \
+	 ISO="$(BUILD_DIR)/helix.iso" \
+	 LIMINE_CONF="$(CURDIR)/limine.conf" \
+	 sh tools/mkiso.sh
+
+# Hypervisor disk formats (VDI/VMDK/VHD) converted from the raw image.
+disks: image
+	@sh tools/mkdisk.sh "$(IMAGE)" "$(BUILD_DIR)"
 
 run: image
 	@sh tools/run-qemu.sh "$(IMAGE)"

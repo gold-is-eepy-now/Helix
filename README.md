@@ -117,9 +117,11 @@ Firmware paths differ on macOS; `tools/ovmf.sh` finds them automatically.
 
 ```sh
 make            # build the bootable disk image (build/helix.img)
+make iso        # build a bootable UEFI CD image (build/helix.iso)
+make disks      # build VDI/VMDK/VHD hypervisor disk images
 make kernel     # build just the kernel ELF
 make run        # boot the image in QEMU (serial output on your terminal)
-make test       # boot headlessly and verify the boot banner (CI-style)
+make test       # boot headlessly and drive the shell (CI-style)
 make clean      # remove build output
 ```
 
