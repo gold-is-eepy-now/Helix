@@ -29,14 +29,17 @@ native object model. They are not the foundation.
 | Kernel-resident commands (help, sysinfo, cpu, mem, uptime, ...) | ✅ working |
 | Time source (TSC calibrated against the PIT) | ✅ working |
 | Calibrated time, memory map, firmware detection | ✅ working |
-| Memory management, heap | ⛔ not started (M3) |
+| Kernel heap (`kmalloc`/`kfree`) + panic/`kprintf` | ✅ working (M3) |
+| Physical frame allocator (bitmap) | ✅ working, machine-tested (M3) |
+| Page tables, guard pages | ⛔ not started (M3 remainder) |
 | Scheduler and user space / ELF / syscalls | ⛔ not started (M4–M9) |
 | Object manager & capabilities | ⛔ not started (M5–M6) |
 | Isolated driver services, filesystems, networking | ⛔ not started (M10–M12) |
 | Linux / BSD / POSIX compatibility | ⛔ not started (much later) |
 
-See [ROADMAP.md](ROADMAP.md) for the full plan and [docs/02-shell.md](docs/02-shell.md)
-for a walkthrough of the current shell.
+See [ROADMAP.md](ROADMAP.md) for the full plan, [docs/02-shell.md](docs/02-shell.md)
+for the shell, and [docs/03-cpython-requirements.md](docs/03-cpython-requirements.md)
+for what it will take to run CPython and Linux/BSD software.
 
 See [ROADMAP.md](ROADMAP.md) for the full plan.
 

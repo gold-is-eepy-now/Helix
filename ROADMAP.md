@@ -60,23 +60,29 @@ The kernel becomes a real program that owns physical and virtual memory.
 
 **Runtime foundations** (the scaffolding everything else uses):
 
-- Panic/assert machinery: fail loudly with a message instead of silently
-  hanging.
-- A `kprintf`-style formatter (one formatter shared by the shell and logs).
-- Kernel log levels and a consistent `[helix]` prefix.
-- Basic type vocabulary (`u8/u16/u32/u64`, `usize`) and compiler macros.
+- ✅ Panic machinery: `panic()` prints and halts instead of hanging silently.
+- ✅ `kprintf`-style formatter (`%s %c %d %u %x %p`, `l`/`ll` modifiers).
+- ✅ A freestanding string/memory library (`memcpy`, `memset`, `strlen`, ...).
+- ✅ A consistent `[helix]` boot-log prefix.
 
 **Physical memory:**
 
-- A simple physical frame allocator (bitmap) over the Limine memory map that
-  M2 already reads.
+- ✅ A bitmap physical frame allocator over the Limine memory map, with
+  single-frame and contiguous-run allocation, and statistics (`pmm` command).
 
-**Virtual memory:**
+**Kernel heap:**
 
-- Page tables: our own `map`, `unmap`, `protect` routines on x86_64.
-- Higher-half direct map for physical memory.
-- Kernel heap (`kmalloc`/`kfree`) with a first-fit or slab allocator.
-- Guard pages and a non-executable stack.
+- ✅ `kmalloc` / `kzalloc` / `kfree`: first-fit free list with splitting and
+  coalescing, growing on demand by requesting contiguous frames from the PMM
+  and accessing them through the Limine higher-half direct map.
+- ✅ Self-test (`memtest` command) that allocates, pattern-checks and frees.
+
+**Still to do in M3:**
+
+- ⛔ Our own page tables (`map`, `unmap`, `protect`) on x86_64.
+- ⛔ Guard pages and a non-executable stack.
+- ⛔ A dynamically sized frame bitmap (currently a static 128 KiB array caps
+  physical RAM at 4 GiB).
 
 ## M4 — Interrupts, exceptions and timers
 

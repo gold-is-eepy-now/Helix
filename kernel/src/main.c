@@ -15,9 +15,12 @@
 
 #include "console.h"
 #include "fb.h"
+#include "heap.h"
 #include "io.h"
 #include "keyboard.h"
 #include "memory.h"
+#include "panic.h"
+#include "pmm.h"
 #include "shell.h"
 #include "sysinfo.h"
 #include "time.h"
@@ -53,6 +56,14 @@ static volatile struct limine_memmap_request memmap_request = {
 __attribute__((used, section(".limine_requests")))
 static volatile struct limine_firmware_type_request firmware_type_request = {
     .id = LIMINE_FIRMWARE_TYPE_REQUEST_ID,
+    .revision = 0,
+};
+
+/* Ask for the higher-half direct map offset: physical address P is reachable
+ * at P + offset. We need this to touch physical frames the PMM hands out. */
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_hhdm_request hhdm_request = {
+    .id = LIMINE_HHDM_REQUEST_ID,
     .revision = 0,
 };
 
@@ -98,6 +109,13 @@ void kmain(void) {
     }
     time_init();
 
+    /* Physical memory, then the heap built on top of it. */
+    pmm_init(memmap_request.response);
+    uint64_t hhdm_offset = (hhdm_request.response != NULL)
+                         ? hhdm_request.response->offset
+                         : 0;
+    heap_init(hhdm_offset);
+
     /* 4. Say hello. */
     console_write("HELIX OS\n");
     console_write("Native Object Kernel\n");
@@ -122,6 +140,12 @@ void kmain(void) {
     } else {
         console_write("map unavailable\n");
     }
+    kprintf("[helix] pmm:     %llu MiB total, %llu MiB free (%llu frames)\n",
+            (unsigned long long)(pmm_total_bytes() / (1024u * 1024u)),
+            (unsigned long long)(pmm_free_bytes() / (1024u * 1024u)),
+            (unsigned long long)pmm_free_frame_count());
+    kprintf("[helix] heap:    %llu KiB reserved\n",
+            (unsigned long long)(heap_total_bytes() / 1024u));
     console_write("[helix] clock:   ");
     console_write(time_available() ? "TSC calibrated\n" : "unavailable\n");
     console_reset_color();

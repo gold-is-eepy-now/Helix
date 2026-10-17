@@ -26,7 +26,7 @@ KERNEL  := $(BUILD_DIR)/kernel
 #   -mcmodel=kernel       address code/data in the top 2 GiB
 CFLAGS := -std=gnu11 -O2 -g \
           -Wall -Wextra \
-          -ffreestanding -fno-stack-protector -fno-stack-check \
+          -ffreestanding -fno-builtin -fno-stack-protector -fno-stack-check \
           -fno-common -fno-PIC -fno-PIE \
           -fno-asynchronous-unwind-tables -fno-unwind-tables \
           -mno-red-zone -mno-mmx -mno-sse -mno-80387 -mgeneral-regs-only \

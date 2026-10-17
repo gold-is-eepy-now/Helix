@@ -68,10 +68,11 @@ make BUILD_DIR=/tmp/hb test   # build + boot headlessly and verify the banner
 - **Implemented:** UEFI boot via Limine, x86_64 long-mode kernel entry, serial
   console (with ANSI colour and input), framebuffer text console (with cursor
   and colour), PS/2 keyboard input, the `helixsh` interactive shell, a command
-  table of kernel-resident programs (help, sysinfo, cpu, mem, uptime, calc,
-  echo, clear, halt, reboot, ...), TSC-calibrated uptime, Limine-backed
-  memory map, CPU identification via CPUID.
-- **Not implemented:** dynamic memory / heap, real interrupt handling, a
+  table of kernel-resident programs, TSC-calibrated uptime, Limine-backed
+  memory map, CPU identification via CPUID, a **bitmap physical frame
+  allocator** and a **kernel heap** (`kmalloc`/`kfree`), `panic()` and
+  `kprintf()`, and a freestanding string library.
+- **Not implemented:** page tables / guard pages, real interrupt handling, a
   scheduler, user space, ELF loading, syscalls, the object manager,
   capabilities, isolated driver services, filesystems, networking, graphics,
   compatibility layers.

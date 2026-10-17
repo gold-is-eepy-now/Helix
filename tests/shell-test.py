@@ -169,6 +169,17 @@ def main():
         ser.send("mem\n")
         check("mem reports usable RAM", "usable")
 
+        ser.send("pmm\n")
+        check("pmm reports frame statistics", "Physical frame allocator")
+        check("pmm reports free frames", "free")
+
+        ser.send("heap\n")
+        check("heap reports statistics", "Kernel heap")
+
+        ser.send("memtest\n")
+        check("memtest allocates and frees", "Heap self-test")
+        check("memtest passes", "result: PASS")
+
         ser.send("uptime\n")
         check("uptime reports seconds", "seconds")
 

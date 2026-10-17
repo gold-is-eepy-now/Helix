@@ -15,8 +15,12 @@
 
 #include "console.h"
 #include "cpu.h"
+#include "heap.h"
 #include "io.h"
+#include "kstring.h"
 #include "memory.h"
+#include "panic.h"
+#include "pmm.h"
 #include "sysinfo.h"
 #include "time.h"
 #include "version.h"
@@ -175,6 +179,85 @@ static void cmd_mem(int argc, char **argv) {
     }
 }
 
+static void cmd_pmm(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    kprintf("Physical frame allocator\n");
+    kprintf("  total     : %llu MiB (%llu frames)\n",
+            (unsigned long long)(pmm_total_bytes() / (1024u * 1024u)),
+            (unsigned long long)pmm_total_frames());
+    kprintf("  usable    : %llu MiB (%llu frames)\n",
+            (unsigned long long)(pmm_usable_frames() * PAGE_SIZE / (1024u * 1024u)),
+            (unsigned long long)pmm_usable_frames());
+    kprintf("  allocated : %llu frames\n",
+            (unsigned long long)pmm_allocated_frames());
+    kprintf("  free      : %llu MiB (%llu frames)\n",
+            (unsigned long long)(pmm_free_bytes() / (1024u * 1024u)),
+            (unsigned long long)pmm_free_frame_count());
+    kprintf("  bitmap    : %llu bytes\n",
+            (unsigned long long)pmm_bitmap_bytes());
+}
+
+static void cmd_heap(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    kprintf("Kernel heap\n");
+    kprintf("  used   : %llu bytes\n", (unsigned long long)heap_used_bytes());
+    kprintf("  total  : %llu bytes\n", (unsigned long long)heap_total_bytes());
+    kprintf("  blocks : %llu\n", (unsigned long long)heap_block_count());
+}
+
+static void cmd_memtest(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    static const size_t sizes[16] = {
+        16, 64, 256, 1024, 4096, 16384, 65536, 16,
+        64, 256, 1024, 4096, 16384, 65536, 128, 512,
+    };
+    void *blocks[16] = {0};
+    bool ok = true;
+
+    uint64_t before = heap_used_bytes();
+    kprintf("Heap self-test\n");
+
+    for (int i = 0; i < 16; i++) {
+        blocks[i] = kmalloc(sizes[i]);
+        if (blocks[i] == NULL) {
+            kprintf("  alloc %5llu bytes: FAILED\n", (unsigned long long)sizes[i]);
+            ok = false;
+            continue;
+        }
+        memset(blocks[i], i + 1, sizes[i]);
+        kprintf("  alloc %5llu bytes: ok at %p\n",
+                (unsigned long long)sizes[i], (uintptr_t)blocks[i]);
+    }
+
+    for (int i = 0; i < 16; i++) {
+        if (blocks[i] == NULL) {
+            continue;
+        }
+        const uint8_t *p = blocks[i];
+        for (size_t j = 0; j < sizes[i]; j++) {
+            if (p[j] != (uint8_t)(i + 1)) {
+                kprintf("  pattern mismatch in block %d\n", i);
+                ok = false;
+                break;
+            }
+        }
+    }
+
+    for (int i = 0; i < 16; i++) {
+        if (blocks[i] != NULL) {
+            kfree(blocks[i]);
+        }
+    }
+
+    uint64_t after = heap_used_bytes();
+    kprintf("  heap used before: %llu bytes\n", (unsigned long long)before);
+    kprintf("  heap used after:  %llu bytes\n", (unsigned long long)after);
+    kprintf("  result: %s\n", (ok && before == after) ? "PASS" : "FAIL");
+}
+
 static void cmd_uptime(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -292,6 +375,9 @@ const command_t helix_commands[] = {
     {"about",   "alias for sysinfo",                    cmd_sysinfo},
     {"cpu",     "show CPU vendor and brand",            cmd_cpu},
     {"mem",     "show the physical memory map",         cmd_mem},
+    {"pmm",     "physical frame allocator statistics",   cmd_pmm},
+    {"heap",    "kernel heap statistics",                cmd_heap},
+    {"memtest", "exercise kmalloc/kfree",                cmd_memtest},
     {"uptime",  "time since boot",                      cmd_uptime},
     {"echo",    "print the arguments back",             cmd_echo},
     {"calc",    "integer calculator: calc 2 + 3",       cmd_calc},
