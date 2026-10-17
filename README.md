@@ -215,4 +215,9 @@ boots.
 
 TBD by the project owner. Third-party components retain their own licenses:
 `limine.h` is 0BSD, and the embedded 8×8 font (`kernel/src/font8x8.h`) is
-public domain.
+public domain. 
+
+## Disclaimer
+
+This project is AI-assisted, if you want to help that would help tremendously. i am open to let humans contribute until im fully proficient in C this is a learning experience for me, and maybe you too.
+Have a good day! - ‘Gold-is-eepy-now’
