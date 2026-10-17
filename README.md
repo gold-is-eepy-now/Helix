@@ -77,6 +77,10 @@ available as a downloadable attachment: unzip it, install QEMU, and run
 `./run.sh`. The only requirement is QEMU (`brew install qemu` on macOS,
 `sudo apt install qemu-system-x86 ovmf` on Linux).
 
+The image is **UEFI-only** (pure GPT, no legacy BIOS code). It runs in QEMU on
+any host, and in VirtualBox on x86_64 hosts with EFI enabled (`--firmware efi`).
+VirtualBox on Apple Silicon cannot run x86 guests; use QEMU/UTM there instead.
+
 ### Requirements
 
 - A C toolchain that can emit x86_64 **ELF** (see the platform notes below)

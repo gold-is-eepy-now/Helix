@@ -12,6 +12,12 @@
 # /EFI/BOOT/BOOTX64.EFI from the ESP with no configuration at all — that is
 # the UEFI "removable media" boot path. Limine then reads limine.conf.
 #
+# The disk is UEFI-only: a pure GPT with a standard protective MBR and a
+# FAT32 EFI System Partition. We deliberately do NOT create a hybrid MBR
+# (the old `sgdisk -m 1`), because that only helps legacy BIOS booting --
+# which Helix does not support -- and it makes some firmware (including
+# VirtualBox's EFI) misread the partition table.
+#
 # Environment overrides: BUILD_DIR KERNEL LIMINE_DIR IMAGE LIMINE_CONF SIZE_MB
 set -eu
 
@@ -56,10 +62,11 @@ echo "[mkimage] creating ${SIZE_MB} MiB image: $IMAGE"
 dd if=/dev/zero of="$IMAGE" bs=1048576 count="$SIZE_MB" 2>/dev/null
 
 echo "[mkimage] writing GPT + EFI System Partition"
-sgdisk "$IMAGE" -n "1:${PART_START}:${PART_END}" -t 1:ef00 -m 1 >/dev/null
+sgdisk "$IMAGE" -n "1:${PART_START}:${PART_END}" -t 1:ef00 >/dev/null
 
-echo "[mkimage] formatting FAT filesystem on the ESP"
-mformat -i "$IMAGE@@${PART_OFFSET}" -T "$PART_SECTORS" -h "$HEADS" -s "$SECTORS_PER_TRACK" ::
+echo "[mkimage] formatting FAT32 filesystem on the ESP"
+# -F forces FAT32, which the UEFI specification recommends for the ESP.
+mformat -i "$IMAGE@@${PART_OFFSET}" -T "$PART_SECTORS" -h "$HEADS" -s "$SECTORS_PER_TRACK" -F ::
 mmd -i "$IMAGE@@${PART_OFFSET}" ::/EFI ::/EFI/BOOT ::/boot ::/boot/limine
 
 echo "[mkimage] installing Limine, config and kernel"
