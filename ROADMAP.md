@@ -54,21 +54,26 @@ user space, ELF loading, real filesystems, command history / completion.
 
 ---
 
-## M2 — Kernel runtime foundations 🚧
+## M3 — Kernel runtime foundations and memory management 🚧
 
-The kernel stops being a single function and becomes a real program.
+The kernel becomes a real program that owns physical and virtual memory.
 
-- Panic/assert machinery: a way to fail loudly with a message and a backtrace
-  of sorts, instead of silently hanging.
-- `kprintf`-style formatted output.
-- Basic type system (`u8/u16/u32/u64`, `usize`), compiler-abstraction macros.
-- Kernel log levels and a `[helix]` logging prefix.
-- A physical memory map obtained from the bootloader.
-- A simple physical frame allocator (bitmap).
+**Runtime foundations** (the scaffolding everything else uses):
 
-## M3 — Memory management
+- Panic/assert machinery: fail loudly with a message instead of silently
+  hanging.
+- A `kprintf`-style formatter (one formatter shared by the shell and logs).
+- Kernel log levels and a consistent `[helix]` prefix.
+- Basic type vocabulary (`u8/u16/u32/u64`, `usize`) and compiler macros.
 
-- Page tables: our own `mmap`, `unmap`, `map` routines on x86_64.
+**Physical memory:**
+
+- A simple physical frame allocator (bitmap) over the Limine memory map that
+  M2 already reads.
+
+**Virtual memory:**
+
+- Page tables: our own `map`, `unmap`, `protect` routines on x86_64.
 - Higher-half direct map for physical memory.
 - Kernel heap (`kmalloc`/`kfree`) with a first-fit or slab allocator.
 - Guard pages and a non-executable stack.

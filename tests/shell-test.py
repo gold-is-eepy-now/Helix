@@ -31,6 +31,50 @@ VARS = os.path.join(OUTDIR, "OVMF_VARS.fd")
 
 ANSI = re.compile(rb"\x1b\[[0-9;?]*[A-Za-z]")
 
+
+def read_ppm(path):
+    """Read a binary PPM (P6) into (width, height, bytes)."""
+    data = open(path, "rb").read()
+    toks, i = [], 0
+    while len(toks) < 4:
+        while data[i] in b" \t\r\n":
+            i += 1
+        start = i
+        while data[i] not in b" \t\r\n":
+            i += 1
+        toks.append(data[start:i])
+    width, height = int(toks[1]), int(toks[2])
+    i += 1
+    return width, height, data[i:i + width * height * 3]
+
+
+def light_background_blocks(path):
+    """Count pixels sitting in a solid light-coloured 3x3 block.
+
+    Text strokes are 1-2px wide, so solid light blocks are glyph-cell
+    backgrounds. A large count means text is being drawn on a light
+    background, which is the bug that made bright colours unreadable.
+    """
+    width, height, px = read_ppm(path)
+
+    def at(x, y):
+        o = (y * width + x) * 3
+        return (px[o], px[o + 1], px[o + 2])
+
+    def is_light(c):
+        return (c[0] + c[1] + c[2]) / 3 > 160
+
+    count = 0
+    for y in range(1, height - 1):
+        for x in range(1, width - 1):
+            c = at(x, y)
+            if is_light(c) and all(
+                at(x + dx, y + dy) == c
+                for dx in (-1, 0, 1) for dy in (-1, 0, 1)
+            ):
+                count += 1
+    return count
+
 os.makedirs(OUTDIR, exist_ok=True)
 for path in (SERIAL_SOCK, MONITOR_SOCK):
     if os.path.exists(path):
@@ -137,6 +181,11 @@ def main():
         ser.send("doesnotexist\n")
         check("unknown command is reported", "command not found")
 
+        ser.send("color off\n")
+        check("color off acknowledged", "disabled")
+        ser.send("color on\n")
+        check("color on acknowledged", "enabled")
+
         # --- screenshot of the framebuffer console ---
         time.sleep(1.0)
         if os.path.exists(MONITOR_SOCK):
@@ -160,6 +209,14 @@ def main():
     except NameError:
         print("(no serial data)")
     print("[shell-test] --------------------------------------------")
+
+    # --- framebuffer readability regression check ---
+    if os.path.exists(PPM):
+        blocks = light_background_blocks(PPM)
+        ok = blocks < 1000
+        print(f"[shell-test] {'PASS' if ok else 'FAIL'}: framebuffer has no "
+              f"light-background text blocks (found {blocks})")
+        checks.append(ok)
 
     if os.path.exists(PPM):
         if subprocess.run(

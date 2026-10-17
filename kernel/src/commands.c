@@ -25,10 +25,17 @@
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
 
+static bool str_eq(const char *a, const char *b) {
+    while (*a && *b && *a == *b) {
+        a++;
+        b++;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
 static void print_u64(uint64_t value) {
     console_write_dec(value);
 }
-
 static void print_mib(uint64_t bytes) {
     print_u64(bytes / (1024u * 1024u));
     console_write(" MiB");
@@ -89,6 +96,25 @@ static void cmd_clear(int argc, char **argv) {
     (void)argc;
     (void)argv;
     console_clear();
+}
+
+static void cmd_color(int argc, char **argv) {
+    if (argc == 1) {
+        console_write("Colour output is ");
+        console_write(console_color_enabled() ? "on" : "off");
+        console_write(".\n");
+        console_write("usage: color on | color off\n");
+        return;
+    }
+    if (str_eq(argv[1], "on")) {
+        console_set_color_enabled(true);
+        console_write("Colour output enabled.\n");
+    } else if (str_eq(argv[1], "off")) {
+        console_set_color_enabled(false);
+        console_write("Colour output disabled; using terminal defaults.\n");
+    } else {
+        console_write("usage: color on | color off\n");
+    }
 }
 
 static void cmd_sysinfo(int argc, char **argv) {
@@ -270,6 +296,7 @@ const command_t helix_commands[] = {
     {"echo",    "print the arguments back",             cmd_echo},
     {"calc",    "integer calculator: calc 2 + 3",       cmd_calc},
     {"clear",   "clear the screen",                     cmd_clear},
+    {"color",   "turn ANSI colour on/off: color on|off", cmd_color},
     {"version", "show the OS version",                  cmd_version},
     {"halt",    "halt the machine",                     cmd_halt},
     {"reboot",  "restart the machine",                  cmd_reboot},

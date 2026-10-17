@@ -4,10 +4,21 @@
  * to every backend that is available (serial and, if the firmware gave us
  * one, the framebuffer), and carries a current colour. On serial, colour is
  * emitted as ANSI escape sequences; on the framebuffer it is packed RGB.
+ *
+ * Readability rules (learned the hard way):
+ *   - The framebuffer background is always dark, and the default foreground is
+ *     a soft light grey. Foreground and background are packed separately, so
+ *     "default" means light text on a dark background, never white-on-white.
+ *   - On serial we use standard-intensity ANSI colours; "bright" palette
+ *     entries become bold + standard colour. That stays legible on both light
+ *     and dark terminals, where raw bright colours do not.
+ *   - `console_set_color_enabled(false)` suppresses ANSI colour entirely, for
+ *     terminals where even that is hard to read.
  */
 #ifndef HELIX_CONSOLE_H
 #define HELIX_CONSOLE_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 struct limine_framebuffer;
@@ -49,6 +60,12 @@ void console_clear(void);
 void console_set_fg(console_color_t color);
 void console_set_bg(console_color_t color);
 void console_reset_color(void);
+
+/* Turn ANSI colour output on the serial backend on or off. When off, the
+ * terminal's own default colours are used, which is the safest choice on a
+ * light-background terminal. */
+void console_set_color_enabled(bool enabled);
+bool console_color_enabled(void);
 
 /* Convenience helpers for diagnostics. */
 void console_write_dec(uint64_t value);

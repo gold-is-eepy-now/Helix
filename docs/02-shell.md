@@ -86,15 +86,50 @@ fans text out to:
 
 | Backend | Colour representation |
 |---|---|
-| Serial (any ANSI terminal) | ANSI SGR escape sequences (`\x1b[36m` …) |
-| Framebuffer | Packed RGB computed by the same enum |
+| Serial (any ANSI terminal) | ANSI SGR escape sequences |
+| Framebuffer | Packed RGB computed from the same palette enum |
 
 That means a line printed in `CONSOLE_RED` shows as red both on your terminal
 and on the graphical screen — without any caller having to know which backend
 they got.
 
-Try it: every command that sets a colour (`sysinfo`, `help`, the error
-message for an unknown command, …) demonstrates this.
+### Readability, and a real bug we fixed
+
+The first version of this had a nasty bug, and it is worth understanding
+because it is a classic. Foreground and background were packed by the *same*
+function, and `CONSOLE_DEFAULT` mapped to near-white `#E0E0E0`. So the moment
+any command set a foreground colour, `apply_colors()` also set the framebuffer
+**background** to near-white. Every glyph cell after that was white-backed,
+and the bright cyan/green/magenta text was painted on top of it — which is
+unreadable. (A pixel audit of a screenshot found ~102,000 solid-white
+background pixels; after the fix, 0.)
+
+The fix has three parts:
+
+1. **Pack foreground and background separately.** `fb_pack(colour, is_bg)`:
+   the default *background* is black, the default *foreground* is soft white.
+   They must never be the same value.
+2. **A muted, high-contrast palette.** The framebuffer uses soft, One-Dark-ish
+   tones (e.g. green `#98C379`, cyan `#56B6C2`) rather than fully saturated
+   neon, so long sessions stay comfortable.
+3. **Serial colours that work on light and dark terminals.** We emit
+   *standard-intensity* ANSI codes; the "bright" palette entries become
+   **bold + standard colour** (`\x1b[1;32m`), which terminals render as bright
+   on a dark background and as a saturated dark colour on a light one. Raw
+   bright codes (`90`–`97`) were the part that vanished on white.
+
+If even that is hard to read on your terminal, use the escape hatch:
+
+```
+helix> color off
+```
+
+That suppresses ANSI colour entirely and lets your terminal's own default
+foreground/background through. `color on` restores it. The framebuffer keeps
+its palette either way, since we control that background.
+
+The test harness now guards this: `tests/shell-test.py` audits the screenshot
+and fails if it finds solid light-coloured background blocks behind text.
 
 ---
 
@@ -137,6 +172,7 @@ shows it; typing `myprog arg1 arg2` runs it.
 | `echo` | prints its arguments |
 | `calc` | `calc <a> <op> <b>` for `+ - * / %` (integers only) |
 | `clear` | clear the screen |
+| `color` | turn ANSI colour on/off: `color on`, `color off` |
 | `halt` | halt the machine (you may close the QEMU window) |
 | `reboot` | reset the machine |
 
