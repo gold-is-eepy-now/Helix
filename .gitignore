@@ -1,0 +1,16 @@
+# Build output — never commit binaries or generated images.
+build/
+*.o
+*.d
+*.img
+*.iso
+*.elf
+
+# Test artefacts.
+serial.log
+screen.ppm
+screen.png
+
+# Downloaded third-party bootloader binaries.
+third_party/
+deps/
