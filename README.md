@@ -9,7 +9,7 @@ open-source research OS. Linux and BSD compatibility are planned as *runtimes
 that run on top of the Helix kernel*, translating Unix behaviour into Helix's
 native object model. They are not the foundation.
 
-> Status: **M3–M7 are complete; M8 IPC is in progress.** The kernel owns its
+> Status: **M3–M8 are complete; M9 user-space foundations are in progress.** The kernel owns its
 > page tables (`map`/`unmap`/`protect`), handles CPU exceptions with readable
 > reports, schedules guarded kernel threads, and takes a 100 Hz timer
 > interrupt. M8 now has bounded, rights-checked channels, blocking receive
@@ -44,9 +44,10 @@ native object model. They are not the foundation.
 | Single-CPU preemption guards for shared kernel state | ✅ implemented (M7) |
 | Bounded, rights-checked kernel channels | ✅ `chantest` passed in QEMU |
 | Blocking receive and channel wakeups | ✅ `chanwaittest` passed in QEMU |
-| Reduced-rights capability transfer over channels | 🚧 `capxfer` ready for QEMU testing |
-| Timed channel receive | 🚧 `chantimeout` ready for QEMU testing |
-| User space / ELF / syscalls | ⛔ not started (M9) |
+| Reduced-rights capability transfer over channels | ✅ `capxfer` passed in QEMU |
+| Timed channel receive | ✅ `chantimeout` passed in QEMU |
+| Private user address spaces with shared supervisor kernel mappings | 🚧 `asptest` ready for QEMU testing |
+| Ring-3 execution / ELF / syscalls | ⛔ not started (M9) |
 | Isolated driver services, filesystems, networking | ⛔ not started (M10–M12) |
 | Linux / BSD / POSIX compatibility | ⛔ not started (much later) |
 | Doom / FreeDoom | 🧪 WAD boot handoff groundwork; playable port deferred until userland |
@@ -55,6 +56,8 @@ See [ROADMAP.md](ROADMAP.md) for the full plan, [docs/02-shell.md](docs/02-shell
 for the shell, [docs/03-cpython-requirements.md](docs/03-cpython-requirements.md)
 for what it will take to run CPython and Linux/BSD software, and
 [docs/06-ipc-channels.md](docs/06-ipc-channels.md) for the first M8 channel API.
+[docs/08-address-spaces.md](docs/08-address-spaces.md) describes the M9
+address-space foundation.
 [docs/04-paging-interrupts.md](docs/04-paging-interrupts.md) for virtual memory
 and interrupts, [docs/05-object-manager.md](docs/05-object-manager.md) for the
 M5 object and handle APIs, and [docs/06-capabilities.md](docs/06-capabilities.md)
@@ -164,7 +167,7 @@ HELIX OS
 Native Object Kernel
 Boot successful.
 
-Helix OS 0.8.0-dev.20261018 "IPC"
+Helix OS 0.9.0-dev.20261018 "Userland"
 
 [helix] console: serial + framebuffer
 [helix] memory:  462 MiB usable

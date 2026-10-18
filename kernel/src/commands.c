@@ -371,6 +371,76 @@ static bool objtest_check(bool passed, const char *label) {
     return passed;
 }
 
+static void cmd_asptest(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    console_write("Address-space self-test\n");
+    const uint64_t user_page = 0x00400000ULL;
+    const uint64_t pattern = 0x48454C4958555345ULL;
+    vmm_address_space_t space = {0};
+    uintptr_t frame = pmm_alloc_frame();
+    bool created = frame != 0 && vmm_address_space_create(&space);
+    bool ok = objtest_check(created,
+                            "create private lower-half page-table root");
+    if (!created) {
+        if (frame != 0) pmm_free_frame(frame);
+        console_write("  M9 address-space self-test: FAIL\n");
+        return;
+    }
+
+    uint64_t kernel_phys_before = 0;
+    uint64_t kernel_flags_before = 0;
+    bool kernel_had_mapping = vmm_get_mapping(user_page, &kernel_phys_before,
+                                               &kernel_flags_before);
+    bool initially_absent = !vmm_address_space_get_mapping(&space, user_page,
+                                                            NULL, NULL);
+    bool mapped = vmm_address_space_map_user(&space, user_page, frame,
+        VMM_PRESENT | VMM_WRITE | VMM_USER | VMM_NX);
+    uint64_t mapped_phys = 0;
+    uint64_t mapped_flags = 0;
+    bool mapping_ok = initially_absent && mapped &&
+        vmm_address_space_get_mapping(&space, user_page, &mapped_phys,
+                                      &mapped_flags) &&
+        mapped_phys == frame && (mapped_flags & (VMM_USER | VMM_WRITE | VMM_NX)) ==
+                                  (VMM_USER | VMM_WRITE | VMM_NX);
+    ok &= objtest_check(mapping_ok,
+                        "map a user, writable, non-executable page");
+
+    bool switched = mapped && vmm_address_space_switch(&space);
+    uint64_t kernel_code_flags = 0;
+    bool kernel_shared = switched &&
+        (read_cr3() & 0x000FFFFFFFFFF000ULL) == space.root_phys &&
+        vmm_address_space_get_mapping(&space,
+            (uint64_t)(uintptr_t)&cmd_asptest, NULL, &kernel_code_flags) &&
+        !(kernel_code_flags & VMM_USER);
+    bool data_access = false;
+    if (switched && mapping_ok) {
+        volatile uint64_t *user_memory = (volatile uint64_t *)(uintptr_t)user_page;
+        *user_memory = pattern;
+        data_access = *user_memory == pattern;
+    }
+    ok &= objtest_check(kernel_shared && data_access,
+                        "switch roots, keep kernel supervisor mappings, access user page");
+
+    bool restored = vmm_address_space_switch(vmm_kernel_address_space());
+    uint64_t kernel_phys_after = 0;
+    uint64_t kernel_flags_after = 0;
+    bool kernel_unchanged = restored &&
+        vmm_get_mapping(user_page, &kernel_phys_after, &kernel_flags_after) ==
+            kernel_had_mapping &&
+        (!kernel_had_mapping || kernel_phys_after == kernel_phys_before);
+    ok &= objtest_check(kernel_unchanged,
+                        "private user mapping leaves kernel root unchanged");
+
+    bool unmapped = mapped && vmm_address_space_unmap_user(&space, user_page);
+    pmm_free_frame(frame);
+    bool destroyed = vmm_address_space_destroy(&space);
+    ok &= objtest_check(unmapped && destroyed,
+                        "unmap user page and reclaim private page tables");
+    console_write(ok ? "  M9 address-space self-test: PASS\n"
+                     : "  M9 address-space self-test: FAIL\n");
+}
+
 static void cmd_objects(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -1090,6 +1160,7 @@ const command_t helix_commands[] = {
     {"heap",    "kernel heap statistics",                cmd_heap},
     {"memtest", "exercise kmalloc/kfree",                cmd_memtest},
     {"vmtest",  "exercise map/unmap/protect",            cmd_vmtest},
+    {"asptest", "exercise isolated user address spaces", cmd_asptest},
     {"stacktest","verify guarded NX kernel stack",       cmd_stacktest},
     {"objects", "show object manager statistics",        cmd_objects},
     {"objtest", "exercise objects and handles",          cmd_objtest},

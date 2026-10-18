@@ -26,7 +26,7 @@ object cleanup; it has passed in QEMU. `chanwaittest` covers blocking receive,
 message wake-up, close wake-up and the no-runnable-thread case; it has passed
 in QEMU. `channel_send_capability()` derives a capability with reduced object
 rights before queueing it, and `channel_receive_capability()` creates the new
-handle in the receiver's table. `capxfer` checks this path and is awaiting
-machine testing. Timeouts and cross-process IPC remain future work. These
-queues are kernel objects and do not yet provide user-space IPC. `chantimeout`
-checks the deadline path and still needs machine testing.
+handle in the receiver's table. `capxfer` passed in QEMU. Timeouts are measured
+in PIT ticks; `chantimeout` passed in QEMU. Cross-process IPC remains future
+work because Helix does not yet have user processes. These queues are kernel
+objects and do not yet provide user-space IPC.

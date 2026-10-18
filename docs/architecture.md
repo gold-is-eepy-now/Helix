@@ -140,7 +140,9 @@ User space reaches the kernel through a native system-call ABI built around
 objects and handles — not `open`/`read`/`write`. An ELF loader for native
 executables and a minimal native runtime follow.
 
-**Status:** not implemented. Planned for M9.
+**Status:** M9 has started with private lower-half page-table roots and shared
+supervisor-only kernel mappings. Ring-3 execution, the loader, and syscalls
+remain to be implemented.
 
 ## Compatibility layers
 

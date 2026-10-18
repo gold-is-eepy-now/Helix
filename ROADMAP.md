@@ -112,8 +112,8 @@ M5 object and handle APIs were started early; work now continues at M6.
 - ✅ The boot and shell suite covers the M4 paging, timer, and exception paths;
   M3, M5 and initial M6 checks have since expanded it to 45 checks.
 
-**Still to do:** APIC/IOAPIC timers; per-process address spaces (needs the
-object manager).
+**Still to do:** APIC/IOAPIC timers; per-process address spaces are being
+introduced in M9 on top of the completed object manager.
 
 ## M5 — The object manager ✅
 
@@ -148,13 +148,14 @@ still future work.
 - ✅ Memory-protection control is gated by a memory-range capability. New
   privileged service APIs must use capability checks and least-privilege
   defaults as they are introduced.
-- 🚧 Reduced-rights capability transfer over channels is implemented in M8;
-  awaiting `capxfer` machine testing.
+- ✅ Reduced-rights capability transfer over channels passed in QEMU as part
+  of the M8 `capxfer` exit gate.
 
 **M6 exit gate (passed):** `captest` proves rights cannot be enlarged by
 derivation, revoking a parent invalidates its descendants, and the protected
 memory operation rejects missing, insufficient, wrong-type, out-of-range, and
-revoked capabilities. M8 channel transfer has its own machine-test gate.
+revoked capabilities. M8 later verified reduced-rights capability transfer
+between handle tables with `capxfer`.
 
 ## M7 — Threads and scheduler ✅
 
@@ -173,23 +174,30 @@ guards protect scheduler and shared allocator/object state; they do not
 provide SMP safety. M7's single-CPU kernel-thread exit gate is passed; SMP
 and user-space scheduling remain future work.
 
-## M8 — IPC and channels
+## M8 — IPC and channels ✅
 
 - ✅ Bounded, non-blocking FIFO channels are rights-checked kernel objects;
   `chantest` passed in QEMU.
 - ✅ Blocking receive and scheduler wake-ups; `chanwaittest` passed in QEMU.
-- 🚧 Reduced-rights capability transfer between kernel handle tables is
-  implemented; `capxfer` needs machine testing.
-- 🚧 PIT-tick receive timeouts are implemented; `chantimeout` needs machine
-  testing.
-- ⛔ Cross-process message passing remains for the user-space/process work.
+- ✅ Reduced-rights capability transfer between kernel handle tables;
+  `capxfer` passed in QEMU.
+- ✅ PIT-tick receive timeouts; `chantimeout` passed in QEMU.
+- ⏭ Cross-process message passing builds on M9 process and address-space support.
 
-## M9 — User space
+**M8 exit gate (passed):** `chantest`, `chanwaittest`, `capxfer`, and
+`chantimeout` all passed in QEMU. The kernel now has bounded channels,
+blocking receive, close and send wakeups, reduced-rights capability transfer,
+and timeout support. User-process IPC depends on M9.
 
-- ELF loader for native Helix executables.
-- System-call entry (`syscall`/`sysret`), the native ABI.
-- A minimal native libc-style runtime.
-- `init` as the first user-space process.
+## M9 — User space 🚧
+
+- 🚧 Private lower-half address spaces with shared supervisor-only kernel
+  mappings; `asptest` is ready for QEMU testing.
+- ⛔ Ring-3 execution and user/kernel transition stacks.
+- ⛔ ELF loader for native Helix executables.
+- ⛔ System-call entry (`syscall`/`sysret`) and the native ABI.
+- ⛔ A minimal native libc-style runtime.
+- ⛔ `init` as the first user-space process.
 
 ## M10 — Driver framework and isolated drivers
 
