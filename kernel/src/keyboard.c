@@ -12,6 +12,7 @@
 #include "keyboard.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #include "io.h"
 
@@ -20,6 +21,7 @@
 
 static bool shift_down;
 static bool extended; /* saw the 0xE0 prefix */
+static int pressed_keys[256];
 
 /* Unshifted US layout, indexed by make code. */
 static const char keymap_normal[128] = {
@@ -64,44 +66,88 @@ static const char keymap_shift[128] = {
 void keyboard_init(void) {
     shift_down = false;
     extended = false;
+    for (size_t i = 0; i < sizeof(pressed_keys) / sizeof(pressed_keys[0]); i++)
+        pressed_keys[i] = 0;
 }
 
-int keyboard_read(void) {
+static int extended_key(uint8_t code) {
+    switch (code) {
+        case 0x48: return KBD_KEY_UP;
+        case 0x50: return KBD_KEY_DOWN;
+        case 0x4B: return KBD_KEY_LEFT;
+        case 0x4D: return KBD_KEY_RIGHT;
+        case 0x1C: return KBD_KEY_ENTER;
+        case 0x1D: return KBD_KEY_CTRL;
+        case 0x38: return KBD_KEY_ALT;
+        case 0x53: return KBD_KEY_DELETE;
+        case 0x47: return KBD_KEY_HOME;
+        case 0x4F: return KBD_KEY_END;
+        case 0x49: return KBD_KEY_PAGE_UP;
+        case 0x51: return KBD_KEY_PAGE_DOWN;
+        default: return 0;
+    }
+}
+
+bool keyboard_read_event(keyboard_event_t *event) {
+    if (event == NULL) return false;
     uint8_t status = inb(KBD_STATUS);
     if ((status & 0x01) == 0) {
-        return -1; /* nothing to read */
+        return false;
     }
 
     uint8_t scancode = inb(KBD_DATA);
 
     /* Bit 5 means the byte came from the mouse, not the keyboard. */
     if (status & 0x20) {
-        return -1;
+        return false;
     }
 
     if (scancode == 0xE0) {
         extended = true;
-        return -1;
+        return false;
     }
-    if (extended) {
-        extended = false; /* arrow keys etc. arrive here; ignore for now */
-        return -1;
+    bool ext = extended;
+    extended = false;
+    bool pressed = (scancode & 0x80u) == 0;
+    uint8_t code = (uint8_t)(scancode & 0x7fu);
+    unsigned slot = (unsigned)code | (ext ? 0x80u : 0u);
+    int key = 0;
+
+    if (ext) {
+        key = pressed_keys[slot];
+        if (pressed) key = extended_key(code);
+        if (key == 0) return false;
+    } else if (code == 0x2A || code == 0x36) {
+        key = KBD_KEY_SHIFT;
+        shift_down = pressed;
+    } else if (code == 0x1D) {
+        key = KBD_KEY_CTRL;
+    } else if (code == 0x38) {
+        key = KBD_KEY_ALT;
+    } else if (code == 0x01) {
+        key = KBD_KEY_ESCAPE;
+    } else if (pressed) {
+        key = shift_down ? (unsigned char)keymap_shift[code]
+                         : (unsigned char)keymap_normal[code];
+    } else {
+        key = pressed_keys[slot];
     }
 
-    if (scancode & 0x80) {
-        /* Break code: a key was released. */
-        uint8_t make = (uint8_t)(scancode & 0x7F);
-        if (make == 0x2A || make == 0x36) {
-            shift_down = false;
-        }
-        return -1;
-    }
+    if (pressed) pressed_keys[slot] = key;
+    else pressed_keys[slot] = 0;
+    event->key = key;
+    event->pressed = pressed;
+    return key != 0;
+}
 
-    if (scancode == 0x2A || scancode == 0x36) {
-        shift_down = true;
-        return -1;
-    }
-
-    char c = shift_down ? keymap_shift[scancode] : keymap_normal[scancode];
-    return c ? (int)(unsigned char)c : -1;
+int keyboard_read(void) {
+    keyboard_event_t event;
+    if (!keyboard_read_event(&event) || !event.pressed) return -1;
+    if (event.key == '\n') return '\n';
+    if (event.key == KBD_KEY_ENTER) return '\n';
+    if (event.key == KBD_KEY_ESCAPE) return 0x1b;
+    if (event.key >= 0x20 && event.key <= 0x7e) return event.key;
+    if (event.key == 0x7f) return 0x7f;
+    if (event.key == '\t') return '\t';
+    return -1;
 }

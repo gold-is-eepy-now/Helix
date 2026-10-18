@@ -18,7 +18,7 @@
 # which Helix does not support -- and it makes some firmware (including
 # VirtualBox's EFI) misread the partition table.
 #
-# Environment overrides: BUILD_DIR KERNEL LIMINE_DIR IMAGE LIMINE_CONF SIZE_MB
+# Environment overrides: BUILD_DIR KERNEL LIMINE_DIR IMAGE LIMINE_CONF SIZE_MB DOOM_WAD
 set -eu
 
 # sgdisk and friends live in the sbin directories, which are not always on a
@@ -31,6 +31,7 @@ KERNEL="${KERNEL:-$BUILD_DIR/kernel}"
 LIMINE_DIR="${LIMINE_DIR:-$BUILD_DIR/deps/limine-binary}"
 IMAGE="${IMAGE:-$BUILD_DIR/helix.img}"
 LIMINE_CONF="${LIMINE_CONF:-limine.conf}"
+DOOM_WAD="${DOOM_WAD:-}"
 SIZE_MB="${SIZE_MB:-64}"
 
 # Geometry chosen so one "cylinder" is exactly 1 MiB, matching the layout
@@ -68,10 +69,23 @@ echo "[mkimage] formatting FAT32 filesystem on the ESP"
 # -F forces FAT32, which the UEFI specification recommends for the ESP.
 mformat -i "$IMAGE@@${PART_OFFSET}" -T "$PART_SECTORS" -h "$HEADS" -s "$SECTORS_PER_TRACK" -F ::
 mmd -i "$IMAGE@@${PART_OFFSET}" ::/EFI ::/EFI/BOOT ::/boot ::/boot/limine
+if [ -n "$DOOM_WAD" ]; then
+    [ -f "$DOOM_WAD" ] || { echo "mkimage: Doom WAD not found: $DOOM_WAD" >&2; exit 1; }
+    mmd -i "$IMAGE@@${PART_OFFSET}" ::/boot/doom
+fi
 
 echo "[mkimage] installing Limine, config and kernel"
 mcopy -i "$IMAGE@@${PART_OFFSET}" "$LIMINE_DIR/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
 mcopy -i "$IMAGE@@${PART_OFFSET}" "$LIMINE_CONF"           ::/boot/limine/limine.conf
 mcopy -i "$IMAGE@@${PART_OFFSET}" "$KERNEL"                ::/boot/kernel
+if [ -n "$DOOM_WAD" ]; then
+    # Limine config is generated in the build directory so the source config
+    # stays independent of a user's locally supplied, licensed game data.
+    DOOM_CONF="$BUILD_DIR/limine-doom.conf"
+    cp "$LIMINE_CONF" "$DOOM_CONF"
+    printf '    module_path: boot():/boot/doom/doom1.wad\n    module_string: helix-doom-wad\n' >> "$DOOM_CONF"
+    mcopy -i "$IMAGE@@${PART_OFFSET}" "$DOOM_WAD" ::/boot/doom/doom1.wad
+    mcopy -o -i "$IMAGE@@${PART_OFFSET}" "$DOOM_CONF" ::/boot/limine/limine.conf
+fi
 
 echo "[mkimage] done: $IMAGE"

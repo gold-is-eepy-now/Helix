@@ -26,6 +26,7 @@ static size_t g_cursor_y;
 static uint32_t g_fg;
 static uint32_t g_bg;
 static bool g_cursor_drawn;
+static bool g_graphics_mode;
 
 void fb_init(struct limine_framebuffer *fb) {
     g_fb = fb;
@@ -97,6 +98,47 @@ void fb_clear(uint32_t color) {
     g_cursor_drawn = false;
 }
 
+bool fb_present_rgb(const uint32_t *pixels, uint32_t width, uint32_t height) {
+    if (!fb_ready() || pixels == NULL || width == 0 || height == 0 ||
+        g_fb->bpp < 24) return false;
+
+    /* Fit the image without distortion, then center it to produce black bars. */
+    uint64_t out_w = g_fb->width;
+    uint64_t out_h = (out_w * height) / width;
+    if (out_h > g_fb->height) {
+        out_h = g_fb->height;
+        out_w = (out_h * width) / height;
+    }
+    if (out_w == 0 || out_h == 0) return false;
+    uint64_t x0 = (g_fb->width - out_w) / 2;
+    uint64_t y0 = (g_fb->height - out_h) / 2;
+
+    /* Clear bars first, honoring firmware channel layout for the pixels. */
+    uint32_t black = fb_rgb(0, 0, 0);
+    for (uint64_t y = 0; y < g_fb->height; y++) {
+        for (uint64_t x = 0; x < g_fb->width; x++) put_pixel(x, y, black);
+    }
+    for (uint64_t y = 0; y < out_h; y++) {
+        uint32_t sy = (uint32_t)((y * height) / out_h);
+        for (uint64_t x = 0; x < out_w; x++) {
+            uint32_t sx = (uint32_t)((x * width) / out_w);
+            uint32_t rgb = pixels[(size_t)sy * width + sx];
+            uint32_t packed = fb_rgb((uint8_t)(rgb >> 16),
+                                     (uint8_t)(rgb >> 8), (uint8_t)rgb);
+            put_pixel(x0 + x, y0 + y, packed);
+        }
+    }
+    g_graphics_mode = true;
+    g_cursor_drawn = false;
+    return true;
+}
+
+void fb_graphics_end(void) {
+    g_graphics_mode = false;
+    g_cursor_drawn = false;
+    if (fb_ready()) fb_clear(g_bg);
+}
+
 /* Move the whole image up by one text row and blank the new bottom row. */
 static void scroll_up(void) {
     size_t row_bytes = g_fb->pitch;
@@ -145,7 +187,7 @@ static void newline(void) {
 }
 
 void fb_putchar(char c) {
-    if (!fb_ready()) {
+    if (!fb_ready() || g_graphics_mode) {
         return;
     }
 

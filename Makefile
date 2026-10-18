@@ -42,6 +42,7 @@ image: kernel deps
 	 LIMINE_DIR="$(LIMINE_DIR)" \
 	 IMAGE="$(IMAGE)" \
 	 LIMINE_CONF="$(CURDIR)/limine.conf" \
+	 DOOM_WAD="$(DOOM_WAD)" \
 	 sh tools/mkimage.sh
 
 # Bootable UEFI CD/DVD image (attach as an optical drive).

@@ -209,6 +209,48 @@ def main():
         ser.send("vmtest\n")
         check("vmtest maps/unmaps/protects", "result: PASS")
 
+        ser.send("stacktest\n")
+        check("kernel runs on its dedicated stack",
+              "execution is on the dedicated stack: ok")
+        check("guard page fault is reported and recovered",
+              "guard page fault: reported and recovered")
+        check("NX execute fault is reported and recovered",
+              "NX execute fault: reported and recovered")
+        check("M3 stack self-test passes", "M3 stack self-test: PASS")
+
+        ser.send("objects\n")
+        check("object manager reports statistics", "Object manager")
+        check("object registry starts empty", "live objects : 0")
+
+        ser.send("objtest\n")
+        check("objtest rejects invalid rights and handles",
+              "reject missing/zero rights, wrong type, and invalid handle: ok")
+        check("objtest closes the final channel reference",
+              "close channel once and release final reference: ok")
+        check("objtest reaches its passing result", "M5 object self-test: PASS")
+        check_true("objtest result is PASS",
+                   "M5 object self-test: PASS" in
+                   ser.text().split("objtest\n", 1)[-1])
+
+        ser.send("objects\n")
+        check("objtest leaves no objects behind", "live objects : 0")
+
+        ser.send("captest\n")
+        check("captest creates and derives capabilities",
+              "create capability and derive reduced rights: ok")
+        check("captest rejects capability rights enlargement",
+              "reject capability rights enlargement: ok")
+        check("captest enforces granted rights and type",
+              "enforce granted rights and target type: ok")
+        check("derived capability cannot revoke its parent",
+              "derived capability cannot revoke its parent: ok")
+        check("revoking parent invalidates descendants",
+              "revoke parent and invalidate every descendant: ok")
+        check("M6 capability self-test passes",
+              "M6 capability self-test: PASS")
+        ser.send("objects\n")
+        check("captest leaves no objects behind", "live objects : 0")
+
         ser.send("ticks\n")
         check("PIT timer is ticking", "PIT timer")
         ser.read_until("ms\n")  # wait for the whole line, not just its prefix
