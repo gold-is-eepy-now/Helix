@@ -1,6 +1,7 @@
 /* channel.c — bounded kernel message channels with optional blocking receive. */
 #include "channel.h"
 
+#include "capability.h"
 #include "heap.h"
 #include "kstring.h"
 #include "object.h"
@@ -9,6 +10,8 @@
 
 typedef struct {
     size_t size;
+    object_t *capability;
+    uint32_t capability_handle_rights;
     uint8_t data[CHANNEL_MAX_MESSAGE_SIZE];
 } channel_message_t;
 
@@ -58,6 +61,14 @@ static void remove_waiter(channel_core_t *core, thread_id_t id) {
     }
 }
 
+static void channel_core_destroy(channel_core_t *core) {
+    for (uint32_t i = 0; i < core->count; i++) {
+        uint32_t index = (core->head + i) % core->capacity;
+        object_release(core->messages[index].capability);
+    }
+    kfree(core);
+}
+
 static void channel_endpoint_destroy(object_t *object, void *payload_ptr) {
     (void)object;
     channel_endpoint_t *endpoint = payload_ptr;
@@ -67,13 +78,18 @@ static void channel_endpoint_destroy(object_t *object, void *payload_ptr) {
         wake_waiters(core, true);
     if (endpoint->can_receive && core->receivers != 0 && --core->receivers == 0)
         wake_waiters(core, true);
-    if (core->endpoints != 0 && --core->endpoints == 0) kfree(core);
+    if (core->endpoints != 0 && --core->endpoints == 0)
+        channel_core_destroy(core);
 }
 
-bool channel_create_pair(handle_table_t *table, uint32_t capacity,
-                         handle_t *send_handle, handle_t *receive_handle) {
+bool channel_create_pair_between(handle_table_t *send_table,
+                                 handle_table_t *receive_table,
+                                 uint32_t capacity,
+                                 handle_t *send_handle,
+                                 handle_t *receive_handle) {
     IRQ_GUARD;
-    if (table == NULL || send_handle == NULL || receive_handle == NULL ||
+    if (send_table == NULL || receive_table == NULL ||
+        send_handle == NULL || receive_handle == NULL ||
         send_handle == receive_handle ||
         capacity == 0 || capacity > CHANNEL_MAX_CAPACITY) return false;
     *send_handle = 0;
@@ -109,13 +125,13 @@ bool channel_create_pair(handle_table_t *table, uint32_t capacity,
     core->endpoints++;
     core->receivers++;
 
-    handle_t send = handle_create(table, sender,
+    handle_t send = handle_create(send_table, sender,
         OBJECT_RIGHT_WRITE | OBJECT_RIGHT_DUPLICATE | OBJECT_RIGHT_INSPECT);
-    handle_t receive = handle_create(table, receiver,
+    handle_t receive = handle_create(receive_table, receiver,
         OBJECT_RIGHT_READ | OBJECT_RIGHT_DUPLICATE | OBJECT_RIGHT_INSPECT);
     if (send == 0 || receive == 0) {
-        if (send != 0) handle_close(table, send);
-        if (receive != 0) handle_close(table, receive);
+        if (send != 0) handle_close(send_table, send);
+        if (receive != 0) handle_close(receive_table, receive);
         object_release(sender);
         object_release(receiver);
         return false;
@@ -125,6 +141,12 @@ bool channel_create_pair(handle_table_t *table, uint32_t capacity,
     *send_handle = send;
     *receive_handle = receive;
     return true;
+}
+
+bool channel_create_pair(handle_table_t *table, uint32_t capacity,
+                         handle_t *send_handle, handle_t *receive_handle) {
+    return channel_create_pair_between(table, table, capacity,
+                                       send_handle, receive_handle);
 }
 
 channel_result_t channel_send(handle_table_t *table, handle_t channel,
@@ -154,10 +176,55 @@ channel_result_t channel_send(handle_table_t *table, handle_t channel,
     uint32_t tail = (core->head + core->count) % core->capacity;
     channel_message_t *slot = &core->messages[tail];
     slot->size = size;
+    slot->capability = NULL;
+    slot->capability_handle_rights = 0;
     if (size != 0) memcpy(slot->data, message, size);
     core->count++;
     wake_waiters(core, false);
     object_release(object);
+    return CHANNEL_OK;
+}
+
+channel_result_t channel_send_capability(handle_table_t *table,
+                                         handle_t channel,
+                                         handle_t capability,
+                                         uint32_t requested_rights) {
+    IRQ_GUARD;
+    object_t *endpoint_object = handle_get(table, channel, OBJECT_RIGHT_WRITE,
+                                           OBJECT_TYPE_CHANNEL);
+    channel_endpoint_t *endpoint = object_payload(endpoint_object);
+    channel_core_t *core = endpoint != NULL && endpoint->can_send
+        ? endpoint->core : NULL;
+    if (core == NULL) {
+        object_release(endpoint_object);
+        return CHANNEL_DENIED;
+    }
+    if (core->receivers == 0) {
+        object_release(endpoint_object);
+        return CHANNEL_CLOSED;
+    }
+    if (core->count == core->capacity) {
+        object_release(endpoint_object);
+        return CHANNEL_FULL;
+    }
+
+    handle_t derived = capability_derive(table, capability, requested_rights);
+    object_t *transfer = derived == 0 ? NULL :
+        handle_get(table, derived, OBJECT_RIGHT_READ, OBJECT_TYPE_CAPABILITY);
+    if (derived != 0) (void)handle_close(table, derived);
+    if (transfer == NULL) {
+        object_release(endpoint_object);
+        return CHANNEL_DENIED;
+    }
+
+    uint32_t tail = (core->head + core->count) % core->capacity;
+    channel_message_t *slot = &core->messages[tail];
+    slot->size = 0;
+    slot->capability = transfer; /* the queue owns this retained reference */
+    slot->capability_handle_rights = OBJECT_RIGHT_READ | OBJECT_RIGHT_DUPLICATE;
+    core->count++;
+    wake_waiters(core, false);
+    object_release(endpoint_object);
     return CHANNEL_OK;
 }
 
@@ -180,6 +247,10 @@ channel_result_t channel_receive(handle_table_t *table, handle_t channel,
     }
 
     channel_message_t *slot = &core->messages[core->head];
+    if (slot->capability != NULL) {
+        object_release(object);
+        return CHANNEL_CAPABILITY_PRESENT;
+    }
     if (buffer_size < slot->size || (slot->size != 0 && buffer == NULL)) {
         if (message_size != NULL) *message_size = slot->size;
         object_release(object);
@@ -192,6 +263,50 @@ channel_result_t channel_receive(handle_table_t *table, handle_t channel,
     core->head = (core->head + 1) % core->capacity;
     core->count--;
     object_release(object);
+    return CHANNEL_OK;
+}
+
+channel_result_t channel_receive_capability(handle_table_t *table,
+                                            handle_t channel,
+                                            handle_t *capability) {
+    IRQ_GUARD;
+    if (capability == NULL) return CHANNEL_DENIED;
+    *capability = 0;
+    object_t *object = handle_get(table, channel, OBJECT_RIGHT_READ,
+                                  OBJECT_TYPE_CHANNEL);
+    channel_endpoint_t *endpoint = object_payload(object);
+    channel_core_t *core = endpoint != NULL && endpoint->can_receive
+        ? endpoint->core : NULL;
+    if (core == NULL) {
+        object_release(object);
+        return CHANNEL_DENIED;
+    }
+    if (core->count == 0) {
+        channel_result_t result = core->senders == 0
+            ? CHANNEL_CLOSED : CHANNEL_EMPTY;
+        object_release(object);
+        return result;
+    }
+    channel_message_t *slot = &core->messages[core->head];
+    if (slot->capability == NULL) {
+        object_release(object);
+        return CHANNEL_NO_CAPABILITY;
+    }
+    handle_t installed = handle_create(table, slot->capability,
+                                       slot->capability_handle_rights);
+    if (installed == 0) {
+        object_release(object);
+        return CHANNEL_HANDLE_TABLE_FULL;
+    }
+    object_t *transferred = slot->capability;
+    slot->capability = NULL;
+    slot->capability_handle_rights = 0;
+    slot->size = 0;
+    core->head = (core->head + 1) % core->capacity;
+    core->count--;
+    object_release(transferred);
+    object_release(object);
+    *capability = installed;
     return CHANNEL_OK;
 }
 

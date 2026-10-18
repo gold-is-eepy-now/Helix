@@ -549,6 +549,78 @@ static void cmd_chanwaittest(int argc, char **argv) {
                      : "  M8 blocking IPC self-test: FAIL\n");
 }
 
+static void cmd_capxfer(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    console_write("Capability transfer self-test\n");
+    uint64_t before = object_count();
+    handle_table_t sender_table;
+    handle_table_t receiver_table;
+    handle_table_init(&sender_table);
+    handle_table_init(&receiver_table);
+    handle_t send_handle = 0;
+    handle_t receive_handle = 0;
+    bool created = channel_create_pair_between(&sender_table, &receiver_table,
+        1, &send_handle, &receive_handle);
+    bool ok = objtest_check(created,
+                            "create endpoints in separate handle tables");
+    if (!created) {
+        console_write("  M8 capability transfer self-test: FAIL\n");
+        return;
+    }
+
+    object_t *target = object_create(OBJECT_TYPE_EVENT, 0, NULL);
+    uint64_t target_id = object_id(target);
+    handle_t target_handle = target == NULL ? 0 : handle_create(&sender_table,
+        target, OBJECT_RIGHT_READ | OBJECT_RIGHT_WRITE |
+                OBJECT_RIGHT_DUPLICATE | OBJECT_RIGHT_INSPECT);
+    object_release(target);
+    handle_t source_capability = target_handle == 0 ? 0 :
+        capability_create(&sender_table, target_handle,
+                          OBJECT_RIGHT_READ | OBJECT_RIGHT_WRITE);
+    (void)handle_close(&sender_table, target_handle);
+    bool have_capability = source_capability != 0;
+    ok &= objtest_check(have_capability,
+                        "create source capability for transfer");
+
+    channel_result_t enlarged = channel_send_capability(&sender_table,
+        send_handle, source_capability, OBJECT_RIGHT_READ | OBJECT_RIGHT_CONTROL);
+    bool denied_enlargement = enlarged == CHANNEL_DENIED;
+    ok &= objtest_check(denied_enlargement,
+                        "reject transfer rights beyond source capability");
+    channel_result_t sent = have_capability ? channel_send_capability(
+        &sender_table, send_handle, source_capability, OBJECT_RIGHT_READ)
+        : CHANNEL_DENIED;
+    bool sent_reduced = sent == CHANNEL_OK;
+    ok &= objtest_check(sent_reduced, "send a reduced capability to the peer");
+    (void)handle_close(&sender_table, source_capability);
+
+    bool preserved = channel_receive(&receiver_table, receive_handle,
+        NULL, 0, NULL) == CHANNEL_CAPABILITY_PRESENT;
+    handle_t received_capability = 0;
+    bool received = channel_receive_capability(&receiver_table, receive_handle,
+        &received_capability) == CHANNEL_OK && received_capability != 0;
+    object_t *resolved = received ? capability_resolve(&receiver_table,
+        received_capability, OBJECT_RIGHT_READ, OBJECT_TYPE_EVENT) : NULL;
+    bool read_allowed = resolved != NULL && object_id(resolved) == target_id;
+    if (resolved != NULL) object_release(resolved);
+    object_t *write_target = received ? capability_resolve(&receiver_table,
+        received_capability, OBJECT_RIGHT_WRITE, OBJECT_TYPE_EVENT) : NULL;
+    bool write_denied = write_target == NULL;
+    if (write_target != NULL) object_release(write_target);
+    ok &= objtest_check(preserved && received,
+                        "receive capability without consuming it as data");
+    ok &= objtest_check(read_allowed && write_denied,
+                        "transferred capability retains only reduced authority");
+
+    handle_table_close_all(&sender_table);
+    handle_table_close_all(&receiver_table);
+    ok &= objtest_check(object_count() == before,
+                        "transferred capability and endpoints are released");
+    console_write(ok ? "  M8 capability transfer self-test: PASS\n"
+                     : "  M8 capability transfer self-test: FAIL\n");
+}
+
 static void cmd_objtest(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -970,6 +1042,7 @@ const command_t helix_commands[] = {
     {"captest", "exercise capability rights and revocation", cmd_captest},
     {"chantest", "exercise bounded IPC channels", cmd_chantest},
     {"chanwaittest", "exercise blocking receive and wakeups", cmd_chanwaittest},
+    {"capxfer", "exercise channel capability transfer", cmd_capxfer},
     {"threadtest", "exercise kernel threads and round-robin yield", cmd_threadtest},
     {"ticks",   "show the PIT timer tick count",         cmd_ticks},
     {"swint",   "software-trigger the timer vector",      cmd_swint},

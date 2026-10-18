@@ -20,10 +20,10 @@ object, the granted rights, and a shared revocation domain.
   `CONTROL` by default.
 
 These APIs establish the authority model, but existing kernel services have
-not all migrated from direct object handles to capabilities yet. Channel
-transfer is sequenced with M8 because channels do not provide message delivery
-yet. The current implementation inherits M5's single-CPU, kernel-context-only
-synchronization assumption.
+not all migrated from direct object handles to capabilities yet. M8 channels
+can transfer a derived capability between kernel handle tables while
+preserving the shared revocation domain. The current implementation inherits
+M5's single-CPU, kernel-context-only synchronization assumption.
 
 ## Self-test
 

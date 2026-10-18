@@ -86,7 +86,8 @@ A capability is itself an object. Capabilities can be:
 The kernel enforces capabilities at every operation boundary. There is no
 ambient "root".
 
-**Status:** not implemented. Planned for M6.
+**Status:** capability objects and revocation are implemented (M6); kernel
+services are still migrating to capability checks.
 
 ## IPC: channels and messages
 
@@ -97,7 +98,8 @@ native mechanism for:
 - transferring handles and capabilities,
 - driver I/O.
 
-**Status:** not implemented. Planned for M8.
+**Status:** bounded channels, blocking receive and reduced-rights capability
+transfer are implemented in M8. Cross-process messaging awaits user space.
 
 ## Drivers
 

@@ -20,6 +20,9 @@ typedef enum {
     CHANNEL_CLOSED,
     CHANNEL_DENIED,
     CHANNEL_WOULD_BLOCK,
+    CHANNEL_CAPABILITY_PRESENT,
+    CHANNEL_NO_CAPABILITY,
+    CHANNEL_HANDLE_TABLE_FULL,
 } channel_result_t;
 
 /* Create a bounded FIFO pair with distinct send-only and receive-only handles.
@@ -27,8 +30,20 @@ typedef enum {
  */
 bool channel_create_pair(handle_table_t *table, uint32_t capacity,
                          handle_t *send_handle, handle_t *receive_handle);
+bool channel_create_pair_between(handle_table_t *send_table,
+                                 handle_table_t *receive_table,
+                                 uint32_t capacity,
+                                 handle_t *send_handle,
+                                 handle_t *receive_handle);
 channel_result_t channel_send(handle_table_t *table, handle_t channel,
                               const void *message, size_t size);
+/* Send a derived capability. requested_rights must be a subset of the source
+ * capability; the receiver gets a fresh handle in its own handle table.
+ */
+channel_result_t channel_send_capability(handle_table_t *table,
+                                         handle_t channel,
+                                         handle_t capability,
+                                         uint32_t requested_rights);
 channel_result_t channel_receive(handle_table_t *table, handle_t channel,
                                  void *buffer, size_t buffer_size,
                                  size_t *message_size);
@@ -38,5 +53,8 @@ channel_result_t channel_receive(handle_table_t *table, handle_t channel,
 channel_result_t channel_receive_wait(handle_table_t *table, handle_t channel,
                                      void *buffer, size_t buffer_size,
                                      size_t *message_size);
+channel_result_t channel_receive_capability(handle_table_t *table,
+                                            handle_t channel,
+                                            handle_t *capability);
 
 #endif /* HELIX_CHANNEL_H */

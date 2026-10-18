@@ -21,11 +21,9 @@ sender or receiver wakes all waiters so they can observe closure.
 Operations are protected against PIT preemption on the current single CPU.
 `chantest` covers queue limits, endpoint rights, FIFO reads, closure and
 object cleanup; it has passed in QEMU. `chanwaittest` covers blocking receive,
-message wake-up, close wake-up and the no-runnable-thread case; it still needs
-machine testing. Capability transfer, timeouts and cross-process IPC remain
-future work. These queues are kernel objects and do not yet provide user-space
-IPC.
-
-Blocking receive, wakeups, timeouts, and cross-process handle transfer remain
-future M8 work. These queues are kernel objects; they do not yet provide user
-space IPC.
+message wake-up, close wake-up and the no-runnable-thread case; it has passed
+in QEMU. `channel_send_capability()` derives a capability with reduced object
+rights before queueing it, and `channel_receive_capability()` creates the new
+handle in the receiver's table. `capxfer` checks this path and is awaiting
+machine testing. Timeouts and cross-process IPC remain future work. These
+queues are kernel objects and do not yet provide user-space IPC.

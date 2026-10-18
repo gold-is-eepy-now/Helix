@@ -148,12 +148,13 @@ still future work.
 - ✅ Memory-protection control is gated by a memory-range capability. New
   privileged service APIs must use capability checks and least-privilege
   defaults as they are introduced.
-- ⏸ Capability transfer over channels (M8).
+- 🚧 Reduced-rights capability transfer over channels is implemented in M8;
+  awaiting `capxfer` machine testing.
 
 **M6 exit gate (passed):** `captest` proves rights cannot be enlarged by
 derivation, revoking a parent invalidates its descendants, and the protected
 memory operation rejects missing, insufficient, wrong-type, out-of-range, and
-revoked capabilities. Channel transfer remains sequenced with M8.
+revoked capabilities. M8 channel transfer has its own machine-test gate.
 
 ## M7 — Threads and scheduler ✅
 
@@ -176,9 +177,10 @@ and user-space scheduling remain future work.
 
 - ✅ Bounded, non-blocking FIFO channels are rights-checked kernel objects;
   `chantest` passed in QEMU.
-- 🚧 Blocking receive and scheduler wake-ups are implemented; `chanwaittest`
-  needs machine testing.
-- ⛔ Capability transfer, timeouts, and cross-process message passing remain.
+- ✅ Blocking receive and scheduler wake-ups; `chanwaittest` passed in QEMU.
+- 🚧 Reduced-rights capability transfer between kernel handle tables is
+  implemented; `capxfer` needs machine testing.
+- ⛔ Timeouts and cross-process message passing remain.
 
 ## M9 — User space
 
