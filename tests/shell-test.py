@@ -176,7 +176,7 @@ def main():
         # --- boot banner ---
         check("boot banner: HELIX OS", "HELIX OS")
         check("boot banner: Boot successful.", "Boot successful.")
-        check("shell prompt", "helix> ")
+        check("shell prompt", "helix:/# ")
 
         # --- commands ---
         ser.send("help\n")
@@ -279,7 +279,7 @@ def main():
         check("uptime reports seconds", "seconds")
 
         ser.send("sysinfo\n")
-        check("sysinfo header", "founder@helix")
+        check("sysinfo header", "Helix kernel")
         check("sysinfo OS line", "Helix OS")
         check("sysinfo CPU line", "CPU:")
         check("sysinfo Memory line", "Memory:")

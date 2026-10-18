@@ -18,7 +18,7 @@
 # which Helix does not support -- and it makes some firmware (including
 # VirtualBox's EFI) misread the partition table.
 #
-# Environment overrides: BUILD_DIR KERNEL LIMINE_DIR IMAGE LIMINE_CONF SIZE_MB DOOM_WAD DOOM_LICENSE
+# Environment overrides: BUILD_DIR KERNEL LIMINE_DIR IMAGE LIMINE_CONF SIZE_MB DOOM_WAD DOOM_LICENSE HELIX_APP HELIX_SHELL
 set -eu
 
 # sgdisk and friends live in the sbin directories, which are not always on a
@@ -33,6 +33,8 @@ IMAGE="${IMAGE:-$BUILD_DIR/helix.img}"
 LIMINE_CONF="${LIMINE_CONF:-limine.conf}"
 DOOM_WAD="${DOOM_WAD:-}"
 DOOM_LICENSE="${DOOM_LICENSE:-}"
+HELIX_APP="${HELIX_APP:-}"
+HELIX_SHELL="${HELIX_SHELL:-}"
 SIZE_MB="${SIZE_MB:-64}"
 
 # Geometry chosen so one "cylinder" is exactly 1 MiB, matching the layout
@@ -74,23 +76,47 @@ if [ -n "$DOOM_WAD" ]; then
     [ -f "$DOOM_WAD" ] || { echo "mkimage: Doom WAD not found: $DOOM_WAD" >&2; exit 1; }
     mmd -i "$IMAGE@@${PART_OFFSET}" ::/boot/doom
 fi
+if [ -n "$HELIX_APP" ]; then
+    [ -f "$HELIX_APP" ] || { echo "mkimage: Helix app not found: $HELIX_APP" >&2; exit 1; }
+    mmd -i "$IMAGE@@${PART_OFFSET}" ::/boot/apps
+fi
+if [ -n "$HELIX_SHELL" ]; then
+    [ -f "$HELIX_SHELL" ] || { echo "mkimage: Helix shell app not found: $HELIX_SHELL" >&2; exit 1; }
+    if [ -z "$HELIX_APP" ]; then mmd -i "$IMAGE@@${PART_OFFSET}" ::/boot/apps; fi
+fi
 
 echo "[mkimage] installing Limine, config and kernel"
 mcopy -i "$IMAGE@@${PART_OFFSET}" "$LIMINE_DIR/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
-mcopy -i "$IMAGE@@${PART_OFFSET}" "$LIMINE_CONF"           ::/boot/limine/limine.conf
 mcopy -i "$IMAGE@@${PART_OFFSET}" "$KERNEL"                ::/boot/kernel
+CONF_TO_INSTALL="$LIMINE_CONF"
+if [ -n "$DOOM_WAD" ] || [ -n "$HELIX_APP" ] || [ -n "$HELIX_SHELL" ]; then
+    # Generated config keeps the source config independent of local modules.
+    GENERATED_CONF="$BUILD_DIR/limine-modules.conf"
+    cp "$LIMINE_CONF" "$GENERATED_CONF"
+    if [ -n "$HELIX_APP" ]; then
+        printf '    module_path: boot():/boot/apps/hello.hlx\n    module_string: helix-native-app\n' >> "$GENERATED_CONF"
+    fi
+    if [ -n "$HELIX_SHELL" ]; then
+        printf '    module_path: boot():/boot/apps/shell.hlx\n    module_string: helix-user-shell\n' >> "$GENERATED_CONF"
+    fi
+    if [ -n "$DOOM_WAD" ]; then
+        printf '    module_path: boot():/boot/doom/doom1.wad\n    module_string: helix-doom-wad\n' >> "$GENERATED_CONF"
+    fi
+    CONF_TO_INSTALL="$GENERATED_CONF"
+fi
+mcopy -i "$IMAGE@@${PART_OFFSET}" "$CONF_TO_INSTALL" ::/boot/limine/limine.conf
+if [ -n "$HELIX_APP" ]; then
+    mcopy -i "$IMAGE@@${PART_OFFSET}" "$HELIX_APP" ::/boot/apps/hello.hlx
+fi
+if [ -n "$HELIX_SHELL" ]; then
+    mcopy -i "$IMAGE@@${PART_OFFSET}" "$HELIX_SHELL" ::/boot/apps/shell.hlx
+fi
 if [ -n "$DOOM_WAD" ]; then
-    # Limine config is generated in the build directory so the source config
-    # stays independent of a user's locally supplied, licensed game data.
-    DOOM_CONF="$BUILD_DIR/limine-doom.conf"
-    cp "$LIMINE_CONF" "$DOOM_CONF"
-    printf '    module_path: boot():/boot/doom/doom1.wad\n    module_string: helix-doom-wad\n' >> "$DOOM_CONF"
     mcopy -i "$IMAGE@@${PART_OFFSET}" "$DOOM_WAD" ::/boot/doom/doom1.wad
     if [ -n "$DOOM_LICENSE" ]; then
         [ -f "$DOOM_LICENSE" ] || { echo "mkimage: Doom asset license not found: $DOOM_LICENSE" >&2; exit 1; }
         mcopy -i "$IMAGE@@${PART_OFFSET}" "$DOOM_LICENSE" ::/boot/doom/COPYING.adoc
     fi
-    mcopy -o -i "$IMAGE@@${PART_OFFSET}" "$DOOM_CONF" ::/boot/limine/limine.conf
 fi
 
 echo "[mkimage] done: $IMAGE"

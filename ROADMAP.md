@@ -34,6 +34,9 @@ typing.
 
 - Input: serial (COM1) polling + PS/2 keyboard (scancode set 1, US layout).
 - Line editor: printable chars, Backspace, Ctrl-C, Ctrl-L, Enter.
+- Up/Down command history (16 recent commands, retained for the current boot).
+- Helix kernel-shell prompt: `helix:/#`; a `user@helix:~$` prompt waits for
+  actual user identities and a user-space shell.
 - Console gains an ANSI-on-serial, packed-RGB-on-framebuffer colour API, a
   visible cursor on the framebuffer, `clear`, `backspace`, `puts/putc/cursor`.
 - Real time source: TSC calibrated against the PIT (channel 2, mode 0) so we
@@ -52,7 +55,7 @@ Adding a new "program" is two steps: write a function with the command
 signature and add one row to `helix_commands` in `kernel/src/commands.c`.
 
 **Out of scope (intentionally):** dynamic memory, interrupts, scheduling,
-user space, ELF loading, real filesystems, command history / completion.
+user space, ELF loading, real filesystems, persistent history, and completion.
 
 ---
 
@@ -192,12 +195,34 @@ and timeout support. User-process IPC depends on M9.
 ## M9 — User space 🚧
 
 - 🚧 Private lower-half address spaces with shared supervisor-only kernel
-  mappings; `asptest` is ready for QEMU testing.
-- ⛔ Ring-3 execution and user/kernel transition stacks.
-- ⛔ ELF loader for native Helix executables.
-- ⛔ System-call entry (`syscall`/`sysret`) and the native ABI.
-- ⛔ A minimal native libc-style runtime.
-- ⛔ `init` as the first user-space process.
+  mappings; `asptest` passed in QEMU.
+- 🚧 Helix-owned GDT, user descriptors, and TSS privilege-transition stack;
+  passed QEMU boot.
+- ✅ `usermodetest` passed controlled ring-3 entry/return and contained user
+  exception handling in QEMU. Per-thread transition stacks remain to do.
+- ✅ Restricted static x86-64 ELF `ET_EXEC` loader and `.hlx` boot-module
+  handoff. The exit-only sample app ran in QEMU and returned status 42 through
+  `runapp`.
+- ✅ Initial DPL-3 `int 0x80` ABI: bounded console `write` and process `exit`;
+  both passed in QEMU.
+- ⛔ Fast `syscall`/`sysret` entry and a complete native ABI/runtime.
+- ✅ Minimal freestanding C wrappers `helix_write()` and `helix_exit()`; sample
+  app passed in QEMU.
+- ✅ User exception containment returns ring-3 faults to the kernel shell;
+  `usermodetest` confirmed exception 6 in QEMU.
+- ✅ Bounded console `read`/`clear` and first interactive user-space shell;
+  prompt, commands, clear, and exit passed in QEMU.
+- 🚧 Boot starts `shell.hlx` as the initial user process and falls back to the
+  kernel maintenance shell after exit; boot and fallback passed in QEMU.
+
+The current `.hlx` payload is a native ELF64 executable with a Helix extension,
+not a new executable encoding. The initial run path accepts a boot-provided
+module and supports bounded console output, line input, clear, and process
+exit. The shell app has `help`, `echo`, `version`, `clear`, and `exit`
+commands. The automatic init path also passed in QEMU. General syscall
+coverage, filesystem-backed executable discovery, and process lifecycle
+improvements remain M9 work. User accounts and login are deferred until those
+foundations exist.
 
 ## M10 — Driver framework and isolated drivers
 
@@ -212,12 +237,20 @@ and timeout support. User-process IPC depends on M9.
 - Block-device objects.
 - A native Helix filesystem designed around objects, not inodes-as-fds.
 - A read-only boot filesystem, then a writable one.
+- File syscalls and path-based editor saves; this replaces volatile scratch-only
+  editing and provides persistent shell history.
 
 ## M12 — Networking and graphics
 
 - Network-interface objects, a native network stack.
 - Display-surface objects and a compositor.
 - Input-device objects.
+
+## Later — Live-image installer
+
+After storage and filesystem support, add a TUI installer for live images. It
+should be able to inspect disks, choose a target, create the boot layout, and
+install Helix without making the live environment itself depend on installation.
 
 ---
 

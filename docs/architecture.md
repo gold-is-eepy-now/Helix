@@ -140,9 +140,10 @@ User space reaches the kernel through a native system-call ABI built around
 objects and handles — not `open`/`read`/`write`. An ELF loader for native
 executables and a minimal native runtime follow.
 
-**Status:** M9 has started with private lower-half page-table roots and shared
-supervisor-only kernel mappings. Ring-3 execution, the loader, and syscalls
-remain to be implemented.
+**Status:** M9 has private lower-half page-table roots, a restricted static
+ELF64 loader, a `.hlx` boot-module handoff, and a native app confirmed in QEMU.
+The initial `int 0x80` write/exit ABI passed in QEMU. Fast syscall entry,
+process scheduling, and the new C wrapper runtime remain ahead.
 
 ## Compatibility layers
 

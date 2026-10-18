@@ -22,6 +22,8 @@ void fb_set_colors(uint32_t fg, uint32_t bg);
 
 /* Fill the whole screen with one packed colour and home the cursor. */
 void fb_clear(uint32_t color);
+void fb_cursor_to(size_t row, size_t column);
+void fb_clear_current_line(void);
 
 /* Present packed 0x00RRGGBB pixels, scaling them to fit while preserving the
  * source aspect ratio. This switches the framebuffer into graphics mode and

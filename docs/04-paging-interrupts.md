@@ -61,7 +61,7 @@ reads a pattern, checks the mapping, flips it read-only, unmaps it, and frees
 the frame. Real captured output:
 
 ```
-helix> vmtest
+helix:/# vmtest
 Virtual memory self-test
   frame 0x0000000000142000 -> virtual 0xffff900000000000
   map: ok
@@ -95,7 +95,7 @@ Exceptions print a report and halt. Captured from a deliberate null
 dereference:
 
 ```
-helix> fault
+helix:/# fault
 Triggering a deliberate page fault (null dereference)...
 
 *** CPU EXCEPTION 14: Page fault ***
@@ -124,7 +124,7 @@ lands in `isr_handler`, which calls `pit_tick()` and acknowledges the PIC.
 Captured:
 
 ```
-helix> ticks
+helix:/# ticks
 PIT timer: 100 Hz, 632 ticks, 6320 ms
 ```
 
@@ -143,15 +143,17 @@ CS = 0x28   SS = 0x30
 ```
 
 **Limine's GDT does not use the `0x08`/`0x10` layout that most tutorials
-assume.** Our gates said `selector = 0x08`, which is not a valid 64-bit code
-segment in this GDT, so the CPU rejected every interrupt.
-
-The fix is not to hardcode `0x28` (another bootloader may differ) but to use
-the selector the CPU is *already running with*:
+assume.** Earlier Helix versions therefore used the selector the CPU was
+already running with:
 
 ```c
 #define KERNEL_CODE_SELECTOR read_cs()
 ```
+
+M9 now installs a small Helix-owned GDT before loading the IDT, with kernel
+code selector `0x08` and kernel data selector `0x10`. It also loads a 64-bit
+TSS for future privilege transitions. See `kernel/src/gdt.c` and
+`kernel/src/gdt_load.S` for the descriptor table and reload sequence.
 
 ### 4.2 The direct map covers RAM, not MMIO
 

@@ -28,4 +28,7 @@ uint64_t idt_expected_page_fault_error(void);
 /* Called from isr.S with a saved frame; may return another thread's frame. */
 registers_t *isr_handler(registers_t *regs);
 
+/* DPL-3 software interrupt used by the first user-mode exit diagnostic. */
+void idt_set_user_vector(void (*handler)(void));
+
 #endif /* HELIX_IDT_H */

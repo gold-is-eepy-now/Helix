@@ -19,6 +19,7 @@
 #define HELIX_CONSOLE_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 struct limine_framebuffer;
@@ -55,6 +56,8 @@ void console_backspace(void);
 
 /* Clear the screen (and home the cursor). */
 void console_clear(void);
+void console_cursor_to(size_t row, size_t column);
+void console_clear_current_line(void);
 
 /* Colour control. Colours apply to subsequent writes. */
 void console_set_fg(console_color_t color);

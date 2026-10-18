@@ -14,9 +14,12 @@
 #include <limine.h>
 
 #include "capability.h"
+#include "boot_app.h"
 #include "channel.h"
 #include "console.h"
 #include "cpu.h"
+#include "editor.h"
+#include "elf.h"
 #include "heap.h"
 #include "io.h"
 #include "kernel_stack.h"
@@ -30,6 +33,7 @@
 #include "thread.h"
 #include "time.h"
 #include "version.h"
+#include "usermode.h"
 #include "vmm.h"
 
 /* ------------------------------------------------------------------ */
@@ -439,6 +443,125 @@ static void cmd_asptest(int argc, char **argv) {
                         "unmap user page and reclaim private page tables");
     console_write(ok ? "  M9 address-space self-test: PASS\n"
                      : "  M9 address-space self-test: FAIL\n");
+}
+
+static void cmd_usermodetest(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    console_write("Ring-3 transition self-test\n");
+    uint64_t result = 0;
+    bool ok = usermode_test(&result);
+    console_write("  user program entered ring 3 and exited through int 0x80: ");
+    console_write(ok ? "ok\n" : "FAILED\n");
+    if (ok) {
+        console_write("  user exit value: ");
+        console_write_dec(result);
+        console_putc('\n');
+    }
+    console_write(ok ? "  M9 ring-3 self-test: PASS\n"
+                     : "  M9 ring-3 self-test: FAIL\n");
+    uint64_t fault_vector = 0;
+    bool fault_ok = usermode_fault_test(&fault_vector);
+    console_write("  user exception containment: ");
+    console_write(fault_ok ? "ok (exception " : "FAILED (exception ");
+    console_write_dec(fault_vector);
+    console_write(")\n");
+    console_write(fault_ok ? "  M9 user-fault self-test: PASS\n"
+                           : "  M9 user-fault self-test: FAIL\n");
+}
+
+static void cmd_runapp(int argc, char **argv) {
+    const void *data = NULL;
+    size_t size = 0;
+    const char *app_name = NULL;
+    const char *requested = argc > 1 ? argv[1] : NULL;
+    if (!boot_app_get(requested, &app_name, &data, &size)) {
+        console_write(requested == NULL ? "No .hlx application module was provided at boot.\n"
+                                        : "No matching .hlx application module: ");
+        if (requested != NULL) { console_write(requested); console_putc('\n'); }
+        return;
+    }
+
+    enum { APP_STACK_PAGES = 4 };
+    const uint64_t stack_top = 0x00007fffffffe000ULL;
+    const uint64_t stack_base = stack_top - APP_STACK_PAGES * PAGE_SIZE;
+    vmm_address_space_t space = {0};
+    elf64_image_t image = {0};
+    uintptr_t stack_frames[APP_STACK_PAGES] = {0};
+    size_t stack_mapped = 0;
+    bool loaded = false;
+    bool ok = vmm_address_space_create(&space);
+    if (ok) {
+        loaded = elf64_load(&space, data, size, &image);
+        ok = loaded;
+    }
+    while (ok && stack_mapped < APP_STACK_PAGES) {
+        uintptr_t frame = pmm_alloc_frame();
+        if (frame == 0 || !vmm_address_space_map_user(&space,
+                stack_base + stack_mapped * PAGE_SIZE, frame,
+                VMM_PRESENT | VMM_WRITE | VMM_USER | VMM_NX)) {
+            if (frame != 0) pmm_free_frame(frame);
+            ok = false;
+            break;
+        }
+        stack_frames[stack_mapped++] = frame;
+    }
+    if (ok && vmm_address_space_switch(&space)) {
+        memset((void *)(uintptr_t)stack_base, 0,
+               APP_STACK_PAGES * PAGE_SIZE);
+        ok = vmm_address_space_switch(vmm_kernel_address_space());
+    } else if (ok) {
+        ok = false;
+    }
+
+    uint64_t result = 0;
+    uint64_t fault_vector = 0;
+    if (ok) {
+        console_write("Launching ");
+        console_write(app_name);
+        console_write(" as a native .hlx app...\n");
+        ok = usermode_run(&space, image.entry, stack_top - 8, &result,
+                          &fault_vector);
+    }
+    if ((read_cr3() & 0x000FFFFFFFFFF000ULL) !=
+        (vmm_kernel_address_space()->root_phys & 0x000FFFFFFFFFF000ULL)) {
+        vmm_address_space_switch(vmm_kernel_address_space());
+    }
+    for (size_t i = 0; i < stack_mapped; i++) {
+        vmm_address_space_unmap_user(&space, stack_base + i * PAGE_SIZE);
+        pmm_free_frame(stack_frames[i]);
+    }
+    if (loaded) elf64_unload(&space, &image);
+    if (space.root_phys != 0) vmm_address_space_destroy(&space);
+
+    if (ok && fault_vector != 0) {
+        console_write("Application stopped after user exception ");
+        console_write_dec(fault_vector);
+        console_putc('\n');
+    } else if (ok) {
+        console_write("Application exited with status ");
+        console_write_dec(result);
+        console_putc('\n');
+    } else {
+        console_write("Application load or execution failed.\n");
+    }
+}
+
+bool commands_start_init(void) {
+    const void *data = NULL;
+    size_t size = 0;
+    if (!boot_app_get("shell.hlx", NULL, &data, &size)) return false;
+    (void)data;
+    (void)size;
+    char *argv[] = { "runapp", "shell.hlx" };
+    cmd_runapp(2, argv);
+    return true;
+}
+
+static void cmd_edit(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    editor_run();
 }
 
 static void cmd_objects(int argc, char **argv) {
@@ -1161,6 +1284,9 @@ const command_t helix_commands[] = {
     {"memtest", "exercise kmalloc/kfree",                cmd_memtest},
     {"vmtest",  "exercise map/unmap/protect",            cmd_vmtest},
     {"asptest", "exercise isolated user address spaces", cmd_asptest},
+    {"usermodetest", "enter and return from ring 3", cmd_usermodetest},
+    {"runapp", "run the boot-provided native .hlx app", cmd_runapp},
+    {"edit", "edit the volatile Helix scratch buffer", cmd_edit},
     {"stacktest","verify guarded NX kernel stack",       cmd_stacktest},
     {"objects", "show object manager statistics",        cmd_objects},
     {"objtest", "exercise objects and handles",          cmd_objtest},

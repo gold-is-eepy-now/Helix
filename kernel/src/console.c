@@ -183,6 +183,20 @@ void console_clear(void) {
     }
 }
 
+void console_cursor_to(size_t row, size_t column) {
+    serial_write("\x1b[");
+    serial_write_uint((uint32_t)(row + 1));
+    serial_write(";");
+    serial_write_uint((uint32_t)(column + 1));
+    serial_write("H");
+    if (g_fb_ok) fb_cursor_to(row, column);
+}
+
+void console_clear_current_line(void) {
+    serial_write("\x1b[2K");
+    if (g_fb_ok) fb_clear_current_line();
+}
+
 void console_set_fg(console_color_t color) {
     g_fg = color;
     apply_colors();

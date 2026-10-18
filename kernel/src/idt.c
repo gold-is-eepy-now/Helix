@@ -11,11 +11,13 @@
 #include <stdint.h>
 
 #include "console.h"
+#include "gdt.h"
 #include "io.h"
 #include "panic.h"
 #include "pic.h"
 #include "pit.h"
 #include "thread.h"
+#include "usermode.h"
 
 typedef struct {
     uint16_t offset_low;
@@ -45,21 +47,26 @@ extern void (*const interrupt_stubs[])(void);
 extern const uint64_t interrupt_stub_count;
 extern void isr_default(void);
 
-/* The kernel code selector is whatever the bootloader set up in the GDT.
- * Limine uses 0x28 (not the 0x08 you see in many tutorials), so we read the
- * current CS instead of hardcoding it. */
-#define KERNEL_CODE_SELECTOR read_cs()
 #define GATE_PRESENT_RING0_INT 0x8Eu /* present, DPL 0, 64-bit interrupt gate */
+#define GATE_PRESENT_RING3_INT 0xEEu /* present, DPL 3, 64-bit interrupt gate */
 
-static void set_gate(uint8_t vector, void (*handler)(void)) {
+static void set_gate_attr(uint8_t vector, void (*handler)(void), uint8_t attr) {
     uint64_t addr = (uint64_t)handler;
     g_idt[vector].offset_low = (uint16_t)(addr & 0xFFFF);
-    g_idt[vector].selector = KERNEL_CODE_SELECTOR;
+    g_idt[vector].selector = GDT_KERNEL_CODE_SELECTOR;
     g_idt[vector].ist = 0;
-    g_idt[vector].type_attr = GATE_PRESENT_RING0_INT;
+    g_idt[vector].type_attr = attr;
     g_idt[vector].offset_mid = (uint16_t)((addr >> 16) & 0xFFFF);
     g_idt[vector].offset_high = (uint32_t)((addr >> 32) & 0xFFFFFFFF);
     g_idt[vector].zero = 0;
+}
+
+static void set_gate(uint8_t vector, void (*handler)(void)) {
+    set_gate_attr(vector, handler, GATE_PRESENT_RING0_INT);
+}
+
+void idt_set_user_vector(void (*handler)(void)) {
+    if (handler != NULL) set_gate_attr(128, handler, GATE_PRESENT_RING3_INT);
 }
 
 static const char *exception_name(uint64_t vector) {
@@ -96,6 +103,8 @@ void idt_init(void) {
     for (uint64_t i = 0; i < interrupt_stub_count && i < 256; i++) {
         set_gate((uint8_t)i, interrupt_stubs[i]);
     }
+    extern void user_syscall_stub(void);
+    idt_set_user_vector(user_syscall_stub);
     g_idt_ptr.limit = (uint16_t)(sizeof(g_idt) - 1);
     g_idt_ptr.base = (uint64_t)&g_idt;
     __asm__ volatile("lidt %0" : : "m"(g_idt_ptr) : "memory");
@@ -122,6 +131,7 @@ uint64_t idt_expected_page_fault_error(void) { return g_expected_fault_error; }
 
 registers_t *isr_handler(registers_t *regs) {
     if (regs->vector < 32) {
+        if (usermode_handle_exception(regs)) return regs;
         if (regs->vector == 14 && g_page_fault_armed &&
             read_cr2() == g_expected_fault_address) {
             g_page_fault_armed = false;
@@ -153,6 +163,10 @@ registers_t *isr_handler(registers_t *regs) {
     }
 
     if (regs->vector == 48) return thread_schedule(regs, false);
+
+    if (regs->vector == 128) {
+        if (usermode_handle_syscall(regs)) return regs;
+    }
 
     kprintf("interrupt: unexpected vector %llu\n", (unsigned long long)regs->vector);
     return regs;

@@ -98,6 +98,11 @@ IRQ 15, 47
 /* Kernel-only software interrupt used for cooperative yield and thread exit. */
 ISR_NOERR 48
 
+/* DPL-3 user-mode test exit vector. */
+ISR_NOERR 128
+.global user_syscall_stub
+.set user_syscall_stub, isr128
+
 /* Everything else lands here. */
 .global isr_default
 isr_default:

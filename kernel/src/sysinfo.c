@@ -191,9 +191,9 @@ void sysinfo_print(void) {
     sb_str(&boot_line, ")");
 
     sb_reset(&user_line);
-    sb_str(&user_line, "founder@helix");
+    sb_str(&user_line, "Helix kernel");
     sb_reset(&sep_line);
-    sb_str(&sep_line, "-------------");
+    sb_str(&sep_line, "------------");
 
     const char *info[10] = {
         user_line.buf, sep_line.buf, os_line.buf, kernel_line.buf,

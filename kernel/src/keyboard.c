@@ -20,6 +20,7 @@
 #define KBD_DATA   0x60u
 
 static bool shift_down;
+static bool ctrl_down;
 static bool extended; /* saw the 0xE0 prefix */
 static int pressed_keys[256];
 
@@ -65,6 +66,7 @@ static const char keymap_shift[128] = {
 
 void keyboard_init(void) {
     shift_down = false;
+    ctrl_down = false;
     extended = false;
     for (size_t i = 0; i < sizeof(pressed_keys) / sizeof(pressed_keys[0]); i++)
         pressed_keys[i] = 0;
@@ -122,6 +124,7 @@ bool keyboard_read_event(keyboard_event_t *event) {
         shift_down = pressed;
     } else if (code == 0x1D) {
         key = KBD_KEY_CTRL;
+        ctrl_down = pressed;
     } else if (code == 0x38) {
         key = KBD_KEY_ALT;
     } else if (code == 0x01) {
@@ -129,6 +132,7 @@ bool keyboard_read_event(keyboard_event_t *event) {
     } else if (pressed) {
         key = shift_down ? (unsigned char)keymap_shift[code]
                          : (unsigned char)keymap_normal[code];
+        if (ctrl_down && key >= 'a' && key <= 'z') key &= 0x1F;
     } else {
         key = pressed_keys[slot];
     }

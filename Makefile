@@ -20,6 +20,13 @@ LIMINE_URL     := https://github.com/Limine-Bootloader/Limine/releases/download/
 DEPS_DIR       := $(BUILD_DIR)/deps
 LIMINE_DIR     := $(DEPS_DIR)/limine-binary
 IMAGE          := $(BUILD_DIR)/helix.img
+HELIX_APP      := $(BUILD_DIR)/hello.hlx
+HELIX_SHELL    := $(BUILD_DIR)/shell.hlx
+HELIX_APP_OBJS := $(BUILD_DIR)/hello-app.o $(BUILD_DIR)/libhelix.o
+HELIX_SHELL_OBJS := $(BUILD_DIR)/shell-app.o $(BUILD_DIR)/libhelix.o
+USER_CFLAGS    := -std=gnu11 -O2 -Wall -Wextra -ffreestanding -fno-builtin \
+	-fno-stack-protector -fno-pic -fno-pie -mno-red-zone -mno-sse -mno-mmx \
+	-mno-80387 -mgeneral-regs-only -m64 -march=x86-64 -Iuser/include
 FREEDOOM_VERSION := 0.13.0
 FREEDOOM_ZIP     := $(DEPS_DIR)/freedoom-$(FREEDOOM_VERSION).zip
 FREEDOOM_DIR     := $(DEPS_DIR)/freedoom-$(FREEDOOM_VERSION)
@@ -39,7 +46,7 @@ DOOM_LICENSE ?=
 DOOM_WAD_DEP :=
 endif
 
-.PHONY: all kernel deps freedoom image iso disks run test clean
+.PHONY: all kernel deps freedoom app image iso disks run test clean
 
 all: image
 
@@ -57,6 +64,28 @@ $(LIMINE_DIR)/BOOTX64.EFI:
 
 freedoom: $(FREEDOOM_WAD)
 
+app: $(HELIX_APP) $(HELIX_SHELL)
+
+$(BUILD_DIR)/hello-app.o: user/hello.c user/include/helix.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(USER_CFLAGS) -c "$<" -o "$@"
+
+$(BUILD_DIR)/shell-app.o: user/shell.c user/include/helix.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(USER_CFLAGS) -c "$<" -o "$@"
+
+$(BUILD_DIR)/libhelix.o: user/libhelix.c user/include/helix.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(USER_CFLAGS) -c "$<" -o "$@"
+
+$(HELIX_APP): $(HELIX_APP_OBJS) user/hello.ld
+	$(CC) -nostdlib -static -no-pie -Wl,-T,user/hello.ld \
+	 -Wl,-z,max-page-size=0x1000 -Wl,--build-id=none $(HELIX_APP_OBJS) -o "$@"
+
+$(HELIX_SHELL): $(HELIX_SHELL_OBJS) user/hello.ld
+	$(CC) -nostdlib -static -no-pie -Wl,-T,user/hello.ld \
+	 -Wl,-z,max-page-size=0x1000 -Wl,--build-id=none $(HELIX_SHELL_OBJS) -o "$@"
+
 $(FREEDOOM_ZIP):
 	@mkdir -p "$(DEPS_DIR)"
 	@echo "[deps] downloading Freedoom $(FREEDOOM_VERSION)"
@@ -71,11 +100,13 @@ $(FREEDOOM_WAD): $(FREEDOOM_ZIP)
 	@test "$$(wc -c < "$@.tmp" | tr -d ' ')" = 28817756 || { rm -f "$@.tmp"; echo "[deps] unexpected Freedoom IWAD size" >&2; exit 1; }
 	@mv "$@.tmp" "$@"
 
-image: kernel deps $(DOOM_WAD_DEP)
+image: kernel deps $(DOOM_WAD_DEP) $(HELIX_APP) $(HELIX_SHELL)
 	@BUILD_DIR="$(BUILD_DIR)" \
 	 KERNEL="$(BUILD_DIR)/kernel" \
 	 LIMINE_DIR="$(LIMINE_DIR)" \
 	 IMAGE="$(IMAGE)" \
+	 HELIX_APP="$(HELIX_APP)" \
+	 HELIX_SHELL="$(HELIX_SHELL)" \
 	 LIMINE_CONF="$(CURDIR)/limine.conf" \
 	 DOOM_WAD="$(DOOM_WAD)" \
 	 DOOM_LICENSE="$(DOOM_LICENSE)" \

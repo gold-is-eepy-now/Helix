@@ -27,7 +27,7 @@ native object model. They are not the foundation.
 | Serial console (16550 UART) | ✅ working (input + output, ANSI colour) |
 | Framebuffer text console (8×8 font) | ✅ working (cursor, backspace, colour) |
 | PS/2 keyboard input | ✅ working (polling, US layout, shift) |
-| Interactive shell (`helixsh`) | ✅ working, machine-tested |
+| Interactive shell (`helix:/#`, 16-entry volatile command history) | ✅ working |
 | Kernel-resident commands (help, sysinfo, cpu, mem, uptime, ...) | ✅ working |
 | Time source (TSC calibrated against the PIT) | ✅ working |
 | Calibrated time, memory map, firmware detection | ✅ working |
@@ -46,8 +46,17 @@ native object model. They are not the foundation.
 | Blocking receive and channel wakeups | ✅ `chanwaittest` passed in QEMU |
 | Reduced-rights capability transfer over channels | ✅ `capxfer` passed in QEMU |
 | Timed channel receive | ✅ `chantimeout` passed in QEMU |
-| Private user address spaces with shared supervisor kernel mappings | 🚧 `asptest` ready for QEMU testing |
-| Ring-3 execution / ELF / syscalls | ⛔ not started (M9) |
+| Private user address spaces with shared supervisor kernel mappings | ✅ `asptest` passed in QEMU |
+| GDT, user descriptors, TSS transition stack | ✅ QEMU boot confirmed |
+| Controlled ring-3 entry/return diagnostic | ✅ `usermodetest` passed with current syscall ABI |
+| Static x86-64 ELF `ET_EXEC` loader and `.hlx` boot module | ✅ `runapp` passed in QEMU |
+| Initial `int 0x80` syscall ABI (`write`, `exit`) | ✅ sample printed and exited in QEMU |
+| Minimal native C runtime (`helix_write`, `helix_exit`) | ✅ `.hlx` sample passed in QEMU |
+| User exception containment | ✅ `usermodetest` invalid-opcode isolation passed in QEMU |
+| First interactive user-space shell | ✅ prompt, commands, clear, and exit passed in QEMU |
+| Automatic user-space init shell | ✅ boot and fallback to maintenance shell passed in QEMU |
+| Helix Edit scratch editor | 🚧 multiline editing; volatile RAM save only |
+| Fast syscall entry and complete native runtime | ⛔ not started (M9) |
 | Isolated driver services, filesystems, networking | ⛔ not started (M10–M12) |
 | Linux / BSD / POSIX compatibility | ⛔ not started (much later) |
 | Doom / FreeDoom | 🧪 WAD boot handoff groundwork; playable port deferred until userland |
@@ -179,7 +188,7 @@ Helix OS 0.9.0-dev.20261018 "Userland"
 
 Type 'help' for a list of commands, 'sysinfo' for system info.
 
-helix> 
+helix:/# <cursor>
 ```
 
 `make test` boots the image, drives the shell over a serial socket, checks 45

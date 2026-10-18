@@ -10,6 +10,7 @@
 #include <stddef.h>
 
 #include "kstring.h"
+#include "gdt.h"
 #include "io.h"
 #include "panic.h"
 #include "pit.h"
@@ -175,10 +176,10 @@ thread_id_t thread_create(thread_entry_t entry, void *argument) {
     memset(frame, 0, sizeof(*frame));
     frame->vector = 48;
     frame->rip = (uint64_t)(uintptr_t)thread_bootstrap;
-    frame->cs = read_cs();
+    frame->cs = GDT_KERNEL_CODE_SELECTOR;
     frame->rflags = 0x202; /* reserved bit 1 + interrupts enabled */
     frame->rsp = stack_top - sizeof(uintptr_t);
-    frame->ss = read_ss();
+    frame->ss = GDT_KERNEL_DATA_SELECTOR;
     thread->rsp = (uint64_t)(uintptr_t)frame;
     guard = irq_guard_enter();
     thread->state = THREAD_READY;

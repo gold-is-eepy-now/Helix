@@ -16,9 +16,12 @@
 #include <limine.h>
 
 #include "console.h"
+#include "boot_app.h"
+#include "commands.h"
 #include "doom_wad.h"
 #include "apic.h"
 #include "fb.h"
+#include "gdt.h"
 #include "heap.h"
 #include "idt.h"
 #include "io.h"
@@ -36,6 +39,7 @@
 #include "time.h"
 #include "version.h"
 #include "vmm.h"
+#include "usermode.h"
 
 /* -------------------------------------------------------------------------
  * Limine protocol requests
@@ -150,6 +154,7 @@ static void kernel_main_continue(void) {
     console_write("[helix] clock:   ");
     console_write(time_available() ? "TSC calibrated\n" : "unavailable\n");
     bool doom_wad_found = false;
+    size_t helix_app_count = 0;
     if (module_request.response != NULL) {
         for (uint64_t i = 0; i < module_request.response->module_count; ++i) {
             struct limine_file *module = module_request.response->modules[i];
@@ -173,6 +178,18 @@ static void kernel_main_continue(void) {
                         doom_wad_found = true;
                         doom_wad_set(module->address, (size_t)module->size);
                     }
+                    size_t name_len = 0;
+                    while (name[name_len] != '\0') name_len++;
+                    if (name_len >= 4 &&
+                        name[name_len - 4] == '.' &&
+                        name[name_len - 3] == 'h' &&
+                        name[name_len - 2] == 'l' &&
+                        name[name_len - 1] == 'x' &&
+                        module->address != NULL && module->size != 0) {
+                        if (boot_app_set(name, module->address,
+                                         (size_t)module->size))
+                            helix_app_count++;
+                    }
                 }
             }
         }
@@ -180,9 +197,17 @@ static void kernel_main_continue(void) {
     console_write("[helix] doom:    ");
     console_write(doom_wad_found ? "IWAD module found (engine port in progress)\n"
                                  : "no IWAD module; set DOOM_WAD when building\n");
+    console_write("[helix] app:     ");
+    if (helix_app_count == 0) console_write("no .hlx boot module\n");
+    else { console_write_dec(helix_app_count); console_write(" .hlx boot module(s) found\n"); }
     console_reset_color();
     console_putc('\n');
 
+    if (commands_start_init()) {
+        console_write("\nInitial user process returned; entering maintenance shell.\n");
+    } else {
+        console_write("No user init app; entering kernel maintenance shell.\n");
+    }
     console_write("Type 'help' for a list of commands, 'sysinfo' for system info.\n\n");
     shell_run();
     kernel_idle_loop();
@@ -222,9 +247,15 @@ void kmain(void) {
     /* Adopt page tables, install exceptions, map a protected stack, then move
      * all ordinary kernel execution onto it before enabling interrupts. */
     vmm_init(hhdm_offset);
-    idt_init();
     if (!kernel_stack_init(hhdm_offset)) {
         panic("failed to establish NX kernel stack");
     }
+    if (!gdt_init(KERNEL_STACK_TOP)) {
+        panic("failed to establish GDT and TSS");
+    }
+    if (!usermode_syscall_init()) {
+        panic("CPU does not support native syscall entry");
+    }
+    idt_init();
     kernel_stack_enter(KERNEL_STACK_TOP, kernel_main_continue);
 }

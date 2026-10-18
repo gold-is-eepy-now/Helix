@@ -28,6 +28,9 @@ static uint32_t g_bg;
 static bool g_cursor_drawn;
 static bool g_graphics_mode;
 
+static void draw_cursor(void);
+static void erase_cursor(void);
+
 void fb_init(struct limine_framebuffer *fb) {
     g_fb = fb;
     g_cursor_x = MARGIN_X;
@@ -96,6 +99,32 @@ void fb_clear(uint32_t color) {
     g_cursor_x = MARGIN_X;
     g_cursor_y = MARGIN_Y;
     g_cursor_drawn = false;
+}
+
+void fb_cursor_to(size_t row, size_t column) {
+    if (!fb_ready() || g_graphics_mode) return;
+    erase_cursor();
+    size_t max_y = g_fb->height > GLYPH_H ? g_fb->height - GLYPH_H : 0;
+    size_t y = MARGIN_Y + row * LINE_H;
+    if (y > max_y) y = max_y - (max_y % LINE_H);
+    size_t max_x = g_fb->width > GLYPH_W ? g_fb->width - GLYPH_W : 0;
+    size_t x = MARGIN_X + column * GLYPH_W;
+    if (x > max_x) x = max_x - (max_x % GLYPH_W);
+    g_cursor_x = x;
+    g_cursor_y = y;
+    draw_cursor();
+}
+
+void fb_clear_current_line(void) {
+    if (!fb_ready() || g_graphics_mode) return;
+    erase_cursor();
+    size_t end_y = g_cursor_y + LINE_H;
+    if (end_y > g_fb->height) end_y = g_fb->height;
+    for (size_t y = g_cursor_y; y < end_y; y++) {
+        for (size_t x = 0; x < g_fb->width; x++) put_pixel(x, y, g_bg);
+    }
+    g_cursor_x = MARGIN_X;
+    draw_cursor();
 }
 
 bool fb_present_rgb(const uint32_t *pixels, uint32_t width, uint32_t height) {
