@@ -10,6 +10,10 @@
 
 typedef uint32_t handle_t;
 
+/* Handles encode a 16-bit slot generation. A slot is retired instead of
+ * wrapping its generation, preventing old stale handles from becoming valid.
+ */
+
 typedef enum {
     OBJECT_TYPE_NONE = 0,
     OBJECT_TYPE_EVENT,

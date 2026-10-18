@@ -27,4 +27,13 @@ object_t *capability_resolve(handle_table_t *table, handle_t capability,
 
 bool capability_is_revoked(handle_table_t *table, handle_t capability);
 
+/* Trusted kernel code can mint a CONTROL capability over a page-aligned
+ * virtual-memory range. The guarded operation below can change permissions
+ * only for pages inside that range.
+ */
+handle_t capability_create_memory_region(handle_table_t *table,
+                                         uint64_t base, uint64_t size);
+bool capability_protect_memory(handle_table_t *table, handle_t capability,
+                               uint64_t virtual_address, uint64_t flags);
+
 #endif /* HELIX_CAPABILITY_H */

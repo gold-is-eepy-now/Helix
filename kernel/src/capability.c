@@ -6,6 +6,7 @@
 #include "capability.h"
 
 #include "heap.h"
+#include "vmm.h"
 
 typedef struct {
     uint32_t references;
@@ -17,6 +18,11 @@ typedef struct {
     uint32_t rights;
     revocation_domain_t *domain;
 } capability_payload_t;
+
+typedef struct {
+    uint64_t base;
+    uint64_t size;
+} memory_region_payload_t;
 
 static void domain_release(revocation_domain_t *domain) {
     if (domain == NULL || domain->references == 0) return;
@@ -154,4 +160,42 @@ bool capability_is_revoked(handle_table_t *table, handle_t capability) {
                    payload->domain->revoked;
     object_release(cap_object);
     return revoked;
+}
+
+handle_t capability_create_memory_region(handle_table_t *table,
+                                         uint64_t base, uint64_t size) {
+    if (table == NULL || size == 0 || (base & 0xfffu) != 0 ||
+        (size & 0xfffu) != 0 || base > UINT64_MAX - size) return 0;
+
+    object_t *memory = object_create(OBJECT_TYPE_MEMORY,
+                                     sizeof(memory_region_payload_t), NULL);
+    if (memory == NULL) return 0;
+    memory_region_payload_t *region = object_payload(memory);
+    region->base = base;
+    region->size = size;
+
+    handle_t result = capability_install(table, memory,
+        OBJECT_RIGHT_READ | OBJECT_RIGHT_CONTROL,
+        NULL, true, OBJECT_RIGHT_READ | OBJECT_RIGHT_DUPLICATE |
+                    OBJECT_RIGHT_CONTROL | OBJECT_RIGHT_INSPECT);
+    object_release(memory);
+    return result;
+}
+
+bool capability_protect_memory(handle_table_t *table, handle_t capability,
+                               uint64_t virtual_address, uint64_t flags) {
+    const uint64_t allowed_flags = VMM_PRESENT | VMM_WRITE | VMM_USER | VMM_NX;
+    if ((virtual_address & 0xfffu) != 0 || (flags & ~allowed_flags) != 0)
+        return false;
+
+    object_t *memory = capability_resolve(table, capability,
+        OBJECT_RIGHT_CONTROL, OBJECT_TYPE_MEMORY);
+    if (memory == NULL) return false;
+
+    memory_region_payload_t *region = object_payload(memory);
+    bool within_region = region != NULL && virtual_address >= region->base &&
+        virtual_address - region->base < region->size;
+    bool result = within_region && vmm_protect(virtual_address, flags);
+    object_release(memory);
+    return result;
 }

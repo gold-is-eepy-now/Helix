@@ -113,6 +113,17 @@ void handle_table_init(handle_table_t *table) {
     }
 }
 
+/* Handles devote 16 bits to a slot generation. Retire a slot when that
+ * generation would wrap so an old stale handle can never become valid again.
+ */
+static void advance_generation(handle_entry_t *entry) {
+    if (entry->generation == UINT16_MAX) {
+        entry->generation = 0; /* permanently retired */
+    } else {
+        entry->generation++;
+    }
+}
+
 void handle_table_close_all(handle_table_t *table) {
     if (table == NULL) return;
     for (size_t i = 0; i < HANDLE_TABLE_CAPACITY; i++) {
@@ -121,8 +132,7 @@ void handle_table_close_all(handle_table_t *table) {
         object_t *object = entry->object;
         entry->object = NULL;
         entry->rights = 0;
-        entry->generation++;
-        if (entry->generation == 0) entry->generation = 1;
+        advance_generation(entry);
         object_release(object);
     }
 }
@@ -148,7 +158,7 @@ handle_t handle_create(handle_table_t *table, object_t *object, uint32_t rights)
         (rights & ~OBJECT_RIGHT_ALL) != 0) return 0;
     for (size_t i = 0; i < HANDLE_TABLE_CAPACITY; i++) {
         handle_entry_t *entry = &table->entries[i];
-        if (entry->object != NULL) continue;
+        if (entry->object != NULL || entry->generation == 0) continue;
         if (!object_retain(object)) return 0;
         entry->object = object;
         entry->rights = rights;
@@ -181,8 +191,7 @@ bool handle_close(handle_table_t *table, handle_t handle) {
     object_t *object = entry->object;
     entry->object = NULL;
     entry->rights = 0;
-    entry->generation++;
-    if (entry->generation == 0) entry->generation = 1;
+    advance_generation(entry);
     object_release(object);
     return true;
 }

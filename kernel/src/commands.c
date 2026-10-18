@@ -529,6 +529,50 @@ static void cmd_captest(int argc, char **argv) {
                                            OBJECT_TYPE_NONE) == NULL,
                         "revoke parent and invalidate every descendant");
 
+    const uint64_t protected_page = 0xFFFF900000001000ULL;
+    uintptr_t protected_frame = 0;
+    bool page_mapped = false;
+    uint64_t mapped_phys = 0;
+    bool page_available = !vmm_get_mapping(protected_page, &mapped_phys, NULL);
+    if (page_available) {
+        protected_frame = pmm_alloc_frame();
+        page_mapped = protected_frame != 0 &&
+            vmm_map(protected_page, protected_frame, VMM_PRESENT | VMM_WRITE);
+    }
+    handle_t memory_cap = page_mapped
+        ? capability_create_memory_region(&table, protected_page, PAGE_SIZE) : 0;
+    handle_t read_only_cap = memory_cap != 0
+        ? capability_derive(&table, memory_cap, OBJECT_RIGHT_READ) : 0;
+    bool denied_missing = !capability_protect_memory(&table, 0, protected_page,
+                                                      VMM_PRESENT);
+    bool denied_reduced = read_only_cap != 0 &&
+        !capability_protect_memory(&table, read_only_cap, protected_page,
+                                   VMM_PRESENT);
+    bool denied_wrong_type = !capability_protect_memory(&table, cap,
+        protected_page, VMM_PRESENT);
+    bool denied_outside = memory_cap != 0 &&
+        !capability_protect_memory(&table, memory_cap,
+            protected_page + PAGE_SIZE, VMM_PRESENT);
+    bool allowed_inside = memory_cap != 0 &&
+        capability_protect_memory(&table, memory_cap, protected_page,
+                                  VMM_PRESENT | VMM_NX);
+    uint64_t protected_flags = 0;
+    bool flags_applied = vmm_get_mapping(protected_page, NULL, &protected_flags) &&
+        (protected_flags & VMM_NX) != 0 && (protected_flags & VMM_WRITE) == 0;
+    ok &= objtest_check(page_mapped && memory_cap != 0 && read_only_cap != 0 &&
+                        denied_missing && denied_reduced && denied_wrong_type,
+                        "memory protection rejects absent and insufficient capabilities");
+    ok &= objtest_check(denied_outside && allowed_inside && flags_applied,
+                        "memory capability confines page protection to its range");
+    bool memory_revoked = memory_cap != 0 && capability_revoke(&table, memory_cap);
+    bool denied_revoked = memory_revoked &&
+        !capability_protect_memory(&table, memory_cap, protected_page,
+                                   VMM_PRESENT | VMM_WRITE);
+    ok &= objtest_check(denied_revoked,
+                        "revoked memory capability blocks protected operation");
+    if (page_mapped) vmm_unmap(protected_page);
+    if (protected_frame != 0) pmm_free_frame(protected_frame);
+
     handle_table_close_all(&table);
     ok &= objtest_check(object_count() == before && g_objtest_destroyed == 1,
                         "release capabilities and target at final close");

@@ -133,20 +133,26 @@ objects are destroyed exactly when their final reference is released. Document
 handle ownership and the synchronization assumptions before introducing
 concurrent callers in M7.
 
-## M6 — Capabilities 🚧
+## M6 — Capabilities ✅
 
 - ✅ Capability objects bind a target object to an explicit rights subset.
 - ✅ Derivation only reduces rights; revoking a parent invalidates its subtree.
 - ✅ `capability_resolve()` checks revocation, requested rights and target type.
 - ✅ `captest` rejects rights enlargement and verifies subtree revocation.
-- ⛔ Capability transfer over channels (M8).
-- 🚧 Migrate privileged operations to require capabilities and establish
-  least-privilege defaults as those operations are added.
+- ✅ Handle slots retire at generation exhaustion instead of wrapping and
+  making an old stale handle valid again.
+- ✅ A memory-range CONTROL capability gates page-permission changes; `captest`
+  checks absent, insufficient, wrong-type, out-of-range, successful, and
+  revoked authority. Mapping inspection now reports NX permissions as well.
+- ✅ Memory-protection control is gated by a memory-range capability. New
+  privileged service APIs must use capability checks and least-privilege
+  defaults as they are introduced.
+- ⏸ Capability transfer over channels (M8).
 
-**M6 exit gate:** self-tests must prove rights cannot be enlarged by
-derivation, revoked capabilities and descendants cannot resolve their targets,
-and kernel operations reject missing or insufficient capabilities. Channel
-transfer remains sequenced with M8.
+**M6 exit gate (passed):** `captest` proves rights cannot be enlarged by
+derivation, revoking a parent invalidates its descendants, and the protected
+memory operation rejects missing, insufficient, wrong-type, out-of-range, and
+revoked capabilities. Channel transfer remains sequenced with M8.
 
 ## M7 — Threads and scheduler
 

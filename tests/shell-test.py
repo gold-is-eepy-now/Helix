@@ -246,6 +246,12 @@ def main():
               "derived capability cannot revoke its parent: ok")
         check("revoking parent invalidates descendants",
               "revoke parent and invalidate every descendant: ok")
+        check("memory protection rejects missing and insufficient capabilities",
+              "memory protection rejects absent and insufficient capabilities: ok")
+        check("memory capability confines protection to its range",
+              "memory capability confines page protection to its range: ok")
+        check("revoked capability blocks protected memory operation",
+              "revoked memory capability blocks protected operation: ok")
         check("M6 capability self-test passes",
               "M6 capability self-test: PASS")
         ser.send("objects\n")

@@ -156,7 +156,7 @@ bool vmm_get_mapping(uint64_t virt, uint64_t *phys_out, uint64_t *flags_out) {
         *phys_out = *pte & ADDR_MASK;
     }
     if (flags_out != NULL) {
-        *flags_out = *pte & 0xFFFULL;
+        *flags_out = *pte & FLAG_MASK;
     }
     return true;
 }
