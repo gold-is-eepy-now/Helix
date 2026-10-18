@@ -174,9 +174,11 @@ and user-space scheduling remain future work.
 
 ## M8 — IPC and channels
 
-- 🚧 Bounded, non-blocking FIFO channels are first-class, rights-checked objects.
-- ⛔ Synchronous and asynchronous message passing.
-- ⛔ Blocking receive, timeouts, and wake-ups tied to the scheduler.
+- ✅ Bounded, non-blocking FIFO channels are rights-checked kernel objects;
+  `chantest` passed in QEMU.
+- 🚧 Blocking receive and scheduler wake-ups are implemented; `chanwaittest`
+  needs machine testing.
+- ⛔ Capability transfer, timeouts, and cross-process message passing remain.
 
 ## M9 — User space
 

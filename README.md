@@ -12,8 +12,8 @@ native object model. They are not the foundation.
 > Status: **M3–M7 are complete; M8 IPC is in progress.** The kernel owns its
 > page tables (`map`/`unmap`/`protect`), handles CPU exceptions with readable
 > reports, schedules guarded kernel threads, and takes a 100 Hz timer
-> interrupt. The first M8 slice adds bounded, non-blocking channels; blocking
-> receive and capability transfer are still ahead.
+> interrupt. M8 now has bounded, rights-checked channels and blocking receive
+> with scheduler wakeups; capability transfer and timeouts remain ahead.
 
 ---
 
@@ -41,8 +41,8 @@ native object model. They are not the foundation.
 | Kernel threads, guarded stacks and cooperative scheduling | ✅ working, machine-tested (M7) |
 | PIT timer preemption | ✅ working, machine-tested (M7) |
 | Single-CPU preemption guards for shared kernel state | ✅ implemented (M7) |
-| Bounded, rights-checked kernel channels | 🚧 first M8 slice; `chantest` available |
-| Blocking IPC and channel wakeups | ⛔ planned (M8) |
+| Bounded, rights-checked kernel channels | ✅ `chantest` passed in QEMU |
+| Blocking receive and channel wakeups | 🚧 `chanwaittest` ready for QEMU testing |
 | User space / ELF / syscalls | ⛔ not started (M9) |
 | Isolated driver services, filesystems, networking | ⛔ not started (M10–M12) |
 | Linux / BSD / POSIX compatibility | ⛔ not started (much later) |
@@ -161,7 +161,7 @@ HELIX OS
 Native Object Kernel
 Boot successful.
 
-Helix OS 0.7.0-dev.20261018 "Channels"
+Helix OS 0.8.0-dev.20261018 "IPC"
 
 [helix] console: serial + framebuffer
 [helix] memory:  462 MiB usable

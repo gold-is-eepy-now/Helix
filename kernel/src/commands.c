@@ -454,6 +454,101 @@ static void cmd_chantest(int argc, char **argv) {
                      : "  M8 channel self-test: FAIL\n");
 }
 
+typedef struct {
+    handle_table_t *table;
+    handle_t receive_handle;
+    volatile bool started;
+    volatile bool finished;
+    channel_result_t result;
+    size_t size;
+    char data[16];
+} channel_wait_context_t;
+
+static void channel_wait_worker(void *argument) {
+    channel_wait_context_t *context = argument;
+    context->started = true;
+    context->result = channel_receive_wait(context->table,
+        context->receive_handle, context->data, sizeof(context->data),
+        &context->size);
+    context->finished = true;
+}
+
+static bool channel_waiter_parked(channel_wait_context_t *context) {
+    for (uint32_t attempt = 0; attempt < 16; attempt++) {
+        bool switched = thread_yield();
+        if (context->finished) return false;
+        if (!switched && context->started) return true;
+    }
+    return false;
+}
+
+static void cmd_chanwaittest(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    console_write("Blocking IPC self-test\n");
+    uint64_t before = object_count();
+    handle_table_t table;
+    handle_table_init(&table);
+    handle_t sender = 0;
+    handle_t receiver = 0;
+    bool created = channel_create_pair(&table, 1, &sender, &receiver);
+    bool ok = objtest_check(created, "create wait-test channel");
+    if (!created) {
+        console_write("  M8 blocking IPC self-test: FAIL\n");
+        return;
+    }
+
+    char byte = 0;
+    bool no_runnable = channel_receive_wait(&table, receiver, &byte,
+        sizeof(byte), NULL) == CHANNEL_WOULD_BLOCK;
+    ok &= objtest_check(no_runnable,
+                        "avoid sleeping when no other thread can wake caller");
+
+    channel_wait_context_t context = {
+        .table = &table,
+        .receive_handle = receiver,
+    };
+    thread_id_t worker = thread_create(channel_wait_worker, &context);
+    bool started = worker != 0 && channel_waiter_parked(&context);
+    ok &= objtest_check(started, "receiver thread blocks on an empty channel");
+    const char payload[] = "wake";
+    bool sent = started && channel_send(&table, sender, payload,
+                                        sizeof(payload)) == CHANNEL_OK;
+    while (started && !context.finished) {
+        if (!thread_yield()) break;
+    }
+    bool received = sent && context.finished && context.result == CHANNEL_OK &&
+        context.size == sizeof(payload) && str_eq(context.data, payload);
+    (void)thread_yield();
+    ok &= objtest_check(received, "send wakes receiver with the queued message");
+    (void)handle_close(&table, sender);
+    (void)handle_close(&table, receiver);
+
+    sender = 0;
+    receiver = 0;
+    bool close_pair = channel_create_pair(&table, 1, &sender, &receiver);
+    channel_wait_context_t close_context = {
+        .table = &table,
+        .receive_handle = receiver,
+    };
+    worker = close_pair ? thread_create(channel_wait_worker, &close_context) : 0;
+    started = worker != 0 && channel_waiter_parked(&close_context);
+    bool closed_sender = started && handle_close(&table, sender);
+    while (started && !close_context.finished) {
+        if (!thread_yield()) break;
+    }
+    bool close_woke = closed_sender && close_context.finished &&
+                      close_context.result == CHANNEL_CLOSED;
+    (void)thread_yield();
+    ok &= objtest_check(close_woke, "closing final sender wakes blocked receiver");
+    (void)handle_close(&table, receiver);
+    handle_table_close_all(&table);
+    ok &= objtest_check(object_count() == before,
+                        "blocking IPC test releases all channel objects");
+    console_write(ok ? "  M8 blocking IPC self-test: PASS\n"
+                     : "  M8 blocking IPC self-test: FAIL\n");
+}
+
 static void cmd_objtest(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -874,6 +969,7 @@ const command_t helix_commands[] = {
     {"objtest", "exercise objects and handles",          cmd_objtest},
     {"captest", "exercise capability rights and revocation", cmd_captest},
     {"chantest", "exercise bounded IPC channels", cmd_chantest},
+    {"chanwaittest", "exercise blocking receive and wakeups", cmd_chanwaittest},
     {"threadtest", "exercise kernel threads and round-robin yield", cmd_threadtest},
     {"ticks",   "show the PIT timer tick count",         cmd_ticks},
     {"swint",   "software-trigger the timer vector",      cmd_swint},

@@ -19,6 +19,7 @@ typedef enum {
     CHANNEL_BUFFER_SMALL,
     CHANNEL_CLOSED,
     CHANNEL_DENIED,
+    CHANNEL_WOULD_BLOCK,
 } channel_result_t;
 
 /* Create a bounded FIFO pair with distinct send-only and receive-only handles.
@@ -31,5 +32,11 @@ channel_result_t channel_send(handle_table_t *table, handle_t channel,
 channel_result_t channel_receive(handle_table_t *table, handle_t channel,
                                  void *buffer, size_t buffer_size,
                                  size_t *message_size);
+/* Wait for a message when the queue is empty. Returns CHANNEL_WOULD_BLOCK if
+ * no other kernel thread is runnable to wake this caller.
+ */
+channel_result_t channel_receive_wait(handle_table_t *table, handle_t channel,
+                                     void *buffer, size_t buffer_size,
+                                     size_t *message_size);
 
 #endif /* HELIX_CHANNEL_H */

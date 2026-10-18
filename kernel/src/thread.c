@@ -24,6 +24,7 @@ typedef enum {
     THREAD_BUILDING,
     THREAD_READY,
     THREAD_RUNNING,
+    THREAD_BLOCKED,
     THREAD_DEAD,
 } thread_state_t;
 
@@ -183,6 +184,44 @@ bool thread_yield(void) {
     return g_switches != before;
 }
 
+bool thread_block_current(void) {
+    if (!g_ready) return false;
+    irq_guard_t guard = irq_guard_enter();
+    bool runnable = false;
+    for (uint32_t i = 0; i < KERNEL_THREAD_MAX; i++) {
+        if (i != g_current && g_threads[i].state == THREAD_READY) {
+            runnable = true;
+            break;
+        }
+    }
+    if (!runnable || g_threads[g_current].state != THREAD_RUNNING) {
+        irq_guard_leave(&guard);
+        return false;
+    }
+
+    g_threads[g_current].state = THREAD_BLOCKED;
+    __asm__ volatile("int $48" : : : "memory", "cc");
+    irq_guard_leave(&guard);
+    return true;
+}
+
+bool thread_wake(thread_id_t id) {
+    IRQ_GUARD;
+    if (!g_ready || id == 0) return false;
+    for (uint32_t i = 0; i < KERNEL_THREAD_MAX; i++) {
+        kernel_thread_t *thread = &g_threads[i];
+        if (thread->id != id || thread->state != THREAD_BLOCKED) continue;
+        thread->state = THREAD_READY;
+        return true;
+    }
+    return false;
+}
+
+thread_id_t thread_current_id(void) {
+    IRQ_GUARD;
+    return g_ready ? g_threads[g_current].id : 0;
+}
+
 __attribute__((noreturn)) void thread_exit(void) {
     if (!g_ready || g_current == 0) panic("bootstrap thread cannot exit");
     g_threads[g_current].state = THREAD_DEAD;
@@ -199,9 +238,11 @@ registers_t *thread_schedule(registers_t *interrupted, bool timer_tick) {
 
     uint32_t previous_index = g_current;
     kernel_thread_t *previous = &g_threads[previous_index];
-    if (previous->state != THREAD_DEAD) {
+    if (previous->state == THREAD_RUNNING) {
         previous->rsp = (uint64_t)(uintptr_t)interrupted;
         previous->state = THREAD_READY;
+    } else if (previous->state == THREAD_BLOCKED) {
+        previous->rsp = (uint64_t)(uintptr_t)interrupted;
     }
 
     uint32_t next_index = previous_index;
@@ -234,7 +275,8 @@ uint32_t thread_live_count(void) {
     if (!g_ready) return 0;
     for (uint32_t i = 0; i < KERNEL_THREAD_MAX; i++) {
         if (g_threads[i].state == THREAD_READY ||
-            g_threads[i].state == THREAD_RUNNING) count++;
+            g_threads[i].state == THREAD_RUNNING ||
+            g_threads[i].state == THREAD_BLOCKED) count++;
     }
     return count;
 }

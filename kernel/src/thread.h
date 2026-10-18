@@ -20,6 +20,12 @@ typedef void (*thread_entry_t)(void *argument);
 bool thread_system_init(uint64_t hhdm_offset);
 thread_id_t thread_create(thread_entry_t entry, void *argument);
 bool thread_yield(void);
+/* Block the current thread only when another thread is runnable. The caller
+ * may hold a single-CPU IRQ guard; the interrupted flags are saved per thread.
+ */
+bool thread_block_current(void);
+bool thread_wake(thread_id_t id);
+thread_id_t thread_current_id(void);
 __attribute__((noreturn)) void thread_exit(void);
 registers_t *thread_schedule(registers_t *interrupted, bool timer_tick);
 uint32_t thread_live_count(void);

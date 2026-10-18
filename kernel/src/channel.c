@@ -1,15 +1,11 @@
-/* channel.c — bounded, preemption-safe, non-blocking message channels.
- *
- * Blocking receive and waiter queues will build on the scheduler's blocked
- * thread state in a later M8 slice. This first slice is a bounded FIFO with
- * rights checked through the object/handle manager.
- */
+/* channel.c — bounded kernel message channels with optional blocking receive. */
 #include "channel.h"
 
 #include "heap.h"
 #include "kstring.h"
 #include "object.h"
 #include "sync.h"
+#include "thread.h"
 
 typedef struct {
     size_t size;
@@ -23,6 +19,8 @@ typedef struct {
     uint32_t endpoints;
     uint32_t senders;
     uint32_t receivers;
+    uint32_t waiter_count;
+    thread_id_t waiters[KERNEL_THREAD_MAX];
     channel_message_t messages[];
 } channel_core_t;
 
@@ -32,13 +30,43 @@ typedef struct {
     bool can_receive;
 } channel_endpoint_t;
 
+static void wake_waiters(channel_core_t *core, bool all) {
+    while (core->waiter_count != 0) {
+        thread_id_t id = core->waiters[0];
+        for (uint32_t i = 1; i < core->waiter_count; i++)
+            core->waiters[i - 1] = core->waiters[i];
+        core->waiter_count--;
+        if (thread_wake(id) && !all) break;
+    }
+}
+
+static bool add_waiter(channel_core_t *core, thread_id_t id) {
+    if (id == 0 || core->waiter_count == KERNEL_THREAD_MAX) return false;
+    for (uint32_t i = 0; i < core->waiter_count; i++)
+        if (core->waiters[i] == id) return true;
+    core->waiters[core->waiter_count++] = id;
+    return true;
+}
+
+static void remove_waiter(channel_core_t *core, thread_id_t id) {
+    for (uint32_t i = 0; i < core->waiter_count; i++) {
+        if (core->waiters[i] != id) continue;
+        for (uint32_t j = i + 1; j < core->waiter_count; j++)
+            core->waiters[j - 1] = core->waiters[j];
+        core->waiter_count--;
+        return;
+    }
+}
+
 static void channel_endpoint_destroy(object_t *object, void *payload_ptr) {
     (void)object;
     channel_endpoint_t *endpoint = payload_ptr;
     if (endpoint == NULL || endpoint->core == NULL) return;
     channel_core_t *core = endpoint->core;
-    if (endpoint->can_send && core->senders != 0) core->senders--;
-    if (endpoint->can_receive && core->receivers != 0) core->receivers--;
+    if (endpoint->can_send && core->senders != 0 && --core->senders == 0)
+        wake_waiters(core, true);
+    if (endpoint->can_receive && core->receivers != 0 && --core->receivers == 0)
+        wake_waiters(core, true);
     if (core->endpoints != 0 && --core->endpoints == 0) kfree(core);
 }
 
@@ -128,6 +156,7 @@ channel_result_t channel_send(handle_table_t *table, handle_t channel,
     slot->size = size;
     if (size != 0) memcpy(slot->data, message, size);
     core->count++;
+    wake_waiters(core, false);
     object_release(object);
     return CHANNEL_OK;
 }
@@ -164,4 +193,42 @@ channel_result_t channel_receive(handle_table_t *table, handle_t channel,
     core->count--;
     object_release(object);
     return CHANNEL_OK;
+}
+
+channel_result_t channel_receive_wait(handle_table_t *table, handle_t channel,
+                                      void *buffer, size_t buffer_size,
+                                      size_t *message_size) {
+    for (;;) {
+        channel_result_t result = channel_receive(table, channel, buffer,
+                                                   buffer_size, message_size);
+        if (result != CHANNEL_EMPTY) return result;
+
+        IRQ_GUARD;
+        object_t *object = handle_get(table, channel, OBJECT_RIGHT_READ,
+                                      OBJECT_TYPE_CHANNEL);
+        channel_endpoint_t *endpoint = object_payload(object);
+        channel_core_t *core = endpoint != NULL && endpoint->can_receive
+            ? endpoint->core : NULL;
+        if (core == NULL) {
+            object_release(object);
+            return CHANNEL_DENIED;
+        }
+        /* Recheck with interrupts disabled to close the empty-to-sleep race. */
+        if (core->count != 0 || core->senders == 0) {
+            object_release(object);
+            continue;
+        }
+
+        thread_id_t id = thread_current_id();
+        if (!add_waiter(core, id)) {
+            object_release(object);
+            return CHANNEL_WOULD_BLOCK;
+        }
+        object_release(object);
+        if (!thread_block_current()) {
+            remove_waiter(core, id);
+            return CHANNEL_WOULD_BLOCK;
+        }
+        /* A send or endpoint close woke us. Retry the queue and closure checks. */
+    }
 }
