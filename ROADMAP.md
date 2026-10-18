@@ -180,7 +180,9 @@ and user-space scheduling remain future work.
 - ✅ Blocking receive and scheduler wake-ups; `chanwaittest` passed in QEMU.
 - 🚧 Reduced-rights capability transfer between kernel handle tables is
   implemented; `capxfer` needs machine testing.
-- ⛔ Timeouts and cross-process message passing remain.
+- 🚧 PIT-tick receive timeouts are implemented; `chantimeout` needs machine
+  testing.
+- ⛔ Cross-process message passing remains for the user-space/process work.
 
 ## M9 — User space
 

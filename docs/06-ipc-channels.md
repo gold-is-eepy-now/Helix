@@ -17,6 +17,8 @@ send handle and one receive handle in a handle table. `channel_send()` and
 calling kernel thread while the queue is empty and returns `CHANNEL_WOULD_BLOCK`
 if no other thread is runnable. A send wakes one waiter; closing the final
 sender or receiver wakes all waiters so they can observe closure.
+`channel_receive_timeout()` adds a deadline expressed in PIT ticks at 100 Hz;
+an empty queue at the deadline returns `CHANNEL_TIMED_OUT`.
 
 Operations are protected against PIT preemption on the current single CPU.
 `chantest` covers queue limits, endpoint rights, FIFO reads, closure and
@@ -26,4 +28,5 @@ in QEMU. `channel_send_capability()` derives a capability with reduced object
 rights before queueing it, and `channel_receive_capability()` creates the new
 handle in the receiver's table. `capxfer` checks this path and is awaiting
 machine testing. Timeouts and cross-process IPC remain future work. These
-queues are kernel objects and do not yet provide user-space IPC.
+queues are kernel objects and do not yet provide user-space IPC. `chantimeout`
+checks the deadline path and still needs machine testing.

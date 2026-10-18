@@ -23,6 +23,7 @@ typedef enum {
     CHANNEL_CAPABILITY_PRESENT,
     CHANNEL_NO_CAPABILITY,
     CHANNEL_HANDLE_TABLE_FULL,
+    CHANNEL_TIMED_OUT,
 } channel_result_t;
 
 /* Create a bounded FIFO pair with distinct send-only and receive-only handles.
@@ -53,6 +54,12 @@ channel_result_t channel_receive(handle_table_t *table, handle_t channel,
 channel_result_t channel_receive_wait(handle_table_t *table, handle_t channel,
                                      void *buffer, size_t buffer_size,
                                      size_t *message_size);
+/* Timeout is expressed in PIT ticks (100 ticks per second). */
+channel_result_t channel_receive_timeout(handle_table_t *table,
+                                         handle_t channel,
+                                         void *buffer, size_t buffer_size,
+                                         size_t *message_size,
+                                         uint64_t timeout_ticks);
 channel_result_t channel_receive_capability(handle_table_t *table,
                                             handle_t channel,
                                             handle_t *capability);

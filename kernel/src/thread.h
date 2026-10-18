@@ -24,6 +24,7 @@ bool thread_yield(void);
  * may hold a single-CPU IRQ guard; the interrupted flags are saved per thread.
  */
 bool thread_block_current(void);
+bool thread_block_current_until_tick(uint64_t deadline_tick);
 bool thread_wake(thread_id_t id);
 thread_id_t thread_current_id(void);
 __attribute__((noreturn)) void thread_exit(void);

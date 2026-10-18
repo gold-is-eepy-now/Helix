@@ -13,8 +13,8 @@ native object model. They are not the foundation.
 > page tables (`map`/`unmap`/`protect`), handles CPU exceptions with readable
 > reports, schedules guarded kernel threads, and takes a 100 Hz timer
 > interrupt. M8 now has bounded, rights-checked channels, blocking receive
-> with scheduler wakeups, and reduced-rights capability transfer. Timeouts and
-> cross-process messaging remain ahead.
+> with scheduler wakeups, reduced-rights capability transfer, and PIT-tick
+> receive timeouts. Cross-process messaging remains ahead.
 
 ---
 
@@ -45,6 +45,7 @@ native object model. They are not the foundation.
 | Bounded, rights-checked kernel channels | ✅ `chantest` passed in QEMU |
 | Blocking receive and channel wakeups | ✅ `chanwaittest` passed in QEMU |
 | Reduced-rights capability transfer over channels | 🚧 `capxfer` ready for QEMU testing |
+| Timed channel receive | 🚧 `chantimeout` ready for QEMU testing |
 | User space / ELF / syscalls | ⛔ not started (M9) |
 | Isolated driver services, filesystems, networking | ⛔ not started (M10–M12) |
 | Linux / BSD / POSIX compatibility | ⛔ not started (much later) |

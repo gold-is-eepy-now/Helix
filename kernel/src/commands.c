@@ -549,6 +549,60 @@ static void cmd_chanwaittest(int argc, char **argv) {
                      : "  M8 blocking IPC self-test: FAIL\n");
 }
 
+typedef struct {
+    handle_table_t *table;
+    handle_t receive_handle;
+    volatile bool finished;
+    channel_result_t result;
+} channel_timeout_context_t;
+
+static void channel_timeout_worker(void *argument) {
+    channel_timeout_context_t *context = argument;
+    uint8_t byte;
+    context->result = channel_receive_timeout(context->table,
+        context->receive_handle, &byte, sizeof(byte), NULL, 3);
+    context->finished = true;
+}
+
+static void cmd_chantimeout(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    console_write("IPC timeout self-test\n");
+    uint64_t before = object_count();
+    handle_table_t table;
+    handle_table_init(&table);
+    handle_t sender = 0;
+    handle_t receiver = 0;
+    bool created = channel_create_pair(&table, 1, &sender, &receiver);
+    bool ok = objtest_check(created, "create timeout-test channel");
+    if (!created) {
+        console_write("  M8 timeout self-test: FAIL\n");
+        return;
+    }
+
+    uint64_t start = pit_ticks();
+    channel_timeout_context_t context = {
+        .table = &table,
+        .receive_handle = receiver,
+    };
+    thread_id_t worker = thread_create(channel_timeout_worker, &context);
+    uint64_t guard_deadline = start + 100;
+    while (worker != 0 && !context.finished && pit_ticks() < guard_deadline)
+        (void)thread_yield();
+    bool timed_out = context.finished && context.result == CHANNEL_TIMED_OUT &&
+                     pit_ticks() - start >= 3;
+    (void)thread_yield();
+    ok &= objtest_check(timed_out,
+                        "empty receive wakes at its PIT-tick deadline");
+    (void)handle_close(&table, sender);
+    (void)handle_close(&table, receiver);
+    handle_table_close_all(&table);
+    ok &= objtest_check(object_count() == before,
+                        "timeout test releases all channel objects");
+    console_write(ok ? "  M8 timeout self-test: PASS\n"
+                     : "  M8 timeout self-test: FAIL\n");
+}
+
 static void cmd_capxfer(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -1042,6 +1096,7 @@ const command_t helix_commands[] = {
     {"captest", "exercise capability rights and revocation", cmd_captest},
     {"chantest", "exercise bounded IPC channels", cmd_chantest},
     {"chanwaittest", "exercise blocking receive and wakeups", cmd_chanwaittest},
+    {"chantimeout", "exercise timed channel receive", cmd_chantimeout},
     {"capxfer", "exercise channel capability transfer", cmd_capxfer},
     {"threadtest", "exercise kernel threads and round-robin yield", cmd_threadtest},
     {"ticks",   "show the PIT timer tick count",         cmd_ticks},

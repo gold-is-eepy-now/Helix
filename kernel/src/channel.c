@@ -5,6 +5,7 @@
 #include "heap.h"
 #include "kstring.h"
 #include "object.h"
+#include "pit.h"
 #include "sync.h"
 #include "thread.h"
 
@@ -345,5 +346,60 @@ channel_result_t channel_receive_wait(handle_table_t *table, handle_t channel,
             return CHANNEL_WOULD_BLOCK;
         }
         /* A send or endpoint close woke us. Retry the queue and closure checks. */
+    }
+}
+
+channel_result_t channel_receive_timeout(handle_table_t *table,
+                                         handle_t channel,
+                                         void *buffer, size_t buffer_size,
+                                         size_t *message_size,
+                                         uint64_t timeout_ticks) {
+    uint64_t start = pit_ticks();
+    uint64_t deadline = timeout_ticks > UINT64_MAX - start
+        ? UINT64_MAX : start + timeout_ticks;
+    for (;;) {
+        channel_result_t result = channel_receive(table, channel, buffer,
+                                                   buffer_size, message_size);
+        if (result != CHANNEL_EMPTY) return result;
+        if (timeout_ticks == 0 || pit_ticks() >= deadline)
+            return CHANNEL_TIMED_OUT;
+
+        IRQ_GUARD;
+        object_t *object = handle_get(table, channel, OBJECT_RIGHT_READ,
+                                      OBJECT_TYPE_CHANNEL);
+        channel_endpoint_t *endpoint = object_payload(object);
+        channel_core_t *core = endpoint != NULL && endpoint->can_receive
+            ? endpoint->core : NULL;
+        if (core == NULL) {
+            object_release(object);
+            return CHANNEL_DENIED;
+        }
+        if (core->count != 0 || core->senders == 0) {
+            object_release(object);
+            continue;
+        }
+
+        thread_id_t id = thread_current_id();
+        if (!add_waiter(core, id)) {
+            object_release(object);
+            return CHANNEL_WOULD_BLOCK;
+        }
+        object_release(object);
+        bool blocked = thread_block_current_until_tick(deadline);
+
+        /* A timeout leaves the waiter linked. Re-resolve the endpoint before
+         * removing it because another thread may have closed the last handle.
+         */
+        object_t *cleanup = handle_get(table, channel, OBJECT_RIGHT_READ,
+                                       OBJECT_TYPE_CHANNEL);
+        channel_endpoint_t *cleanup_endpoint = object_payload(cleanup);
+        channel_core_t *cleanup_core = cleanup_endpoint != NULL &&
+            cleanup_endpoint->can_receive ? cleanup_endpoint->core : NULL;
+        if (cleanup_core != NULL) remove_waiter(cleanup_core, id);
+        object_release(cleanup);
+        if (!blocked) {
+            if (pit_ticks() >= deadline) return CHANNEL_TIMED_OUT;
+            return CHANNEL_WOULD_BLOCK;
+        }
     }
 }

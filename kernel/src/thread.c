@@ -12,6 +12,7 @@
 #include "kstring.h"
 #include "io.h"
 #include "panic.h"
+#include "pit.h"
 #include "pmm.h"
 #include "sync.h"
 #include "vmm.h"
@@ -34,6 +35,8 @@ typedef struct {
     uint64_t rsp;
     uint64_t stack_base;
     uintptr_t stack_phys;
+    uint64_t wake_tick;
+    bool timed_block;
     thread_entry_t entry;
     void *argument;
 } kernel_thread_t;
@@ -79,11 +82,25 @@ static void reap_dead(void) {
         release_stack(thread);
         thread->id = 0;
         thread->rsp = 0;
+        thread->wake_tick = 0;
+        thread->timed_block = false;
         thread->entry = NULL;
         thread->argument = NULL;
         thread->state = THREAD_FREE;
     }
     if (flags & (1u << 9)) cpu_enable_interrupts();
+}
+
+static void wake_expired_threads(void) {
+    uint64_t now = pit_ticks();
+    for (uint32_t i = 0; i < KERNEL_THREAD_MAX; i++) {
+        kernel_thread_t *thread = &g_threads[i];
+        if (thread->state != THREAD_BLOCKED || !thread->timed_block ||
+            now < thread->wake_tick) continue;
+        thread->timed_block = false;
+        thread->wake_tick = 0;
+        thread->state = THREAD_READY;
+    }
 }
 
 bool thread_system_init(uint64_t hhdm_offset) {
@@ -205,6 +222,35 @@ bool thread_block_current(void) {
     return true;
 }
 
+bool thread_block_current_until_tick(uint64_t deadline_tick) {
+    if (!g_ready) return false;
+    irq_guard_t guard = irq_guard_enter();
+    if (deadline_tick <= pit_ticks() ||
+        g_threads[g_current].state != THREAD_RUNNING) {
+        irq_guard_leave(&guard);
+        return false;
+    }
+    bool runnable = false;
+    for (uint32_t i = 0; i < KERNEL_THREAD_MAX; i++) {
+        if (i != g_current && g_threads[i].state == THREAD_READY) {
+            runnable = true;
+            break;
+        }
+    }
+    if (!runnable) {
+        irq_guard_leave(&guard);
+        return false;
+    }
+
+    kernel_thread_t *thread = &g_threads[g_current];
+    thread->wake_tick = deadline_tick;
+    thread->timed_block = true;
+    thread->state = THREAD_BLOCKED;
+    __asm__ volatile("int $48" : : : "memory", "cc");
+    irq_guard_leave(&guard);
+    return true;
+}
+
 bool thread_wake(thread_id_t id) {
     IRQ_GUARD;
     if (!g_ready || id == 0) return false;
@@ -212,6 +258,8 @@ bool thread_wake(thread_id_t id) {
         kernel_thread_t *thread = &g_threads[i];
         if (thread->id != id || thread->state != THREAD_BLOCKED) continue;
         thread->state = THREAD_READY;
+        thread->timed_block = false;
+        thread->wake_tick = 0;
         return true;
     }
     return false;
@@ -231,6 +279,7 @@ __attribute__((noreturn)) void thread_exit(void) {
 
 registers_t *thread_schedule(registers_t *interrupted, bool timer_tick) {
     if (!g_ready || interrupted == NULL) return interrupted;
+    if (timer_tick) wake_expired_threads();
     /* A dead thread's handler is still running on its stack. Reap only dead
      * threads other than the interrupted one, before choosing the next task.
      */
@@ -256,6 +305,9 @@ registers_t *thread_schedule(registers_t *interrupted, bool timer_tick) {
     if (next_index == previous_index) {
         if (previous->state == THREAD_DEAD) {
             panic("no runnable thread after thread exit");
+        }
+        if (previous->state == THREAD_BLOCKED) {
+            panic("no runnable thread after thread block");
         }
         previous->state = THREAD_RUNNING;
         return interrupted;
