@@ -18,7 +18,7 @@
 # which Helix does not support -- and it makes some firmware (including
 # VirtualBox's EFI) misread the partition table.
 #
-# Environment overrides: BUILD_DIR KERNEL LIMINE_DIR IMAGE LIMINE_CONF SIZE_MB DOOM_WAD
+# Environment overrides: BUILD_DIR KERNEL LIMINE_DIR IMAGE LIMINE_CONF SIZE_MB DOOM_WAD DOOM_LICENSE
 set -eu
 
 # sgdisk and friends live in the sbin directories, which are not always on a
@@ -32,6 +32,7 @@ LIMINE_DIR="${LIMINE_DIR:-$BUILD_DIR/deps/limine-binary}"
 IMAGE="${IMAGE:-$BUILD_DIR/helix.img}"
 LIMINE_CONF="${LIMINE_CONF:-limine.conf}"
 DOOM_WAD="${DOOM_WAD:-}"
+DOOM_LICENSE="${DOOM_LICENSE:-}"
 SIZE_MB="${SIZE_MB:-64}"
 
 # Geometry chosen so one "cylinder" is exactly 1 MiB, matching the layout
@@ -85,6 +86,10 @@ if [ -n "$DOOM_WAD" ]; then
     cp "$LIMINE_CONF" "$DOOM_CONF"
     printf '    module_path: boot():/boot/doom/doom1.wad\n    module_string: helix-doom-wad\n' >> "$DOOM_CONF"
     mcopy -i "$IMAGE@@${PART_OFFSET}" "$DOOM_WAD" ::/boot/doom/doom1.wad
+    if [ -n "$DOOM_LICENSE" ]; then
+        [ -f "$DOOM_LICENSE" ] || { echo "mkimage: Doom asset license not found: $DOOM_LICENSE" >&2; exit 1; }
+        mcopy -i "$IMAGE@@${PART_OFFSET}" "$DOOM_LICENSE" ::/boot/doom/COPYING.adoc
+    fi
     mcopy -o -i "$IMAGE@@${PART_OFFSET}" "$DOOM_CONF" ::/boot/limine/limine.conf
 fi
 

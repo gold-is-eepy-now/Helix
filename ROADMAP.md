@@ -211,10 +211,22 @@ object system. They are not allowed to distort the native design.
 - Being fast. Be correct, then be fast.
 - Security-hardening details before there is anything to secure.
 
-## Doom experiment
+## Deferred application experiment: Doom
 
-| DoomGeneric source imported (GPL-2.0-or-later)                  | ✅ upstream revision pinned              |
-| Optional IWAD passed as Limine module                           | ✅ `DOOM_WAD=/path/to/doom1.wad`          |
-| Helix framebuffer + keyboard event primitives                   | ✅ groundwork                            |
-| Doom runtime, WAD reader, input/timing glue                     | ⛔ in progress                            |
-| Launch Doom from Helix shell and play under QEMU                | ⛔ not yet working                        |
+Doom is deliberately outside the current kernel milestones. Keep the work
+already done as boot-data and device-interface groundwork; do not link the
+game engine into the kernel. Revisit a playable port after M9 establishes
+userland, ELF loading, syscalls, and a native runtime. At that point, run Doom
+as a userspace program and add only the runtime services it needs.
+
+| Groundwork | State |
+|------------|-------|
+| DoomGeneric source imported (GPL-2.0-or-later) | ✅ upstream revision pinned |
+| FreeDoom Phase 1 data and BSD-3-Clause notice | ✅ 0.13.0, local WAD or verified download |
+| IWAD passed to kernel as a Limine module | ✅ recognized at boot |
+| Framebuffer presentation and PS/2 key events | ✅ reusable platform groundwork |
+| Userspace Doom runtime, renderer/input/timing adapter | ⏸ deferred until after M9 |
+| Playable Doom launch from a userspace program | ⏸ deferred until runtime services are ready |
+
+See [docs/07-doom-port.md](docs/07-doom-port.md) for implementation boundaries
+and licensing details.

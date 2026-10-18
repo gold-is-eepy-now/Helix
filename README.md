@@ -41,6 +41,7 @@ native object model. They are not the foundation.
 | User space / ELF / syscalls | ⛔ not started (M9) |
 | Isolated driver services, filesystems, networking | ⛔ not started (M10–M12) |
 | Linux / BSD / POSIX compatibility | ⛔ not started (much later) |
+| Doom / FreeDoom | 🧪 WAD boot handoff groundwork; playable port deferred until userland |
 
 See [ROADMAP.md](ROADMAP.md) for the full plan, [docs/02-shell.md](docs/02-shell.md)
 for the shell, [docs/03-cpython-requirements.md](docs/03-cpython-requirements.md)
@@ -49,6 +50,8 @@ for what it will take to run CPython and Linux/BSD software,
 and interrupts, [docs/05-object-manager.md](docs/05-object-manager.md) for the
 M5 object and handle APIs, and [docs/06-capabilities.md](docs/06-capabilities.md)
 for M6 capability semantics.
+See [docs/07-doom-port.md](docs/07-doom-port.md) for the Doom experiment's
+current scope, licensing, and place in the roadmap.
 
 ---
 
@@ -91,7 +94,8 @@ VirtualBox on Apple Silicon cannot run x86 guests; use QEMU/UTM there instead.
 ### Requirements
 
 - A C toolchain that can emit x86_64 **ELF** (see the platform notes below)
-- `make`, `curl`
+- `make`, `curl`, `unzip`, `shasum` (used to fetch and verify the default
+  FreeDoom game data)
 - `qemu-system-x86_64` + UEFI firmware (`OVMF`/EDK2)
 - `gdisk` (`sgdisk`) and `mtools` (`mformat`, `mmd`, `mcopy`) to build the disk
   image
@@ -123,7 +127,7 @@ Firmware paths differ on macOS; `tools/ovmf.sh` finds them automatically.
 ### Commands
 
 ```sh
-make            # build the bootable disk image (build/helix.img)
+make            # build the bootable disk image with FreeDoom Phase 1
 make iso        # build a bootable UEFI CD image (build/helix.iso)
 make disks      # build VDI/VMDK/VHD hypervisor disk images
 make kernel     # build just the kernel ELF
@@ -131,6 +135,12 @@ make run        # boot the image in QEMU (serial output on your terminal)
 make test       # boot headlessly and drive the shell (CI-style)
 make clean      # remove build output
 ```
+
+The image build uses a root-level `freedoom1.wad` if present; otherwise it
+downloads FreeDoom Phase 1 v0.13.0 and verifies the release archive SHA-256.
+It adds the IWAD and BSD-3-Clause notice to the image as a Limine module. This
+only stages game data; Doom is not playable yet. To use a different IWAD, set
+`DOOM_WAD=/path/to/your.wad`; set `DOOM_WAD=` to build without an IWAD.
 
 Everything is built into `build/` by default. You can redirect it:
 
@@ -160,7 +170,7 @@ Type 'help' for a list of commands, 'sysinfo' for system info.
 helix> 
 ```
 
-`make test` boots the image, drives the shell over a serial socket, checks 34
+`make test` boots the image, drives the shell over a serial socket, checks 45
 behaviours (banner, prompt, `help`, `echo`, `calc`, `cpu`, `mem`, `pmm`,
 `heap`, `memtest`, `vmtest`, `ticks`, `uptime`, `sysinfo`, error handling,
 `color`, and a caught CPU exception), and audits the framebuffer screenshot for

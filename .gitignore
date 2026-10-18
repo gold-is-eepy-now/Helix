@@ -5,6 +5,8 @@ build/
 *.img
 *.iso
 *.elf
+/freedoom1.wad
+/freedoom2.wad
 
 # Test artefacts.
 serial.log
@@ -14,4 +16,5 @@ screen.png
 # Downloaded third-party bootloader binaries.
 third_party/*
 !third_party/doomgeneric/
+!third_party/freedoom/
 deps/
