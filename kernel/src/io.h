@@ -42,12 +42,12 @@ static inline void cpu_halt(void) {
 
 /* Mask maskable interrupts. */
 static inline void cpu_disable_interrupts(void) {
-    __asm__ volatile("cli");
+    __asm__ volatile("cli" : : : "memory");
 }
 
 /* Unmask maskable interrupts. */
 static inline void cpu_enable_interrupts(void) {
-    __asm__ volatile("sti");
+    __asm__ volatile("sti" : : : "memory");
 }
 
 /* Read the RFLAGS register (bit 9 is the interrupt-enable flag, IF). */

@@ -14,6 +14,7 @@
 #include <limine.h>
 
 #include "capability.h"
+#include "channel.h"
 #include "console.h"
 #include "cpu.h"
 #include "heap.h"
@@ -26,6 +27,7 @@
 #include "pit.h"
 #include "pmm.h"
 #include "sysinfo.h"
+#include "thread.h"
 #include "time.h"
 #include "version.h"
 #include "vmm.h"
@@ -380,6 +382,78 @@ static void cmd_objects(int argc, char **argv) {
     console_write("  synchronization: single-CPU, kernel-context callers only\n");
 }
 
+static void cmd_chantest(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    console_write("IPC channel self-test\n");
+
+    uint64_t before = object_count();
+    handle_table_t table;
+    handle_table_init(&table);
+    handle_t send_handle = 0;
+    handle_t receive_handle = 0;
+    bool created = channel_create_pair(&table, 1, &send_handle, &receive_handle);
+    bool ok = objtest_check(created && send_handle != 0 && receive_handle != 0,
+                            "create bounded send/receive endpoints");
+    if (!created) {
+        console_write("  M8 channel self-test: FAIL\n");
+        return;
+    }
+
+    const char message[] = "hello";
+    char received[sizeof(message)] = {0};
+    size_t message_size = 0;
+    ok &= objtest_check(channel_receive(&table, receive_handle, received,
+                                        sizeof(received), &message_size) == CHANNEL_EMPTY,
+                        "empty queue reports CHANNEL_EMPTY");
+    ok &= objtest_check(channel_send(&table, receive_handle, message,
+                                     sizeof(message)) == CHANNEL_DENIED &&
+                        channel_receive(&table, send_handle, received,
+                                        sizeof(received), NULL) == CHANNEL_DENIED,
+                        "endpoint rights restrict send and receive");
+    ok &= objtest_check(channel_send(&table, send_handle, message,
+                                     sizeof(message)) == CHANNEL_OK &&
+                        channel_send(&table, send_handle, message,
+                                     sizeof(message)) == CHANNEL_FULL,
+                        "bounded queue accepts then rejects when full");
+
+    bool small_buffer = channel_receive(&table, receive_handle, received,
+                                        sizeof(message) - 1, &message_size) ==
+                            CHANNEL_BUFFER_SMALL && message_size == sizeof(message);
+    bool received_message = channel_receive(&table, receive_handle, received,
+                                             sizeof(received), &message_size) ==
+                                CHANNEL_OK && message_size == sizeof(message) &&
+                            str_eq(received, message);
+    ok &= objtest_check(small_buffer && received_message,
+                        "small buffer preserves queued message and reports size");
+    ok &= objtest_check(channel_send(&table, send_handle, message,
+                                     CHANNEL_MAX_MESSAGE_SIZE + 1) == CHANNEL_TOO_LARGE,
+                        "oversized message is rejected");
+
+    (void)channel_send(&table, send_handle, message, sizeof(message));
+    bool closed_sender = handle_close(&table, send_handle);
+    bool drained = channel_receive(&table, receive_handle, received,
+                                   sizeof(received), NULL) == CHANNEL_OK;
+    bool sender_closed = channel_receive(&table, receive_handle, received,
+                                         sizeof(received), NULL) == CHANNEL_CLOSED;
+    ok &= objtest_check(closed_sender && drained && sender_closed,
+                        "closed sender drains queued data then reports closed");
+    (void)handle_close(&table, receive_handle);
+
+    send_handle = 0;
+    receive_handle = 0;
+    bool second_pair = channel_create_pair(&table, 1, &send_handle, &receive_handle);
+    bool receiver_close = second_pair && handle_close(&table, receive_handle) &&
+        channel_send(&table, send_handle, message, sizeof(message)) == CHANNEL_CLOSED;
+    ok &= objtest_check(receiver_close,
+                        "closed receiver makes peer send report closed");
+    handle_table_close_all(&table);
+    ok &= objtest_check(object_count() == before,
+                        "channel endpoints release all objects");
+    console_write(ok ? "  M8 channel self-test: PASS\n"
+                     : "  M8 channel self-test: FAIL\n");
+}
+
 static void cmd_objtest(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -580,6 +654,60 @@ static void cmd_captest(int argc, char **argv) {
                      : "  M6 capability self-test: FAIL\n");
 }
 
+static volatile uint32_t g_threadtest_runs[2];
+
+static void threadtest_worker(void *argument) {
+    uintptr_t index = (uintptr_t)argument;
+    uint64_t start_tick = pit_ticks();
+    while (pit_ticks() == start_tick) {
+        __asm__ volatile("pause");
+    }
+    for (uint32_t i = 0; i < 5; i++) {
+        g_threadtest_runs[index]++;
+        (void)thread_yield();
+    }
+}
+
+static void cmd_threadtest(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    console_write("Kernel thread self-test\n");
+    g_threadtest_runs[0] = 0;
+    g_threadtest_runs[1] = 0;
+    uint64_t switches_before = thread_switch_count();
+    uint64_t preemptions_before = thread_preemption_count();
+    thread_id_t first = thread_create(threadtest_worker, (void *)(uintptr_t)0);
+    thread_id_t second = thread_create(threadtest_worker, (void *)(uintptr_t)1);
+    bool created = first != 0 && second != 0;
+
+    uint64_t deadline = pit_ticks() + 20;
+    while (thread_live_count() > 1 && pit_ticks() < deadline) {
+        __asm__ volatile("pause");
+    }
+    uint32_t attempts = 0;
+    while (thread_live_count() > 1 && attempts++ < 100) {
+        if (!thread_yield()) break;
+    }
+    (void)thread_yield(); /* reclaim the final exited thread stack */
+    bool completed = g_threadtest_runs[0] == 5 && g_threadtest_runs[1] == 5;
+    bool cleaned = thread_live_count() == 1;
+    bool switched = thread_switch_count() > switches_before;
+    bool preempted = thread_preemption_count() > preemptions_before;
+    bool ok = created && completed && cleaned && switched && preempted;
+    console_write(created ? "  create two guarded kernel threads: ok\n"
+                          : "  create two guarded kernel threads: FAILED\n");
+    console_write(completed ? "  round-robin yield and thread return: ok\n"
+                            : "  round-robin yield and thread return: FAILED\n");
+    console_write(preempted ? "  PIT preempted a non-yielding thread: ok\n"
+                            : "  PIT preempted a non-yielding thread: FAILED\n");
+    console_write(cleaned ? "  dead thread stacks reaped: ok\n"
+                          : "  dead thread stacks reaped: FAILED\n");
+    kprintf("  context switches: %llu\n",
+            (unsigned long long)(thread_switch_count() - switches_before));
+    console_write(ok ? "  M7 thread self-test: PASS\n"
+                     : "  M7 thread self-test: FAIL\n");
+}
+
 static void cmd_ticks(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -745,6 +873,8 @@ const command_t helix_commands[] = {
     {"objects", "show object manager statistics",        cmd_objects},
     {"objtest", "exercise objects and handles",          cmd_objtest},
     {"captest", "exercise capability rights and revocation", cmd_captest},
+    {"chantest", "exercise bounded IPC channels", cmd_chantest},
+    {"threadtest", "exercise kernel threads and round-robin yield", cmd_threadtest},
     {"ticks",   "show the PIT timer tick count",         cmd_ticks},
     {"swint",   "software-trigger the timer vector",      cmd_swint},
     {"pitcount","read the raw PIT counter (diagnostic)",  cmd_pitcount},

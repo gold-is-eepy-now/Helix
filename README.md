@@ -9,10 +9,11 @@ open-source research OS. Linux and BSD compatibility are planned as *runtimes
 that run on top of the Helix kernel*, translating Unix behaviour into Helix's
 native object model. They are not the foundation.
 
-> Status: **M3–M5 are complete; M6 capability work is underway.** The
-> kernel owns its page tables (`map`/`unmap`/`protect`), handles CPU exceptions
-> with readable reports, and takes a 100 Hz timer interrupt. M1–M3 built the
-> boot chain, interactive shell, and physical memory foundations.
+> Status: **M3–M7 are complete; M8 IPC is in progress.** The kernel owns its
+> page tables (`map`/`unmap`/`protect`), handles CPU exceptions with readable
+> reports, schedules guarded kernel threads, and takes a 100 Hz timer
+> interrupt. The first M8 slice adds bounded, non-blocking channels; blocking
+> receive and capability transfer are still ahead.
 
 ---
 
@@ -36,8 +37,12 @@ native object model. They are not the foundation.
 | PIC remap + PIT timer interrupt | ✅ working, machine-tested (M4) |
 | Guard pages, non-executable kernel stack | ✅ working, machine-tested (M3) |
 | Object manager and rights-bearing kernel handles | ✅ working, machine-tested (M5) |
-| Capability objects, rights reduction and revocation | 🚧 in progress (M6) |
-| Scheduler, threads, IPC | ⛔ not started (M7–M8) |
+| Capability objects, rights reduction and revocation | ✅ working, machine-tested (M6) |
+| Kernel threads, guarded stacks and cooperative scheduling | ✅ working, machine-tested (M7) |
+| PIT timer preemption | ✅ working, machine-tested (M7) |
+| Single-CPU preemption guards for shared kernel state | ✅ implemented (M7) |
+| Bounded, rights-checked kernel channels | 🚧 first M8 slice; `chantest` available |
+| Blocking IPC and channel wakeups | ⛔ planned (M8) |
 | User space / ELF / syscalls | ⛔ not started (M9) |
 | Isolated driver services, filesystems, networking | ⛔ not started (M10–M12) |
 | Linux / BSD / POSIX compatibility | ⛔ not started (much later) |
@@ -45,7 +50,8 @@ native object model. They are not the foundation.
 
 See [ROADMAP.md](ROADMAP.md) for the full plan, [docs/02-shell.md](docs/02-shell.md)
 for the shell, [docs/03-cpython-requirements.md](docs/03-cpython-requirements.md)
-for what it will take to run CPython and Linux/BSD software,
+for what it will take to run CPython and Linux/BSD software, and
+[docs/06-ipc-channels.md](docs/06-ipc-channels.md) for the first M8 channel API.
 [docs/04-paging-interrupts.md](docs/04-paging-interrupts.md) for virtual memory
 and interrupts, [docs/05-object-manager.md](docs/05-object-manager.md) for the
 M5 object and handle APIs, and [docs/06-capabilities.md](docs/06-capabilities.md)
@@ -155,7 +161,7 @@ HELIX OS
 Native Object Kernel
 Boot successful.
 
-Helix OS 0.5.0-dev.20261018 "Paging"
+Helix OS 0.7.0-dev.20261018 "Channels"
 
 [helix] console: serial + framebuffer
 [helix] memory:  462 MiB usable

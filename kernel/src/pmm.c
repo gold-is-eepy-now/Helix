@@ -6,6 +6,7 @@
 #include <limine.h>
 
 #include "kstring.h"
+#include "sync.h"
 
 #define LOW_RESERVED_FRAMES (1024u * 1024u / PAGE_SIZE)
 
@@ -31,6 +32,7 @@ static inline bool bit_test(uint64_t frame) {
 }
 
 void pmm_init(struct limine_memmap_response *memmap, uint64_t hhdm_offset) {
+    IRQ_GUARD;
     g_bitmap = NULL;
     g_bitmap_bytes = 0;
     g_bitmap_phys = 0;
@@ -126,6 +128,7 @@ void pmm_init(struct limine_memmap_response *memmap, uint64_t hhdm_offset) {
 }
 
 uintptr_t pmm_alloc_frame(void) {
+    IRQ_GUARD;
     if (g_bitmap == NULL) return 0;
     for (uint64_t i = g_search_hint; i < g_top_frame; i++) {
         if (!bit_test(i)) {
@@ -143,6 +146,7 @@ uintptr_t pmm_alloc_frame(void) {
 }
 
 uintptr_t pmm_alloc_frames(size_t count) {
+    IRQ_GUARD;
     if (g_bitmap == NULL || count == 0 || count > g_top_frame) return 0;
     uint64_t run = 0;
     for (uint64_t i = 0; i < g_top_frame; i++) {
@@ -160,6 +164,7 @@ uintptr_t pmm_alloc_frames(size_t count) {
 void pmm_free_frame(uintptr_t phys) { pmm_free_frames(phys, 1); }
 
 void pmm_free_frames(uintptr_t phys, size_t count) {
+    IRQ_GUARD;
     if (g_bitmap == NULL || phys % PAGE_SIZE != 0) return;
     uint64_t first = phys / PAGE_SIZE;
     for (size_t i = 0; i < count && first + i >= first; i++) {
@@ -173,10 +178,10 @@ void pmm_free_frames(uintptr_t phys, size_t count) {
     if (first < g_search_hint) g_search_hint = first;
 }
 
-uint64_t pmm_total_frames(void)     { return g_top_frame; }
-uint64_t pmm_usable_frames(void)    { return g_usable_frames; }
-uint64_t pmm_allocated_frames(void) { return g_allocated; }
-uint64_t pmm_free_frame_count(void) { return g_usable_frames - g_allocated; }
-uint64_t pmm_total_bytes(void)      { return g_top_frame * PAGE_SIZE; }
-uint64_t pmm_free_bytes(void)       { return (g_usable_frames - g_allocated) * PAGE_SIZE; }
-uint64_t pmm_bitmap_bytes(void)     { return g_bitmap_bytes; }
+uint64_t pmm_total_frames(void)     { IRQ_GUARD; return g_top_frame; }
+uint64_t pmm_usable_frames(void)    { IRQ_GUARD; return g_usable_frames; }
+uint64_t pmm_allocated_frames(void) { IRQ_GUARD; return g_allocated; }
+uint64_t pmm_free_frame_count(void) { IRQ_GUARD; return g_usable_frames - g_allocated; }
+uint64_t pmm_total_bytes(void)      { IRQ_GUARD; return g_top_frame * PAGE_SIZE; }
+uint64_t pmm_free_bytes(void)       { IRQ_GUARD; return (g_usable_frames - g_allocated) * PAGE_SIZE; }
+uint64_t pmm_bitmap_bytes(void)     { IRQ_GUARD; return g_bitmap_bytes; }

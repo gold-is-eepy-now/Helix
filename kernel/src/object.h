@@ -42,7 +42,7 @@ typedef struct {
 } handle_entry_t;
 
 /* Embed one table in each process once processes exist. The current kernel has
- * one system table, and the subsystem is intentionally single-threaded. */
+ * one system table; table operations are guarded against single-CPU preemption. */
 typedef struct {
     handle_entry_t entries[HANDLE_TABLE_CAPACITY];
 } handle_table_t;

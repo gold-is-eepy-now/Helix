@@ -257,6 +257,17 @@ def main():
         ser.send("objects\n")
         check("captest leaves no objects behind", "live objects : 0")
 
+        ser.send("threadtest\n")
+        check("threadtest creates guarded kernel threads",
+              "create two guarded kernel threads: ok")
+        check("threadtest switches threads cooperatively",
+              "round-robin yield and thread return: ok")
+        check("threadtest verifies PIT preemption",
+              "PIT preempted a non-yielding thread: ok")
+        check("threadtest reclaims dead thread stacks",
+              "dead thread stacks reaped: ok")
+        check("M7 kernel thread self-test passes", "M7 thread self-test: PASS")
+
         ser.send("ticks\n")
         check("PIT timer is ticking", "PIT timer")
         ser.read_until("ms\n")  # wait for the whole line, not just its prefix

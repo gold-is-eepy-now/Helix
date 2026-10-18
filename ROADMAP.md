@@ -124,14 +124,15 @@ object manager).
 - ✅ A native kernel API for create, lookup/open, close, and inspect.
 - ✅ `objtest` self-test exercises multiple types, rights, duplication, invalid
   handles, and final-reference destruction; automated QEMU coverage added.
-- ✅ Ownership and single-CPU synchronization assumptions documented; process-
-  owned handle tables and concurrent synchronization remain sequenced with M7.
+- ✅ Ownership and single-CPU synchronization assumptions documented; core
+  object operations now guard against preemption (M7).
 
 **M5 exit gate:** a kernel self-test creates and looks up multiple object types,
 duplicates and closes handles, rejects invalid handles and rights, and proves
 objects are destroyed exactly when their final reference is released. Document
 handle ownership and the synchronization assumptions before introducing
-concurrent callers in M7.
+concurrent callers in M7. M7 adds single-CPU preemption guards; SMP locks are
+still future work.
 
 ## M6 — Capabilities ✅
 
@@ -154,18 +155,28 @@ derivation, revoking a parent invalidates its descendants, and the protected
 memory operation rejects missing, insufficient, wrong-type, out-of-range, and
 revoked capabilities. Channel transfer remains sequenced with M8.
 
-## M7 — Threads and scheduler
+## M7 — Threads and scheduler ✅
 
-- Kernel threads, then user threads.
-- Context switching.
-- A simple round-robin or priority scheduler.
-- Per-CPU run queues.
+- ✅ Single-CPU kernel threads with private guarded, NX stacks.
+- ✅ Full interrupt-frame context switching and cooperative round-robin yield.
+- ✅ Thread return and deferred stack reclamation.
+- ✅ PIT-driven preemption and scheduling from the interrupt path.
+- ✅ Single-CPU preemption guards for scheduler, PMM, VMM, heap, objects, and
+  capabilities.
+- ⏸ SMP-safe locks and interrupt routing (later SMP work).
+- ⏸ User threads, per-process address spaces, and per-CPU run queues (M9+).
+
+`threadtest`, `objtest`, and `captest` all passed in QEMU. The thread test
+includes PIT preemption and dead-stack reclamation. Single-CPU interrupt
+guards protect scheduler and shared allocator/object state; they do not
+provide SMP safety. M7's single-CPU kernel-thread exit gate is passed; SMP
+and user-space scheduling remain future work.
 
 ## M8 — IPC and channels
 
-- Channels as first-class objects.
-- Synchronous and asynchronous message passing.
-- Blocking receive, timeouts, and wake-ups tied to the scheduler.
+- 🚧 Bounded, non-blocking FIFO channels are first-class, rights-checked objects.
+- ⛔ Synchronous and asynchronous message passing.
+- ⛔ Blocking receive, timeouts, and wake-ups tied to the scheduler.
 
 ## M9 — User space
 

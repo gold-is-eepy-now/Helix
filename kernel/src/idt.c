@@ -15,6 +15,7 @@
 #include "panic.h"
 #include "pic.h"
 #include "pit.h"
+#include "thread.h"
 
 typedef struct {
     uint16_t offset_low;
@@ -119,7 +120,7 @@ void idt_clear_page_fault_expectation(void) {
 bool idt_expected_page_fault_caught(void) { return g_page_fault_caught; }
 uint64_t idt_expected_page_fault_error(void) { return g_expected_fault_error; }
 
-void isr_handler(registers_t *regs) {
+registers_t *isr_handler(registers_t *regs) {
     if (regs->vector < 32) {
         if (regs->vector == 14 && g_page_fault_armed &&
             read_cr2() == g_expected_fault_address) {
@@ -127,7 +128,7 @@ void isr_handler(registers_t *regs) {
             g_page_fault_caught = true;
             g_expected_fault_error = regs->error_code;
             regs->rip = g_fault_recovery_rip;
-            return;
+            return regs;
         }
         console_set_fg(CONSOLE_BRIGHT_RED);
         kprintf("\n*** CPU EXCEPTION %llu: %s ***\n",
@@ -148,8 +149,11 @@ void isr_handler(registers_t *regs) {
             pit_tick();
         }
         pic_send_eoi(irq);
-        return;
+        return irq == 0 ? thread_schedule(regs, true) : regs;
     }
 
+    if (regs->vector == 48) return thread_schedule(regs, false);
+
     kprintf("interrupt: unexpected vector %llu\n", (unsigned long long)regs->vector);
+    return regs;
 }

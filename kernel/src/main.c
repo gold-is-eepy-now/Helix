@@ -4,8 +4,10 @@
  * interactive system: it brings up the console, the keyboard, a time source
  * and the memory map, prints a short boot log, and hands control to the shell.
  *
- * Objects and kernel handles are now available; scheduling, IPC, capabilities,
- * drivers, filesystems, and user space remain future milestones. See ROADMAP.md.
+ * Objects, capabilities, and the first cooperative kernel threads are now
+ * available. Single-CPU preemption and the first bounded IPC channels are
+ * implemented; blocking IPC, drivers, filesystems, and user space remain
+ * future milestones. See ROADMAP.md.
  */
 #include <stdbool.h>
 #include <stddef.h>
@@ -30,6 +32,7 @@
 #include "pmm.h"
 #include "shell.h"
 #include "sysinfo.h"
+#include "thread.h"
 #include "time.h"
 #include "version.h"
 #include "vmm.h"
@@ -106,6 +109,9 @@ static void kernel_main_continue(void) {
     apic_allow_pic(hhdm_request.response->offset); /* let PIC IRQs through */
     pit_init(100);      /* 100 Hz system tick */
     pic_clear_mask(0);  /* unmask IRQ0 (the timer) */
+    if (!thread_system_init(hhdm_request.response->offset)) {
+        panic("failed to initialize kernel thread subsystem");
+    }
     cpu_enable_interrupts();
 
     /* Say hello. */

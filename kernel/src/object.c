@@ -1,14 +1,12 @@
 /* object.c — global object registry and rights-bearing handle tables.
- *
- * The first implementation is deliberately single-CPU and non-concurrent.
- * Object and handle-table mutations must happen in ordinary kernel context;
- * interrupt handlers do not call this subsystem. M7 will add synchronization
- * before introducing concurrent callers.
+ * Short operations are guarded against PIT preemption on the current single
+ * CPU. Destruction callbacks must remain non-blocking and must not yield.
  */
 #include "object.h"
 
 #include "heap.h"
 #include "kstring.h"
+#include "sync.h"
 
 struct object {
     uint64_t id;
@@ -28,6 +26,7 @@ static handle_table_t g_kernel_handles;
 static bool g_initialized;
 
 void object_manager_init(void) {
+    IRQ_GUARD;
     if (g_initialized) return;
     g_objects = NULL;
     g_next_object_id = 1;
@@ -38,6 +37,7 @@ void object_manager_init(void) {
 
 object_t *object_create(object_type_t type, size_t payload_size,
                         object_destroy_fn destroy) {
+    IRQ_GUARD;
     if (!g_initialized || type <= OBJECT_TYPE_NONE || type > OBJECT_TYPE_CAPABILITY ||
         g_next_object_id == 0) {
         return NULL;
@@ -63,6 +63,7 @@ object_t *object_create(object_type_t type, size_t payload_size,
 }
 
 object_t *object_lookup(uint64_t id) {
+    IRQ_GUARD;
     if (!g_initialized || id == 0) return NULL;
     for (object_t *object = g_objects; object != NULL; object = object->next) {
         if (object->id == id) {
@@ -73,6 +74,7 @@ object_t *object_lookup(uint64_t id) {
 }
 
 bool object_retain(object_t *object) {
+    IRQ_GUARD;
     if (object == NULL || object->destroying || object->references == 0 ||
         object->references == UINT32_MAX) return false;
     object->references++;
@@ -80,6 +82,7 @@ bool object_retain(object_t *object) {
 }
 
 void object_release(object_t *object) {
+    IRQ_GUARD;
     if (object == NULL || object->references == 0) return;
     if (--object->references != 0) return;
 
@@ -95,17 +98,20 @@ void object_release(object_t *object) {
     kfree(object);
 }
 
-void *object_payload(object_t *object) { return object ? object->payload : NULL; }
-uint64_t object_id(const object_t *object) { return object ? object->id : 0; }
+void *object_payload(object_t *object) { IRQ_GUARD; return object ? object->payload : NULL; }
+uint64_t object_id(const object_t *object) { IRQ_GUARD; return object ? object->id : 0; }
 object_type_t object_type(const object_t *object) {
+    IRQ_GUARD;
     return object ? object->type : OBJECT_TYPE_NONE;
 }
 uint32_t object_reference_count(const object_t *object) {
+    IRQ_GUARD;
     return object ? object->references : 0;
 }
-uint64_t object_count(void) { return g_object_count; }
+uint64_t object_count(void) { IRQ_GUARD; return g_object_count; }
 
 void handle_table_init(handle_table_t *table) {
+    IRQ_GUARD;
     if (table == NULL) return;
     memset(table, 0, sizeof(*table));
     for (size_t i = 0; i < HANDLE_TABLE_CAPACITY; i++) {
@@ -125,6 +131,7 @@ static void advance_generation(handle_entry_t *entry) {
 }
 
 void handle_table_close_all(handle_table_t *table) {
+    IRQ_GUARD;
     if (table == NULL) return;
     for (size_t i = 0; i < HANDLE_TABLE_CAPACITY; i++) {
         handle_entry_t *entry = &table->entries[i];
@@ -154,6 +161,7 @@ static handle_entry_t *resolve_entry(handle_table_t *table, handle_t handle) {
 }
 
 handle_t handle_create(handle_table_t *table, object_t *object, uint32_t rights) {
+    IRQ_GUARD;
     if (table == NULL || object == NULL || rights == 0 ||
         (rights & ~OBJECT_RIGHT_ALL) != 0) return 0;
     for (size_t i = 0; i < HANDLE_TABLE_CAPACITY; i++) {
@@ -169,6 +177,7 @@ handle_t handle_create(handle_table_t *table, object_t *object, uint32_t rights)
 
 object_t *handle_get(handle_table_t *table, handle_t handle,
                      uint32_t required_rights, object_type_t expected_type) {
+    IRQ_GUARD;
     if (required_rights == 0 || (required_rights & ~OBJECT_RIGHT_ALL) != 0) return NULL;
     handle_entry_t *entry = resolve_entry(table, handle);
     if (entry == NULL || (entry->rights & required_rights) != required_rights ||
@@ -179,6 +188,7 @@ object_t *handle_get(handle_table_t *table, handle_t handle,
 
 handle_t handle_duplicate(handle_table_t *table, handle_t source,
                           uint32_t reduced_rights) {
+    IRQ_GUARD;
     handle_entry_t *entry = resolve_entry(table, source);
     if (entry == NULL || !(entry->rights & OBJECT_RIGHT_DUPLICATE) ||
         reduced_rights == 0 || (reduced_rights & ~entry->rights) != 0) return 0;
@@ -186,6 +196,7 @@ handle_t handle_duplicate(handle_table_t *table, handle_t source,
 }
 
 bool handle_close(handle_table_t *table, handle_t handle) {
+    IRQ_GUARD;
     handle_entry_t *entry = resolve_entry(table, handle);
     if (entry == NULL) return false;
     object_t *object = entry->object;
@@ -197,6 +208,7 @@ bool handle_close(handle_table_t *table, handle_t handle) {
 }
 
 bool handle_inspect(handle_table_t *table, handle_t handle, handle_info_t *info) {
+    IRQ_GUARD;
     handle_entry_t *entry = resolve_entry(table, handle);
     if (entry == NULL || info == NULL || !(entry->rights & OBJECT_RIGHT_INSPECT)) {
         return false;
@@ -209,6 +221,7 @@ bool handle_inspect(handle_table_t *table, handle_t handle, handle_info_t *info)
 }
 
 uint64_t handle_count(const handle_table_t *table) {
+    IRQ_GUARD;
     if (table == NULL) return 0;
     uint64_t count = 0;
     for (size_t i = 0; i < HANDLE_TABLE_CAPACITY; i++) {
@@ -217,4 +230,4 @@ uint64_t handle_count(const handle_table_t *table) {
     return count;
 }
 
-handle_table_t *object_kernel_handles(void) { return &g_kernel_handles; }
+handle_table_t *object_kernel_handles(void) { IRQ_GUARD; return &g_kernel_handles; }

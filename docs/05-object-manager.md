@@ -39,12 +39,10 @@ future process objects will embed.
 
 ## Synchronization boundary
 
-This implementation assumes one CPU and single-threaded callers in ordinary
-kernel context. Object and handle mutations are not safe for concurrent calls,
-and interrupt handlers must not use the subsystem. The kernel has no scheduler
-or SMP execution yet. Before M7 introduces concurrent callers, the object list,
-reference updates, and each process's handle table must gain an explicit locking
-strategy.
+Object and handle operations use single-CPU interrupt guards, which serialize
+their short critical sections against PIT-driven thread preemption. This is not
+an SMP lock; multicore execution will need real locks. Destruction callbacks
+must not block or yield while an object is being released.
 
 ## Commands
 

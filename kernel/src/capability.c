@@ -1,11 +1,10 @@
 /* capability.c — revocable rights grants layered on object handles.
- *
- * Like the M5 object registry this initial version is single-CPU and is only
- * called from kernel context. M7 must add synchronization before concurrency.
+ * Mutations are guarded against PIT preemption on the current single CPU.
  */
 #include "capability.h"
 
 #include "heap.h"
+#include "sync.h"
 #include "vmm.h"
 
 typedef struct {
@@ -25,11 +24,13 @@ typedef struct {
 } memory_region_payload_t;
 
 static void domain_release(revocation_domain_t *domain) {
+    IRQ_GUARD;
     if (domain == NULL || domain->references == 0) return;
     if (--domain->references == 0) kfree(domain);
 }
 
 static bool domain_retain(revocation_domain_t *domain) {
+    IRQ_GUARD;
     if (domain == NULL || domain->revoked || domain->references == UINT32_MAX)
         return false;
     domain->references++;
@@ -37,6 +38,7 @@ static bool domain_retain(revocation_domain_t *domain) {
 }
 
 static void capability_destroy(object_t *object, void *payload_ptr) {
+    IRQ_GUARD;
     (void)object;
     capability_payload_t *payload = payload_ptr;
     if (payload == NULL) return;
@@ -48,6 +50,7 @@ static handle_t capability_install(handle_table_t *table, object_t *target,
                                    uint32_t rights,
                                    revocation_domain_t *domain,
                                    bool create_domain, uint32_t handle_rights) {
+    IRQ_GUARD;
     if (table == NULL || target == NULL || rights == 0 ||
         (rights & ~OBJECT_RIGHT_ALL) != 0) return 0;
 
@@ -83,6 +86,7 @@ static handle_t capability_install(handle_table_t *table, object_t *target,
 
 handle_t capability_create(handle_table_t *table, handle_t source,
                            uint32_t granted_rights) {
+    IRQ_GUARD;
     handle_info_t info;
     if (!handle_inspect(table, source, &info) ||
         !(info.rights & OBJECT_RIGHT_DUPLICATE) || granted_rights == 0 ||
@@ -100,6 +104,7 @@ handle_t capability_create(handle_table_t *table, handle_t source,
 
 handle_t capability_derive(handle_table_t *table, handle_t source,
                            uint32_t reduced_rights) {
+    IRQ_GUARD;
     if (reduced_rights == 0 || (reduced_rights & ~OBJECT_RIGHT_ALL) != 0)
         return 0;
     object_t *cap_object = handle_get(table, source, OBJECT_RIGHT_DUPLICATE,
@@ -118,6 +123,7 @@ handle_t capability_derive(handle_table_t *table, handle_t source,
 }
 
 bool capability_revoke(handle_table_t *table, handle_t capability) {
+    IRQ_GUARD;
     object_t *cap_object = handle_get(table, capability, OBJECT_RIGHT_CONTROL,
                                       OBJECT_TYPE_CAPABILITY);
     if (cap_object == NULL) return false;
@@ -132,6 +138,7 @@ bool capability_revoke(handle_table_t *table, handle_t capability) {
 object_t *capability_resolve(handle_table_t *table, handle_t capability,
                              uint32_t required_rights,
                              object_type_t expected_type) {
+    IRQ_GUARD;
     if (required_rights == 0 || (required_rights & ~OBJECT_RIGHT_ALL) != 0)
         return NULL;
     object_t *cap_object = handle_get(table, capability, OBJECT_RIGHT_READ,
@@ -152,6 +159,7 @@ object_t *capability_resolve(handle_table_t *table, handle_t capability,
 }
 
 bool capability_is_revoked(handle_table_t *table, handle_t capability) {
+    IRQ_GUARD;
     object_t *cap_object = handle_get(table, capability, OBJECT_RIGHT_READ,
                                       OBJECT_TYPE_CAPABILITY);
     if (cap_object == NULL) return false;
@@ -164,6 +172,7 @@ bool capability_is_revoked(handle_table_t *table, handle_t capability) {
 
 handle_t capability_create_memory_region(handle_table_t *table,
                                          uint64_t base, uint64_t size) {
+    IRQ_GUARD;
     if (table == NULL || size == 0 || (base & 0xfffu) != 0 ||
         (size & 0xfffu) != 0 || base > UINT64_MAX - size) return 0;
 
@@ -184,6 +193,7 @@ handle_t capability_create_memory_region(handle_table_t *table,
 
 bool capability_protect_memory(handle_table_t *table, handle_t capability,
                                uint64_t virtual_address, uint64_t flags) {
+    IRQ_GUARD;
     const uint64_t allowed_flags = VMM_PRESENT | VMM_WRITE | VMM_USER | VMM_NX;
     if ((virtual_address & 0xfffu) != 0 || (flags & ~allowed_flags) != 0)
         return false;

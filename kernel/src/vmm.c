@@ -23,6 +23,7 @@
 #include "io.h"
 #include "kstring.h"
 #include "pmm.h"
+#include "sync.h"
 
 #define ADDR_MASK 0x000FFFFFFFFFF000ULL
 #define FLAG_MASK (~ADDR_MASK)
@@ -31,6 +32,7 @@ static uint64_t g_hhdm;
 static uint64_t *g_pml4;
 
 void vmm_init(uint64_t hhdm_offset) {
+    IRQ_GUARD;
     g_hhdm = hhdm_offset;
     g_pml4 = (uint64_t *)(read_cr3() + g_hhdm);
 }
@@ -118,6 +120,7 @@ static uint64_t *walk(uint64_t virt, bool create) {
 }
 
 bool vmm_map(uint64_t virt, uint64_t phys, uint64_t flags) {
+    IRQ_GUARD;
     uint64_t *pte = walk(virt, true);
     if (pte == NULL) {
         return false;
@@ -128,6 +131,7 @@ bool vmm_map(uint64_t virt, uint64_t phys, uint64_t flags) {
 }
 
 bool vmm_unmap(uint64_t virt) {
+    IRQ_GUARD;
     uint64_t *pte = walk(virt, false);
     if (pte == NULL || !(*pte & VMM_PRESENT)) {
         return false;
@@ -138,6 +142,7 @@ bool vmm_unmap(uint64_t virt) {
 }
 
 bool vmm_protect(uint64_t virt, uint64_t flags) {
+    IRQ_GUARD;
     uint64_t *pte = walk(virt, false);
     if (pte == NULL || !(*pte & VMM_PRESENT)) {
         return false;
@@ -148,6 +153,7 @@ bool vmm_protect(uint64_t virt, uint64_t flags) {
 }
 
 bool vmm_get_mapping(uint64_t virt, uint64_t *phys_out, uint64_t *flags_out) {
+    IRQ_GUARD;
     uint64_t *pte = walk(virt, false);
     if (pte == NULL || !(*pte & VMM_PRESENT)) {
         return false;

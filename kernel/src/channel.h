@@ -1,0 +1,35 @@
+/* channel.h — bounded, non-blocking kernel message channels. */
+#ifndef HELIX_CHANNEL_H
+#define HELIX_CHANNEL_H
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "object.h"
+
+#define CHANNEL_MAX_CAPACITY 8u
+#define CHANNEL_MAX_MESSAGE_SIZE 128u
+
+typedef enum {
+    CHANNEL_OK = 0,
+    CHANNEL_EMPTY,
+    CHANNEL_FULL,
+    CHANNEL_TOO_LARGE,
+    CHANNEL_BUFFER_SMALL,
+    CHANNEL_CLOSED,
+    CHANNEL_DENIED,
+} channel_result_t;
+
+/* Create a bounded FIFO pair with distinct send-only and receive-only handles.
+ * Duplicating either handle may reduce its rights through the handle manager.
+ */
+bool channel_create_pair(handle_table_t *table, uint32_t capacity,
+                         handle_t *send_handle, handle_t *receive_handle);
+channel_result_t channel_send(handle_table_t *table, handle_t channel,
+                              const void *message, size_t size);
+channel_result_t channel_receive(handle_table_t *table, handle_t channel,
+                                 void *buffer, size_t buffer_size,
+                                 size_t *message_size);
+
+#endif /* HELIX_CHANNEL_H */

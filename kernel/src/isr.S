@@ -13,7 +13,7 @@
  * The resulting stack frame, from the stack pointer upward, is:
  *
  *   r15 r14 r13 r12 r11 r10 r9 r8 rbp rdi rsi rdx rcx rbx rax
- *   vector  error_code  rip  cs  rflags
+ *   vector  error_code  rip  cs  rflags  rsp  ss
  *
  * which is exactly `registers_t` in idt.h.
  */
@@ -95,6 +95,9 @@ IRQ 13, 45
 IRQ 14, 46
 IRQ 15, 47
 
+/* Kernel-only software interrupt used for cooperative yield and thread exit. */
+ISR_NOERR 48
+
 /* Everything else lands here. */
 .global isr_default
 isr_default:
@@ -120,8 +123,10 @@ isr_common:
     pushq %r15
 
     movq %rsp, %rdi        /* first argument: registers_t * */
+    andq $-16, %rsp        /* align the C call stack per the x86-64 ABI */
     cld
     call isr_handler
+    movq %rax, %rsp        /* handler may select another thread's frame */
 
     popq %r15
     popq %r14
@@ -153,7 +158,8 @@ interrupt_stubs:
     .quad isr24, isr25, isr26, isr27, isr28, isr29, isr30, isr31
     .quad irq0, irq1, irq2, irq3, irq4, irq5, irq6, irq7
     .quad irq8, irq9, irq10, irq11, irq12, irq13, irq14, irq15
+    .quad isr48
 
 .global interrupt_stub_count
 interrupt_stub_count:
-    .quad 48
+    .quad 49
