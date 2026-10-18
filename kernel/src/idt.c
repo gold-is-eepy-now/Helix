@@ -33,6 +33,11 @@ typedef struct {
 
 static idt_entry_t g_idt[256];
 static idt_ptr_t g_idt_ptr;
+static bool g_page_fault_armed;
+static bool g_page_fault_caught;
+static uint64_t g_expected_fault_address;
+static uint64_t g_fault_recovery_rip;
+static uint64_t g_expected_fault_error;
 
 /* Provided by isr.S. */
 extern void (*const interrupt_stubs[])(void);
@@ -95,8 +100,35 @@ void idt_init(void) {
     __asm__ volatile("lidt %0" : : "m"(g_idt_ptr) : "memory");
 }
 
+bool idt_expect_page_fault(uint64_t address, uint64_t recovery_rip) {
+    if (g_page_fault_armed || recovery_rip == 0) return false;
+    g_expected_fault_address = address;
+    g_fault_recovery_rip = recovery_rip;
+    g_expected_fault_error = 0;
+    g_page_fault_caught = false;
+    g_page_fault_armed = true;
+    return true;
+}
+
+void idt_clear_page_fault_expectation(void) {
+    g_page_fault_armed = false;
+    g_expected_fault_address = 0;
+    g_fault_recovery_rip = 0;
+}
+
+bool idt_expected_page_fault_caught(void) { return g_page_fault_caught; }
+uint64_t idt_expected_page_fault_error(void) { return g_expected_fault_error; }
+
 void isr_handler(registers_t *regs) {
     if (regs->vector < 32) {
+        if (regs->vector == 14 && g_page_fault_armed &&
+            read_cr2() == g_expected_fault_address) {
+            g_page_fault_armed = false;
+            g_page_fault_caught = true;
+            g_expected_fault_error = regs->error_code;
+            regs->rip = g_fault_recovery_rip;
+            return;
+        }
         console_set_fg(CONSOLE_BRIGHT_RED);
         kprintf("\n*** CPU EXCEPTION %llu: %s ***\n",
                 (unsigned long long)regs->vector, exception_name(regs->vector));

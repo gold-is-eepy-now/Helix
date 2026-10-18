@@ -1,8 +1,10 @@
 # Helix OS — Roadmap
 
 This roadmap is deliberately incremental. Each milestone is small enough to
-finish, boot, and document. **Do not start a milestone before the previous one
-boots and is documented.** The kernel does not become more real by writing more
+finish, boot, and document. **Do not start a milestone before its prerequisites
+are complete, boot-tested, and documented.** A later milestone may be completed
+early when it is independently useful, but that does not close unfinished work
+in an earlier milestone. The kernel does not become more real by writing more
 code faster; it becomes more real by always working.
 
 Legend: ✅ done · 🚧 in progress · ⛔ not started
@@ -54,7 +56,7 @@ user space, ELF loading, real filesystems, command history / completion.
 
 ---
 
-## M3 — Kernel runtime foundations and memory management 🚧
+## M3 — Kernel runtime foundations and memory management ✅
 
 The kernel becomes a real program that owns physical and virtual memory.
 
@@ -77,13 +79,22 @@ The kernel becomes a real program that owns physical and virtual memory.
   and accessing them through the Limine higher-half direct map.
 - ✅ Self-test (`memtest` command) that allocates, pattern-checks and frees.
 
-**Still to do in M3:**
+**M3 exit-gate implementation:**
 
-- ⛔ Guard pages and a non-executable stack.
-- ⛔ A dynamically sized frame bitmap (currently a static 128 KiB array caps
-  physical RAM at 4 GiB).
+- ✅ A dynamically sized frame bitmap based on the highest usable physical
+  address; its backing frames are reserved and counted in allocator stats.
+- ✅ A dedicated 32 KiB kernel stack with an unmapped guard page and NX
+  mappings; deliberate reads and execution attempts fault and recover through
+  the M4 page-fault handler.
 
-(Page tables, listed here originally, are done — see M4.)
+**M3 exit gate (passed):** the PMM sizes its bitmap from the boot memory map
+without silently truncating usable memory; allocator statistics account for
+its backing storage. The dedicated stack has an unmapped guard page and NX
+mapping. QEMU reports and recovers from deliberate boundary and execute
+faults; all 38 shell checks pass.
+
+**Sequencing note:** page tables were pulled forward into M4 and are complete.
+M5 object and handle APIs were started early; work now continues at M6.
 
 ## M4 — Interrupts, exceptions, timers and paging ✅
 
@@ -98,25 +109,44 @@ The kernel becomes a real program that owns physical and virtual memory.
   uptime.
 - ✅ Local-APIC routing so 8259 interrupts reach the CPU (LINT0 ExtINT, TPR 0).
 - ✅ New commands: `vmtest`, `ticks`, `swint`, `pitcount`, `fault`.
-- ✅ Test suite grown to 27 checks, including a deliberate fault caught and
-  reported.
+- ✅ The boot and shell suite covers the M4 paging, timer, and exception paths;
+  M3, M5 and initial M6 checks have since expanded it to 45 checks.
 
-**Still to do:** guard pages and a non-executable stack; APIC/IOAPIC timers;
-per-process address spaces (needs the object manager).
+**Still to do:** APIC/IOAPIC timers; per-process address spaces (needs the
+object manager).
 
-## M5 — The object manager
+## M5 — The object manager ✅
 
-- The first real Helix concept: a global object table.
-- Object types with reference counting.
-- Handles: per-process tables mapping small integers to objects with rights.
-- A native object API surface (create, open, close, inspect).
+- ✅ The first real Helix concept: a global object table.
+- ✅ Object types with reference counting.
+- ✅ Rights-bearing handles with stale-handle rejection and rights-reducing
+  duplication; the current kernel handle table is ready to move into processes.
+- ✅ A native kernel API for create, lookup/open, close, and inspect.
+- ✅ `objtest` self-test exercises multiple types, rights, duplication, invalid
+  handles, and final-reference destruction; automated QEMU coverage added.
+- ✅ Ownership and single-CPU synchronization assumptions documented; process-
+  owned handle tables and concurrent synchronization remain sequenced with M7.
 
-## M6 — Capabilities
+**M5 exit gate:** a kernel self-test creates and looks up multiple object types,
+duplicates and closes handles, rejects invalid handles and rights, and proves
+objects are destroyed exactly when their final reference is released. Document
+handle ownership and the synchronization assumptions before introducing
+concurrent callers in M7.
 
-- Capability objects that grant specific rights on specific objects.
-- Capability derivation, transfer over channels, and revocation.
-- Kernel enforcement points (every operation checks a capability).
-- Least-privilege defaults.
+## M6 — Capabilities 🚧
+
+- ✅ Capability objects bind a target object to an explicit rights subset.
+- ✅ Derivation only reduces rights; revoking a parent invalidates its subtree.
+- ✅ `capability_resolve()` checks revocation, requested rights and target type.
+- ✅ `captest` rejects rights enlargement and verifies subtree revocation.
+- ⛔ Capability transfer over channels (M8).
+- 🚧 Migrate privileged operations to require capabilities and establish
+  least-privilege defaults as those operations are added.
+
+**M6 exit gate:** self-tests must prove rights cannot be enlarged by
+derivation, revoked capabilities and descendants cannot resolve their targets,
+and kernel operations reject missing or insufficient capabilities. Channel
+transfer remains sequenced with M8.
 
 ## M7 — Threads and scheduler
 
@@ -180,3 +210,11 @@ object system. They are not allowed to distort the native design.
 - SMP on every milestone. Get one CPU rock-solid before adding more.
 - Being fast. Be correct, then be fast.
 - Security-hardening details before there is anything to secure.
+
+## Doom experiment
+
+| DoomGeneric source imported (GPL-2.0-or-later)                  | ✅ upstream revision pinned              |
+| Optional IWAD passed as Limine module                           | ✅ `DOOM_WAD=/path/to/doom1.wad`          |
+| Helix framebuffer + keyboard event primitives                   | ✅ groundwork                            |
+| Doom runtime, WAD reader, input/timing glue                     | ⛔ in progress                            |
+| Launch Doom from Helix shell and play under QEMU                | ⛔ not yet working                        |

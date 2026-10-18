@@ -5,6 +5,7 @@
 #include "cpu.h"
 
 #include <stdint.h>
+#include <stdbool.h>
 
 static void cpuid(uint32_t leaf, uint32_t *a, uint32_t *b, uint32_t *c, uint32_t *d) {
     __asm__ volatile("cpuid"
@@ -64,4 +65,18 @@ void cpu_brand(char *out) {
         }
         out[i] = '\0';
     }
+}
+
+bool cpu_enable_nx(void) {
+    uint32_t max_ext, b, c, d;
+    cpuid(0x80000000u, &max_ext, &b, &c, &d);
+    if (max_ext < 0x80000001u) return false;
+    cpuid(0x80000001u, &max_ext, &b, &c, &d);
+    if ((d & (1u << 20)) == 0) return false;
+
+    uint32_t low, high;
+    __asm__ volatile("rdmsr" : "=a"(low), "=d"(high) : "c"(0xC0000080u));
+    low |= 1u << 11; /* EFER.NXE */
+    __asm__ volatile("wrmsr" : : "a"(low), "d"(high), "c"(0xC0000080u) : "memory");
+    return true;
 }

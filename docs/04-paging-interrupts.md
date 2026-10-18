@@ -5,6 +5,15 @@ memory it controls**, a **CPU exception handler that explains what went wrong**,
 and a **live timer interrupt**. It also produced two genuinely instructive bugs,
 both documented below.
 
+### Physical frame allocator storage
+
+The PMM sizes its bitmap from the highest usable physical frame in Limine's
+memory map. It stores the bitmap in a contiguous usable run reachable through
+the HHDM, marks those backing frames reserved, and includes them in the
+allocated-frame count. `pmm_bitmap_bytes()` reports the actual bitmap size;
+managed memory is no longer capped by a fixed 4 GiB array. Initialization
+fails closed if the bitmap cannot be placed or the memory map/HHDM is missing.
+
 > **Honest scope.** We now own page tables and take hardware interrupts. We do
 > **not** yet have a scheduler, threads, user space, or `mmap` for programs.
 > Those build on exactly this foundation.
@@ -225,7 +234,7 @@ endif
 ## 7. How to test it
 
 ```sh
-make test        # 27 checks: boot, shell, memory, paging, timer, exception
+make test        # 45 checks: boot, shell, memory, paging, stack, objects, capabilities
 ```
 
 `make test` now also verifies that the tick count is genuinely advancing (not
@@ -236,7 +245,10 @@ reported. Everything else from M2 and M3 still passes.
 
 ## 8. What's next
 
-**M5 — the object manager**, the first genuinely Helix-specific subsystem:
-kernel objects with reference counts, and per-process handle tables. Paging is
-what makes address spaces possible; the object manager is what makes them
-Helix rather than Unix.
+`stacktest` checks the dedicated 32 KiB stack, deliberately reads the
+non-present guard page, and tries to execute a page mapped NX. The page-fault
+handler recovers from both probes and the command checks their x86 fault codes.
+The test suite now covers these M3 checks.
+
+The M3 exit gate is complete, and the M5 object manager exit gate passes. Work
+continues with **M6 — capabilities**, built on those object and handle APIs.

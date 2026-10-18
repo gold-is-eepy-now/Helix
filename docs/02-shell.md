@@ -167,6 +167,13 @@ shows it; typing `myprog arg1 arg2` runs it.
 | `sysinfo` / `neofetch` / `about` | Neofetch-style system info panel |
 | `cpu` | CPU vendor (CPUID leaf 0) and brand (leaves 0x80000002–4) |
 | `mem` | total/usable RAM and a row-by-row physical memory map |
+| `pmm` / `heap` | physical-frame and kernel-heap statistics |
+| `memtest` / `vmtest` | self-tests for heap and virtual-memory operations |
+| `stacktest` | checks dedicated stack, guard-page fault recovery and NX enforcement |
+| `objects` | live object count and kernel handle-table usage |
+| `objtest` | self-test for object references, handle rights and closing |
+| `captest` | self-test for capability derivation, rights checks and revocation |
+| `ticks` / `uptime` | PIT timer progress and time since boot |
 | `uptime` | seconds and milliseconds since boot |
 | `version` | name, version, codename |
 | `echo` | prints its arguments |
@@ -184,7 +191,7 @@ and prints it beside a small ASCII logo:
 ```
    ##      ##   founder@helix
    ##      ##   -------------
-   ##      ##   OS:       Helix OS 0.2.0
+   ##      ##   OS:       Helix OS 0.5.0-dev.20261018
    ###########  Kernel:   x86_64, long mode
    ###########  Uptime:   <...>
    ##      ##   Shell:    helixsh

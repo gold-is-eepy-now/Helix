@@ -13,12 +13,15 @@
 
 #include <limine.h>
 
+#include "capability.h"
 #include "console.h"
 #include "cpu.h"
 #include "heap.h"
 #include "io.h"
+#include "kernel_stack.h"
 #include "kstring.h"
 #include "memory.h"
+#include "object.h"
 #include "panic.h"
 #include "pit.h"
 #include "pmm.h"
@@ -324,6 +327,215 @@ static void cmd_vmtest(int argc, char **argv) {
     kprintf("  result: %s\n", ok ? "PASS" : "FAIL");
 }
 
+static void cmd_stacktest(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    console_write("Kernel stack protection self-test\n");
+    bool active = kernel_stack_active();
+    console_write(active ? "  execution is on the dedicated stack: ok\n"
+                         : "  execution is on the dedicated stack: FAILED\n");
+
+    uint64_t guard_error = UINT64_MAX;
+    bool guard_caught = kernel_stack_probe_guard(&guard_error);
+    bool guard_ok = guard_caught && (guard_error & 0x1fu) == 0;
+    kprintf("  guard page fault: %s (error %p)\n",
+            guard_ok ? "reported and recovered" : "FAILED",
+            (uintptr_t)guard_error);
+
+    uint64_t nx_error = UINT64_MAX;
+    bool nx_caught = kernel_stack_probe_nx(&nx_error);
+    bool nx_ok = nx_caught && (nx_error & 0x11u) == 0x11u &&
+                 (nx_error & 0x0eu) == 0;
+    kprintf("  NX execute fault: %s (error %p)\n",
+            nx_ok ? "reported and recovered" : "FAILED",
+            (uintptr_t)nx_error);
+    bool ok = active && guard_ok && nx_ok;
+    console_write(ok ? "  M3 stack self-test: PASS\n"
+                     : "  M3 stack self-test: FAIL\n");
+}
+
+static uint64_t g_objtest_destroyed;
+
+static void objtest_destroy(object_t *object, void *payload) {
+    (void)object;
+    (void)payload;
+    g_objtest_destroyed++;
+}
+
+static bool objtest_check(bool passed, const char *label) {
+    console_write("  ");
+    console_write(label);
+    console_write(passed ? ": ok\n" : ": FAILED\n");
+    return passed;
+}
+
+static void cmd_objects(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    kprintf("Object manager\n");
+    kprintf("  live objects : %llu\n", (unsigned long long)object_count());
+    kprintf("  kernel handles: %llu / %u\n",
+            (unsigned long long)handle_count(object_kernel_handles()),
+            HANDLE_TABLE_CAPACITY);
+    console_write("  synchronization: single-CPU, kernel-context callers only\n");
+}
+
+static void cmd_objtest(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    console_write("Object and handle self-test\n");
+
+    const uint64_t before = object_count();
+    g_objtest_destroyed = 0;
+    handle_table_t table;
+    handle_table_init(&table);
+    object_t *event = object_create(OBJECT_TYPE_EVENT, sizeof(uint64_t), objtest_destroy);
+    object_t *channel = object_create(OBJECT_TYPE_CHANNEL, sizeof(uint64_t), objtest_destroy);
+    bool ok = objtest_check(event != NULL && channel != NULL &&
+                            object_count() == before + 2,
+                            "create event and channel objects");
+    if (event == NULL || channel == NULL) {
+        if (event != NULL) object_release(event);
+        if (channel != NULL) object_release(channel);
+        objtest_check(false, "remaining lifetime checks (allocation failed)");
+        return;
+    }
+
+    uint64_t event_id = object_id(event);
+    uint64_t channel_id = object_id(channel);
+    handle_t event_handle = handle_create(&table, event,
+        OBJECT_RIGHT_READ | OBJECT_RIGHT_WRITE | OBJECT_RIGHT_DUPLICATE |
+        OBJECT_RIGHT_INSPECT);
+    handle_t channel_handle = handle_create(&table, channel,
+        OBJECT_RIGHT_READ | OBJECT_RIGHT_INSPECT);
+    object_release(event);
+    object_release(channel);
+    ok &= objtest_check(event_handle != 0 && channel_handle != 0 &&
+                        handle_count(&table) == 2,
+                        "create handles with per-handle rights");
+
+    object_t *looked_up = object_lookup(channel_id);
+    bool lookup_ok = looked_up != NULL && object_type(looked_up) == OBJECT_TYPE_CHANNEL;
+    if (looked_up != NULL) object_release(looked_up);
+    ok &= objtest_check(lookup_ok, "global lookup retains the requested type");
+
+    object_t *got = handle_get(&table, event_handle, OBJECT_RIGHT_READ,
+                               OBJECT_TYPE_EVENT);
+    bool get_ok = got != NULL && object_type(got) == OBJECT_TYPE_EVENT;
+    if (got != NULL) object_release(got);
+    ok &= objtest_check(get_ok, "handle lookup checks type and rights");
+    ok &= objtest_check(handle_get(&table, channel_handle, OBJECT_RIGHT_WRITE,
+                                   OBJECT_TYPE_NONE) == NULL &&
+                        handle_get(&table, channel_handle, OBJECT_RIGHT_READ,
+                                   OBJECT_TYPE_EVENT) == NULL &&
+                        handle_get(&table, event_handle, 0,
+                                   OBJECT_TYPE_NONE) == NULL &&
+                        handle_get(&table, 0x7fffffffu, OBJECT_RIGHT_READ,
+                                   OBJECT_TYPE_NONE) == NULL,
+                        "reject missing/zero rights, wrong type, and invalid handle");
+
+    handle_info_t info;
+    ok &= objtest_check(handle_inspect(&table, event_handle, &info) &&
+                        info.object_id == event_id &&
+                        info.type == OBJECT_TYPE_EVENT &&
+                        (info.rights & OBJECT_RIGHT_DUPLICATE),
+                        "inspect handle metadata");
+
+    handle_t reduced = handle_duplicate(&table, event_handle,
+        OBJECT_RIGHT_READ | OBJECT_RIGHT_INSPECT);
+    ok &= objtest_check(reduced != 0 &&
+                        handle_duplicate(&table, event_handle,
+                                         OBJECT_RIGHT_CONTROL) == 0 &&
+                        handle_duplicate(&table, channel_handle,
+                                         OBJECT_RIGHT_READ) == 0,
+                        "duplicate only with reduced rights");
+
+    bool closed_source = handle_close(&table, event_handle);
+    bool stale_rejected = !handle_close(&table, event_handle) &&
+        handle_get(&table, event_handle, OBJECT_RIGHT_READ, OBJECT_TYPE_NONE) == NULL;
+    object_t *temporary = object_lookup(event_id);
+    bool alive_through_duplicate = temporary != NULL;
+    if (temporary != NULL) object_release(temporary);
+    ok &= objtest_check(closed_source && stale_rejected && alive_through_duplicate,
+                        "close invalidates a handle but preserves shared object");
+
+    bool closed_duplicate = handle_close(&table, reduced);
+    bool destroyed_once = g_objtest_destroyed == 1 && object_lookup(event_id) == NULL;
+    ok &= objtest_check(closed_duplicate && destroyed_once,
+                        "destroy object after its final handle closes");
+    bool closed_channel = handle_close(&table, channel_handle);
+    bool invalid_close_rejected = !handle_close(&table, channel_handle);
+    ok &= objtest_check(closed_channel && invalid_close_rejected &&
+                        object_lookup(channel_id) == NULL &&
+                        g_objtest_destroyed == 2 && object_count() == before,
+                        "close channel once and release final reference");
+    handle_table_close_all(&table);
+    console_write(ok ? "  M5 object self-test: PASS\n"
+                     : "  M5 object self-test: FAIL\n");
+}
+
+static void cmd_captest(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    console_write("Capability self-test\n");
+
+    uint64_t before = object_count();
+    g_objtest_destroyed = 0;
+    handle_table_t table;
+    handle_table_init(&table);
+    object_t *target = object_create(OBJECT_TYPE_EVENT, 0, objtest_destroy);
+    if (target == NULL) {
+        console_write("  create target object: FAILED\n");
+        console_write("  M6 capability self-test: FAIL\n");
+        return;
+    }
+    handle_t source = handle_create(&table, target,
+        OBJECT_RIGHT_READ | OBJECT_RIGHT_WRITE | OBJECT_RIGHT_DUPLICATE |
+        OBJECT_RIGHT_INSPECT);
+    object_release(target);
+    bool ok = objtest_check(source != 0, "create source object handle");
+
+    handle_t cap = capability_create(&table, source,
+                                     OBJECT_RIGHT_READ | OBJECT_RIGHT_WRITE);
+    handle_t child = capability_derive(&table, cap, OBJECT_RIGHT_READ);
+    bool overgrant_rejected = capability_derive(&table, child,
+                                                OBJECT_RIGHT_WRITE) == 0 &&
+        capability_create(&table, source, OBJECT_RIGHT_CONTROL) == 0;
+    ok &= objtest_check(cap != 0 && child != 0,
+                        "create capability and derive reduced rights");
+    ok &= objtest_check(overgrant_rejected,
+                        "reject capability rights enlargement");
+
+    object_t *resolved = capability_resolve(&table, cap, OBJECT_RIGHT_WRITE,
+                                           OBJECT_TYPE_EVENT);
+    bool resolve_ok = resolved != NULL;
+    if (resolved != NULL) object_release(resolved);
+    object_t *forbidden = capability_resolve(&table, child, OBJECT_RIGHT_WRITE,
+                                             OBJECT_TYPE_NONE);
+    object_t *wrong_type = capability_resolve(&table, cap, OBJECT_RIGHT_READ,
+                                              OBJECT_TYPE_CHANNEL);
+    ok &= objtest_check(resolve_ok && forbidden == NULL && wrong_type == NULL,
+                        "enforce granted rights and target type");
+    if (forbidden != NULL) object_release(forbidden);
+    if (wrong_type != NULL) object_release(wrong_type);
+    ok &= objtest_check(!capability_revoke(&table, child),
+                        "derived capability cannot revoke its parent");
+
+    bool revoked = capability_revoke(&table, cap);
+    ok &= objtest_check(revoked && capability_is_revoked(&table, child) &&
+                        capability_resolve(&table, cap, OBJECT_RIGHT_READ,
+                                           OBJECT_TYPE_NONE) == NULL &&
+                        capability_resolve(&table, child, OBJECT_RIGHT_READ,
+                                           OBJECT_TYPE_NONE) == NULL,
+                        "revoke parent and invalidate every descendant");
+
+    handle_table_close_all(&table);
+    ok &= objtest_check(object_count() == before && g_objtest_destroyed == 1,
+                        "release capabilities and target at final close");
+    console_write(ok ? "  M6 capability self-test: PASS\n"
+                     : "  M6 capability self-test: FAIL\n");
+}
+
 static void cmd_ticks(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -485,6 +697,10 @@ const command_t helix_commands[] = {
     {"heap",    "kernel heap statistics",                cmd_heap},
     {"memtest", "exercise kmalloc/kfree",                cmd_memtest},
     {"vmtest",  "exercise map/unmap/protect",            cmd_vmtest},
+    {"stacktest","verify guarded NX kernel stack",       cmd_stacktest},
+    {"objects", "show object manager statistics",        cmd_objects},
+    {"objtest", "exercise objects and handles",          cmd_objtest},
+    {"captest", "exercise capability rights and revocation", cmd_captest},
     {"ticks",   "show the PIT timer tick count",         cmd_ticks},
     {"swint",   "software-trigger the timer vector",      cmd_swint},
     {"pitcount","read the raw PIT counter (diagnostic)",  cmd_pitcount},
