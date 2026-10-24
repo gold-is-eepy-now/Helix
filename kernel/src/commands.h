@@ -8,6 +8,7 @@
 #ifndef HELIX_COMMANDS_H
 #define HELIX_COMMANDS_H
 
+#include <stdbool.h>
 #include <stddef.h>
 
 typedef void (*command_fn)(int argc, char **argv);
@@ -20,5 +21,8 @@ typedef struct {
 
 extern const command_t helix_commands[];
 extern const size_t helix_command_count;
+
+/* Run the boot-provided shell as the initial user process, if present. */
+bool commands_start_init(void);
 
 #endif /* HELIX_COMMANDS_H */

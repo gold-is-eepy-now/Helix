@@ -86,7 +86,8 @@ A capability is itself an object. Capabilities can be:
 The kernel enforces capabilities at every operation boundary. There is no
 ambient "root".
 
-**Status:** not implemented. Planned for M6.
+**Status:** capability objects and revocation are implemented (M6); kernel
+services are still migrating to capability checks.
 
 ## IPC: channels and messages
 
@@ -97,7 +98,8 @@ native mechanism for:
 - transferring handles and capabilities,
 - driver I/O.
 
-**Status:** not implemented. Planned for M8.
+**Status:** bounded channels, blocking receive and reduced-rights capability
+transfer are implemented in M8. Cross-process messaging awaits user space.
 
 ## Drivers
 
@@ -138,7 +140,10 @@ User space reaches the kernel through a native system-call ABI built around
 objects and handles — not `open`/`read`/`write`. An ELF loader for native
 executables and a minimal native runtime follow.
 
-**Status:** not implemented. Planned for M9.
+**Status:** M9 has private lower-half page-table roots, a restricted static
+ELF64 loader, a `.hlx` boot-module handoff, and a native app confirmed in QEMU.
+The initial `int 0x80` write/exit ABI passed in QEMU. Fast syscall entry,
+process scheduling, and the new C wrapper runtime remain ahead.
 
 ## Compatibility layers
 

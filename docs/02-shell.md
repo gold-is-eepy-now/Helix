@@ -31,7 +31,7 @@ power → UEFI → Limine → kmain()
                     ├─ boot banner (HELIX OS / ...)
                     ├─ status lines (console, memory, clock)
                     │
-                    └─ shell_run() ─────────► helix>
+                    └─ shell_run() ─────────► helix:/#
 ```
 
 ---
@@ -72,6 +72,13 @@ HEADLESS=0 make run
 - **Enter** (`\r` or `\n`) submits the line;
 - **Ctrl-C** cancels the current line and prints `^C`;
 - **Ctrl-L** redraws the screen (useful after garbled terminal output).
+- **Up/Down** browse the 16 most recent nonempty commands; history is held in
+  RAM and resets at reboot. Consecutive duplicate commands are coalesced.
+
+The prompt is `helix:/#`, identifying the current root-level kernel shell
+without claiming that Helix already has login accounts or a home directory.
+The planned user-space shell can use a `user@helix:~$` style prompt once those
+concepts exist.
 
 The serial terminal handles its own cursor; the framebuffer shows an
 underscore at the next character cell, erased and redrawn on every keystroke
@@ -121,7 +128,7 @@ The fix has three parts:
 If even that is hard to read on your terminal, use the escape hatch:
 
 ```
-helix> color off
+helix:/# color off
 ```
 
 That suppresses ANSI colour entirely and lets your terminal's own default
@@ -167,14 +174,44 @@ shows it; typing `myprog arg1 arg2` runs it.
 | `sysinfo` / `neofetch` / `about` | Neofetch-style system info panel |
 | `cpu` | CPU vendor (CPUID leaf 0) and brand (leaves 0x80000002–4) |
 | `mem` | total/usable RAM and a row-by-row physical memory map |
+| `pmm` / `heap` | physical-frame and kernel-heap statistics |
+| `memtest` / `vmtest` | self-tests for heap and virtual-memory operations |
+| `runapp` | launch the boot-provided native `.hlx` sample (exits with status 42) |
+| `stacktest` | checks dedicated stack, guard-page fault recovery and NX enforcement |
+| `objects` | live object count and kernel handle-table usage |
+| `objtest` | self-test for object references, handle rights and closing |
+| `captest` | self-test for capability derivation, rights checks and revocation |
+| `ticks` / `uptime` | PIT timer progress and time since boot |
 | `uptime` | seconds and milliseconds since boot |
 | `version` | name, version, codename |
 | `echo` | prints its arguments |
-| `calc` | `calc <a> <op> <b>` for `+ - * / %` (integers only) |
 | `clear` | clear the screen |
 | `color` | turn ANSI colour on/off: `color on`, `color off` |
 | `halt` | halt the machine (you may close the QEMU window) |
 | `reboot` | reset the machine |
+
+The rescue shell is for diagnostics and recovery. User applications are
+available from the booted userland shell:
+
+| Application | What it does |
+|---|---|
+| `edit [HFS_PATH]` | Helix Edit; HFS files can be loaded and saved, and new root-level `.TXT` files can be created on FAT32 USB0 |
+| `calc A OP B` | signed 32-bit integer calculator for `+`, `-`, `*`, and `/` |
+| `about` | userland alias for the system information panel |
+| `ls` / `cd DIR` / `cd ..` / `pwd` | browse the attached FAT32 USB volume by short 8.3 directory names |
+
+### Helix Edit
+
+Run `edit` to open the built-in multiline editor. Arrow keys move the cursor;
+Home/End move within a line; typing inserts text; Backspace and Delete remove
+text. Ctrl-S prompts for a short 8.3 `NAME.TXT` and creates that file in the
+root of a FAT32 USB volume mounted as `usb0`. It refuses an existing name and
+currently supports files up to 8 KiB. Ctrl-Q exits a clean buffer, and Escape
+discards unsaved edits. Opening existing files, overwriting, choosing
+subdirectories, and HDD/SSD mounts remain future work.
+
+The command history is also volatile for now. Persistent history and path-based
+editing depend on HFS and file-syscall support (M11).
 
 ### The `sysinfo` panel
 
@@ -182,9 +219,9 @@ shows it; typing `myprog arg1 arg2` runs it.
 and prints it beside a small ASCII logo:
 
 ```
-   ##      ##   founder@helix
-   ##      ##   -------------
-   ##      ##   OS:       Helix OS 0.2.0
+   ##      ##   Helix OS
+   ##      ##   ---------
+   ##      ##   OS:       Helix OS 0.5.0-dev.20261018
    ###########  Kernel:   x86_64, long mode
    ###########  Uptime:   <...>
    ##      ##   Shell:    helixsh

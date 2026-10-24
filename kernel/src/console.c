@@ -1,7 +1,7 @@
 /* console.c — fan text out to serial and (optionally) the framebuffer.
  *
- * The serial console is mandatory: it is how automated tests read what the
- * kernel printed. The framebuffer is best-effort. Keeping those two concerns
+ * The serial console is used when a COM1 UART is present; the framebuffer is
+ * the visible fallback. Keeping those two concerns
  * behind one small interface means the rest of the kernel never has to know
  * where text ends up — or that colour is ANSI on one backend and RGB on the
  * other.
@@ -181,6 +181,20 @@ void console_clear(void) {
     if (g_fb_ok) {
         fb_clear(fb_pack(g_bg, true));
     }
+}
+
+void console_cursor_to(size_t row, size_t column) {
+    serial_write("\x1b[");
+    serial_write_uint((uint32_t)(row + 1));
+    serial_write(";");
+    serial_write_uint((uint32_t)(column + 1));
+    serial_write("H");
+    if (g_fb_ok) fb_cursor_to(row, column);
+}
+
+void console_clear_current_line(void) {
+    serial_write("\x1b[2K");
+    if (g_fb_ok) fb_clear_current_line();
 }
 
 void console_set_fg(console_color_t color) {

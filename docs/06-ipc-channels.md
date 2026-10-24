@@ -1,0 +1,32 @@
+# M8: IPC channels
+
+The first channel slice adds bounded, non-blocking kernel message queues. A
+channel pair has separate send-only and receive-only handles, backed by one
+shared FIFO. Handle rights are checked on every operation. Closing the final
+handle for an endpoint makes the peer observe `CHANNEL_CLOSED` once its queued
+messages have been drained.
+
+The initial limits are eight queued messages per channel and 128 bytes per
+message. A full queue returns `CHANNEL_FULL`; an empty queue returns
+`CHANNEL_EMPTY` while a sender remains open. If the receive buffer is too
+small, the message stays queued and the required size is returned.
+
+The API is in `kernel/src/channel.h`. `channel_create_pair()` creates one
+send handle and one receive handle in a handle table. `channel_send()` and
+`channel_receive()` are non-blocking. `channel_receive_wait()` sleeps the
+calling kernel thread while the queue is empty and returns `CHANNEL_WOULD_BLOCK`
+if no other thread is runnable. A send wakes one waiter; closing the final
+sender or receiver wakes all waiters so they can observe closure.
+`channel_receive_timeout()` adds a deadline expressed in PIT ticks at 100 Hz;
+an empty queue at the deadline returns `CHANNEL_TIMED_OUT`.
+
+Operations are protected against PIT preemption on the current single CPU.
+`chantest` covers queue limits, endpoint rights, FIFO reads, closure and
+object cleanup; it has passed in QEMU. `chanwaittest` covers blocking receive,
+message wake-up, close wake-up and the no-runnable-thread case; it has passed
+in QEMU. `channel_send_capability()` derives a capability with reduced object
+rights before queueing it, and `channel_receive_capability()` creates the new
+handle in the receiver's table. `capxfer` passed in QEMU. Timeouts are measured
+in PIT ticks; `chantimeout` passed in QEMU. Cross-process IPC remains future
+work because Helix does not yet have user processes. These queues are kernel
+objects and do not yet provide user-space IPC.

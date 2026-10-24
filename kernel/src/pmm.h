@@ -15,8 +15,9 @@ struct limine_memmap_response;
 
 #define PAGE_SIZE 4096u
 
-/* Build the frame bitmap from the bootloader memory map. */
-void pmm_init(struct limine_memmap_response *memmap);
+/* Build the frame bitmap from the bootloader memory map, placing its backing
+ * storage in a reserved usable run reachable through the HHDM. */
+void pmm_init(struct limine_memmap_response *memmap, uint64_t hhdm_offset);
 
 /* Allocate one frame; returns its physical address, or 0 if out of memory. */
 uintptr_t pmm_alloc_frame(void);

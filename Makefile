@@ -1,13 +1,14 @@
 # Helix OS — top-level build
 #
-#   make            build the bootable disk image (default target)
+#   make            build the bootable disk image (includes FreeDoom Phase 1)
 #   make kernel     build only the kernel ELF
 #   make deps       download the Limine bootloader binaries
 #   make run        boot the image in QEMU (serial on your terminal)
 #   make test       boot headlessly and verify the boot banner
 #   make clean      remove build output
 #
-# Every path is overridable, which is how the sandbox builds out-of-tree:
+# The first default image build downloads pinned FreeDoom game data. Override
+# DOOM_WAD to use a different IWAD. Every path is overridable, which is how the sandbox builds out-of-tree:
 #   make BUILD_DIR=/home/user/helix-build test
 
 BUILD_DIR ?= $(CURDIR)/build
@@ -19,10 +20,42 @@ LIMINE_URL     := https://github.com/Limine-Bootloader/Limine/releases/download/
 DEPS_DIR       := $(BUILD_DIR)/deps
 LIMINE_DIR     := $(DEPS_DIR)/limine-binary
 IMAGE          := $(BUILD_DIR)/helix.img
+HELIX_APP      := $(BUILD_DIR)/hello.hlx
+HELIX_SHELL    := $(BUILD_DIR)/shell.hlx
+HELIX_APP_OBJS := $(BUILD_DIR)/hello-app.o $(BUILD_DIR)/libhelix.o
+HELIX_SHELL_OBJS := $(BUILD_DIR)/shell-app.o $(BUILD_DIR)/fat32.o $(BUILD_DIR)/libhelix.o
+USER_CFLAGS    := -std=gnu11 -O2 -Wall -Wextra -ffreestanding -fno-builtin \
+	-fno-stack-protector -fno-pic -fno-pie -mno-red-zone -mno-sse -mno-mmx \
+	-mno-80387 -mgeneral-regs-only -m64 -march=x86-64 -Iuser/include
+FREEDOOM_VERSION := 0.13.0
+FREEDOOM_ZIP     := $(DEPS_DIR)/freedoom-$(FREEDOOM_VERSION).zip
+FREEDOOM_DIR     := $(DEPS_DIR)/freedoom-$(FREEDOOM_VERSION)
+FREEDOOM_WAD     := $(FREEDOOM_DIR)/freedoom1.wad
 
-.PHONY: all kernel deps image iso disks run test clean
+ifeq ($(origin DOOM_WAD),undefined)
+ifneq ($(wildcard $(CURDIR)/freedoom1.wad),)
+DOOM_WAD := $(CURDIR)/freedoom1.wad
+DOOM_WAD_DEP :=
+else
+DOOM_WAD := $(FREEDOOM_WAD)
+DOOM_WAD_DEP := freedoom
+endif
+DOOM_LICENSE := $(CURDIR)/third_party/freedoom/COPYING.adoc
+else
+DOOM_LICENSE ?=
+DOOM_WAD_DEP :=
+endif
+
+.PHONY: all kernel deps freedoom app image installer-image iso disks run test clean mkhfs
 
 all: image
+
+# Create a disposable HFS v1 filesystem image without overwriting an existing file:
+#   make mkhfs HFS_IMAGE=build/hfs-test.img HFS_SIZE_MIB=64
+HFS_IMAGE ?= $(BUILD_DIR)/hfs-test.img
+HFS_SIZE_MIB ?= 64
+mkhfs:
+	python3 tools/mkhfs.py "$(HFS_IMAGE)" --size-mib "$(HFS_SIZE_MIB)"
 
 kernel:
 	@$(MAKE) -C kernel BUILD_DIR="$(BUILD_DIR)"
@@ -36,21 +69,76 @@ $(LIMINE_DIR)/BOOTX64.EFI:
 	@tar xzf "$(DEPS_DIR)/limine-binary.tar.gz" -C "$(DEPS_DIR)"
 	@echo "[deps] Limine ready in $(LIMINE_DIR)"
 
-image: kernel deps
+freedoom: $(FREEDOOM_WAD)
+
+app: $(HELIX_APP) $(HELIX_SHELL)
+
+$(BUILD_DIR)/hello-app.o: user/hello.c user/include/helix.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(USER_CFLAGS) -c "$<" -o "$@"
+
+$(BUILD_DIR)/shell-app.o: user/shell.c user/include/helix.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(USER_CFLAGS) -c "$<" -o "$@"
+
+$(BUILD_DIR)/fat32.o: user/fat32.c user/include/helix.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(USER_CFLAGS) -c "$<" -o "$@"
+
+$(BUILD_DIR)/libhelix.o: user/libhelix.c user/include/helix.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(USER_CFLAGS) -c "$<" -o "$@"
+
+$(HELIX_APP): $(HELIX_APP_OBJS) user/hello.ld
+	$(CC) -nostdlib -static -no-pie -Wl,-T,user/hello.ld \
+	 -Wl,-z,max-page-size=0x1000 -Wl,--build-id=none $(HELIX_APP_OBJS) -o "$@"
+
+$(HELIX_SHELL): $(HELIX_SHELL_OBJS) user/hello.ld
+	$(CC) -nostdlib -static -no-pie -Wl,-T,user/hello.ld \
+	 -Wl,-z,max-page-size=0x1000 -Wl,--build-id=none $(HELIX_SHELL_OBJS) -o "$@"
+
+$(FREEDOOM_ZIP):
+	@mkdir -p "$(DEPS_DIR)"
+	@echo "[deps] downloading Freedoom $(FREEDOOM_VERSION)"
+	@curl -fL --retry 2 --silent --show-error -o "$@.tmp" \
+	 "https://github.com/freedoom/freedoom/releases/download/v$(FREEDOOM_VERSION)/freedoom-$(FREEDOOM_VERSION).zip"
+	@echo "3f9b264f3e3ce503b4fb7f6bdcb1f419d93c7b546f4df3e874dd878db9688f59  $@.tmp" | shasum -a 256 -c -
+	@mv "$@.tmp" "$@"
+
+$(FREEDOOM_WAD): $(FREEDOOM_ZIP)
+	@mkdir -p "$(FREEDOOM_DIR)"
+	@unzip -p "$(FREEDOOM_ZIP)" "freedoom-$(FREEDOOM_VERSION)/freedoom1.wad" > "$@.tmp"
+	@test "$$(wc -c < "$@.tmp" | tr -d ' ')" = 28795076 || { rm -f "$@.tmp"; echo "[deps] unexpected Freedoom IWAD size" >&2; exit 1; }
+	@mv "$@.tmp" "$@"
+
+image: kernel deps $(DOOM_WAD_DEP) $(HELIX_APP) $(HELIX_SHELL)
 	@BUILD_DIR="$(BUILD_DIR)" \
 	 KERNEL="$(BUILD_DIR)/kernel" \
 	 LIMINE_DIR="$(LIMINE_DIR)" \
 	 IMAGE="$(IMAGE)" \
+	 HELIX_APP="$(HELIX_APP)" \
+	 HELIX_SHELL="$(HELIX_SHELL)" \
 	 LIMINE_CONF="$(CURDIR)/limine.conf" \
+	 DOOM_WAD="$(DOOM_WAD)" \
+	 DOOM_LICENSE="$(DOOM_LICENSE)" \
 	 sh tools/mkimage.sh
 
-# Bootable UEFI CD/DVD image (attach as an optical drive).
-iso: image
+# Build a WAD-free boot disk in a separate tree; the installer ISO carries this
+# complete GPT/ESP/HFS image as a boot module for installation to blank media.
+installer-image:
+	@mkdir -p "$(BUILD_DIR)/installer"
+	@$(MAKE) BUILD_DIR="$(BUILD_DIR)" IMAGE="$(BUILD_DIR)/installer/helix.img" DOOM_WAD= image
+
+# Bootable UEFI CD/DVD installer image (attach as an optical drive).
+iso: installer-image
 	@BUILD_DIR="$(BUILD_DIR)" \
 	 KERNEL="$(BUILD_DIR)/kernel" \
 	 LIMINE_DIR="$(LIMINE_DIR)" \
 	 ISO="$(BUILD_DIR)/helix.iso" \
 	 LIMINE_CONF="$(CURDIR)/limine.conf" \
+	 HELIX_APP="$(HELIX_APP)" \
+	 HELIX_SHELL="$(HELIX_SHELL)" \
+	 INSTALL_IMAGE="$(BUILD_DIR)/installer/helix.img" \
 	 sh tools/mkiso.sh
 
 # Hypervisor disk formats (VDI/VMDK/VHD) converted from the raw image.

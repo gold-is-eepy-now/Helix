@@ -22,6 +22,14 @@ void fb_set_colors(uint32_t fg, uint32_t bg);
 
 /* Fill the whole screen with one packed colour and home the cursor. */
 void fb_clear(uint32_t color);
+void fb_cursor_to(size_t row, size_t column);
+void fb_clear_current_line(void);
+
+/* Present packed 0x00RRGGBB pixels, scaling them to fit while preserving the
+ * source aspect ratio. This switches the framebuffer into graphics mode and
+ * disables text cursor updates until fb_graphics_end(). */
+bool fb_present_rgb(const uint32_t *pixels, uint32_t width, uint32_t height);
+void fb_graphics_end(void);
 
 /* Draw a NUL-terminated string / one character at the cursor. */
 void fb_write(const char *s);

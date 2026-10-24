@@ -11,6 +11,7 @@
 BUILD_DIR ?= build
 CC        ?= gcc
 LD        ?= ld
+.DEFAULT_GOAL := all
 
 SRC_DIR := src
 INC_DIR := include
@@ -25,6 +26,7 @@ KERNEL  := $(BUILD_DIR)/kernel
 #                         never touch FPU/SIMD state we have not saved
 #   -mcmodel=kernel       address code/data in the top 2 GiB
 CFLAGS := -std=gnu11 -O2 -g \
+          -MMD -MP \
           -Wall -Wextra \
           -ffreestanding -fno-builtin -fno-stack-protector -fno-stack-check \
           -fno-common -fno-PIC -fno-PIE \
@@ -59,6 +61,9 @@ C_SOURCES := $(wildcard $(SRC_DIR)/*.c)
 S_SOURCES := $(wildcard $(SRC_DIR)/*.S)
 OBJECTS := $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/obj/%.o,$(C_SOURCES)) \
            $(patsubst $(SRC_DIR)/%.S,$(BUILD_DIR)/obj/%.o,$(S_SOURCES))
+DEPFILES := $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/obj/%.d,$(C_SOURCES))
+
+-include $(DEPFILES)
 
 # Guard against the silent failure mode where the glob finds nothing and the
 # link step quietly produces (or leaves) a kernel built from no sources.

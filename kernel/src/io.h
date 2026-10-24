@@ -29,6 +29,16 @@ static inline uint16_t inw(uint16_t port) {
     return value;
 }
 
+static inline void outl(uint16_t port, uint32_t value) {
+    __asm__ volatile("outl %0, %1" : : "a"(value), "Nd"(port));
+}
+
+static inline uint32_t inl(uint16_t port) {
+    uint32_t value;
+    __asm__ volatile("inl %1, %0" : "=a"(value) : "Nd"(port));
+    return value;
+}
+
 /* Write to an unused port to waste a few cycles; some old devices need a
  * small delay between consecutive I/O accesses. */
 static inline void io_wait(void) {
@@ -42,12 +52,12 @@ static inline void cpu_halt(void) {
 
 /* Mask maskable interrupts. */
 static inline void cpu_disable_interrupts(void) {
-    __asm__ volatile("cli");
+    __asm__ volatile("cli" : : : "memory");
 }
 
 /* Unmask maskable interrupts. */
 static inline void cpu_enable_interrupts(void) {
-    __asm__ volatile("sti");
+    __asm__ volatile("sti" : : : "memory");
 }
 
 /* Read the RFLAGS register (bit 9 is the interrupt-enable flag, IF). */

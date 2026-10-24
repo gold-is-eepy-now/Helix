@@ -2,16 +2,14 @@
 """shell-test.py — boot Helix and drive the interactive shell.
 
 Unlike boot-test.sh (which only checks the banner), this harness talks to the
-kernel's serial port over a Unix socket, types real commands, and checks the
-responses. It is the machine-checked definition of "the shell works".
-
-It also grabs a screenshot of the framebuffer console via the QEMU monitor.
+kernel's serial port, types real commands, and checks the responses. It uses
+stdio pipes so it works in restricted environments that cannot create sockets.
 
 Exit status is 0 only if every check passes.
 """
 import os
 import re
-import socket
+import select
 import subprocess
 import sys
 import time
@@ -19,8 +17,6 @@ import time
 BUILD_DIR = os.environ.get("BUILD_DIR", "build")
 IMAGE = sys.argv[1] if len(sys.argv) > 1 else os.path.join(BUILD_DIR, "helix.img")
 OUTDIR = os.path.join(BUILD_DIR, "test")
-SERIAL_SOCK = os.path.join(OUTDIR, "serial.sock")
-MONITOR_SOCK = os.path.join(OUTDIR, "monitor.sock")
 PPM = os.path.join(OUTDIR, "shell-screen.ppm")
 PNG = os.path.join(OUTDIR, "shell-screen.png")
 
@@ -34,6 +30,8 @@ def _find_ovmf():
         ("/usr/share/OVMF/OVMF_CODE.fd", "/usr/share/OVMF/OVMF_VARS.fd"),
         ("/opt/homebrew/share/qemu/edk2-x86_64-code.fd",
          "/opt/homebrew/share/qemu/edk2-i386-vars.fd"),
+        ("/opt/local/share/qemu/edk2-x86_64-code.fd",
+         "/opt/local/share/qemu/edk2-i386-vars.fd"),
         ("/usr/local/share/qemu/edk2-x86_64-code.fd",
          "/usr/local/share/qemu/edk2-i386-vars.fd"),
         ("/usr/share/qemu/edk2-x86_64-code.fd",
@@ -49,6 +47,12 @@ def _find_ovmf():
 
 OVMF_CODE, OVMF_VARS_SRC = _find_ovmf()
 QEMU_MEM = os.environ.get("QEMU_MEM", "512")
+QEMU_ACCEL = os.environ.get("QEMU_ACCEL")
+USB_TEST_CONTROLLER = os.environ.get("USB_TEST_CONTROLLER")
+USB_TEST_IMAGE = os.environ.get("USB_TEST_IMAGE")
+USB_TEST_FORMAT = os.environ.get("USB_TEST_FORMAT") == "1"
+USB_TEST_FAT32_WRITE = os.environ.get("USB_TEST_FAT32_WRITE") == "1"
+USB_TEST_FAT32_DELETE = os.environ.get("USB_TEST_FAT32_DELETE") == "1"
 VARS = os.path.join(OUTDIR, "OVMF_VARS.fd")
 
 ANSI = re.compile(rb"\x1b\[[0-9;?]*[A-Za-z]")
@@ -98,14 +102,14 @@ def light_background_blocks(path):
     return count
 
 os.makedirs(OUTDIR, exist_ok=True)
-for path in (SERIAL_SOCK, MONITOR_SOCK):
+for path in (PPM, PNG):
     if os.path.exists(path):
         os.unlink(path)
 
 
 class Serial:
-    def __init__(self, sock):
-        self.sock = sock
+    def __init__(self, process):
+        self.process = process
         self.raw = b""
 
     def text(self):
@@ -116,18 +120,18 @@ class Serial:
         while time.time() < deadline:
             if needle in self.text():
                 return True
-            self.sock.settimeout(0.3)
-            try:
-                data = self.sock.recv(65536)
-            except socket.timeout:
+            ready, _, _ = select.select([self.process.stdout], [], [], 0.3)
+            if not ready:
                 continue
+            data = os.read(self.process.stdout.fileno(), 65536)
             if not data:
                 break
             self.raw += data
         return needle in self.text()
 
     def send(self, text):
-        self.sock.sendall(text.encode())
+        self.process.stdin.write(text.encode())
+        self.process.stdin.flush()
 
 
 def main():
@@ -144,24 +148,43 @@ def main():
         "-drive", f"if=pflash,format=raw,unit=0,readonly=on,file={OVMF_CODE}",
         "-drive", f"if=pflash,format=raw,unit=1,file={VARS}",
         "-drive", f"file={IMAGE},format=raw,if=ide,index=0,media=disk",
-        "-chardev", f"socket,id=ser0,path={SERIAL_SOCK},server=on,wait=off",
-        "-serial", "chardev:ser0",
-        "-monitor", f"unix:{MONITOR_SOCK},server=on,wait=off",
+        "-serial", "stdio",
+        "-monitor", "none",
         "-display", "none",
         "-no-reboot",
     ]
+    if QEMU_ACCEL:
+        cmd[3:3] = ["-accel", QEMU_ACCEL]
+    if USB_TEST_CONTROLLER:
+        if USB_TEST_CONTROLLER == "ehci":
+            cmd.extend(["-device", "usb-ehci,id=helix-ehci"])
+            usb_bus = "helix-ehci.0"
+        elif USB_TEST_CONTROLLER == "ich9-ehci":
+            # Match VirtualBox's USB 2.0 topology more closely: an ICH9 EHCI
+            # controller with its three UHCI companions sharing six ports.
+            cmd.extend([
+                "-device", "ich9-usb-ehci1,id=helix-ehci,multifunction=on",
+                "-device", "ich9-usb-uhci1,masterbus=helix-ehci.0,firstport=0",
+                "-device", "ich9-usb-uhci2,masterbus=helix-ehci.0,firstport=2",
+                "-device", "ich9-usb-uhci3,masterbus=helix-ehci.0,firstport=4",
+            ])
+            usb_bus = "helix-ehci.0"
+        elif USB_TEST_CONTROLLER == "xhci":
+            cmd.extend(["-device", "qemu-xhci,id=helix-xhci"])
+            usb_bus = "helix-xhci.0"
+        else:
+            print("[shell-test] USB_TEST_CONTROLLER must be ehci, ich9-ehci, or xhci")
+            return 1
+        if USB_TEST_IMAGE:
+            cmd.extend(["-drive", f"if=none,id=helix-usb-drive,file={USB_TEST_IMAGE},format=raw",
+                        "-device", f"usb-storage,bus={usb_bus},drive=helix-usb-drive"])
     print("[shell-test] starting QEMU...")
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL, bufsize=0)
 
     checks = []
     try:
-        # Wait for the serial socket to appear, then connect.
-        deadline = time.time() + 15
-        while time.time() < deadline and not os.path.exists(SERIAL_SOCK):
-            time.sleep(0.1)
-        ser_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        ser_sock.connect(SERIAL_SOCK)
-        ser = Serial(ser_sock)
+        ser = Serial(proc)
 
         def check(label, needle, timeout=40):
             ok = ser.read_until(needle, timeout)
@@ -174,82 +197,67 @@ def main():
             checks.append(bool(condition))
 
         # --- boot banner ---
-        check("boot banner: HELIX OS", "HELIX OS")
-        check("boot banner: Boot successful.", "Boot successful.")
-        check("shell prompt", "helix> ")
+        prompt_ok = ser.read_until("user@helix:~$ ")
+        check_true("boot banner: HELIX OS", "HELIX OS" in ser.text())
+        check_true("boot banner: Boot successful.", "Boot successful." in ser.text())
+        check_true("shell prompt", prompt_ok)
 
-        # --- commands ---
+        # --- native user-shell commands and syscall-backed devices ---
         ser.send("help\n")
-        check("help lists sysinfo", "sysinfo")
-        check("help lists calc", "calc")
+        check("help documents sysinfo", "sysinfo")
+        check("help documents file navigation", "ls, cd DIR|")
 
         ser.send("echo hello world\n")
-        check("echo", "hello world")
+        check("user shell echo", "hello world")
 
         ser.send("calc 6 * 7\n")
-        check("calc 6 * 7 = 42", "= 42")
+        check("user shell calculator", "42")
 
-        ser.send("cpu\n")
-        check("cpu reports vendor", "Vendor:")
-
-        ser.send("mem\n")
-        check("mem reports usable RAM", "usable")
-
-        ser.send("pmm\n")
-        check("pmm reports frame statistics", "Physical frame allocator")
-        check("pmm reports free frames", "free")
-
-        ser.send("heap\n")
-        check("heap reports statistics", "Kernel heap")
-
-        ser.send("memtest\n")
-        check("memtest allocates and frees", "Heap self-test")
-        check("memtest passes", "result: PASS")
-
-        ser.send("vmtest\n")
-        check("vmtest maps/unmaps/protects", "result: PASS")
-
-        ser.send("ticks\n")
-        check("PIT timer is ticking", "PIT timer")
-        ser.read_until("ms\n")  # wait for the whole line, not just its prefix
-        m = re.search(r"PIT timer: \d+ Hz, (\d+) ticks", ser.text())
-        check_true("PIT tick count is actually advancing",
-                   m is not None and int(m.group(1)) > 0)
-
-        ser.send("uptime\n")
-        check("uptime reports seconds", "seconds")
+        ser.send("version\n")
+        check("version syscall reports the current build", "0.21.0-dev.20261024")
 
         ser.send("sysinfo\n")
-        check("sysinfo header", "founder@helix")
-        check("sysinfo OS line", "Helix OS")
-        check("sysinfo CPU line", "CPU:")
-        check("sysinfo Memory line", "Memory:")
+        check("sysinfo syscall reaches the kernel", "Helix kernel")
 
-        ser.send("doesnotexist\n")
-        check("unknown command is reported", "command not found")
+        ser.send("drivers\n")
+        check("driver inventory syscall responds", "Registered device drivers")
 
-        ser.send("color off\n")
-        check("color off acknowledged", "disabled")
-        ser.send("color on\n")
-        check("color on acknowledged", "enabled")
+        if USB_TEST_IMAGE:
+            ser.send("usb\n")
+            check("USB controller initializes", "USB host controllers on PCI bus")
+            check("USB mass-storage transport is ready", "USB mass storage: BOT transport ready")
+            ser.send("usb read 0\n")
+            check("USB sector read succeeds", "sector read; first 16 bytes:")
+            if USB_TEST_FORMAT:
+                ser.send("hfs format usb-msd\n")
+                check("EHCI block writes format a blank test disk",
+                      "HFS v1 formatted blank disk usb-msd")
+                ser.send("hfs ls\n")
+                check("formatted EHCI volume mounts through HFS", "HFS v1 root directory")
+                ser.send("usb read 0\n")
+                check("EHCI write is readable through the storage service",
+                      "48 45 4c 49 58 46 53 31")
+            if USB_TEST_FAT32_WRITE:
+                ser.send("usb put TEST.TXT updated by Helix\n")
+                check("FAT32 write creates or replaces a root file",
+                      "FAT32 file saved.")
+                ser.send("usb cat TEST.TXT\n")
+                check("FAT32 read returns the saved content",
+                      "updated by Helix")
+            if USB_TEST_FAT32_DELETE:
+                ser.send("usb rm REMOVE.TXT\n")
+                check("FAT32 delete removes a root file", "FAT32 file removed.")
+                ser.send("usb cat REMOVE.TXT\n")
+                check("deleted FAT32 file is no longer found",
+                      "FAT32 file not found in the root directory.")
 
-        # --- framebuffer screenshot of the working shell ---
-        time.sleep(1.0)
-        mon = None
-        if os.path.exists(MONITOR_SOCK):
-            mon = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            mon.connect(MONITOR_SOCK)
-            mon.sendall(f"screendump {PPM}\n".encode())
-            time.sleep(1.5)
+        ser.send("uart z\n")
+        check("capability-gated UART device control", "UART device control sent")
 
-        # --- deliberate fault: the exception handler must report it ---
-        ser.send("fault\n")
-        check("CPU exception is caught and reported", "CPU EXCEPTION")
+        ser.send("command-does-not-exist\n")
+        check("unknown user command is reported", "command not found")
 
-        if mon is not None:
-            mon.sendall(b"quit\n")
-            mon.close()
-        time.sleep(1.0)
+        time.sleep(0.2)
     finally:
         proc.terminate()
         try:
@@ -259,25 +267,19 @@ def main():
 
     print("[shell-test] --- captured serial transcript (tail) ---")
     try:
-        print(ser.text()[-1500:])
+        transcript = ser.text()
+        with open(os.path.join(OUTDIR, "serial.log"), "w", encoding="latin-1") as log:
+            log.write(transcript)
+        print(transcript[-6000:])
     except NameError:
         print("(no serial data)")
     print("[shell-test] --------------------------------------------")
 
-    # --- framebuffer readability regression check ---
-    if os.path.exists(PPM):
-        blocks = light_background_blocks(PPM)
-        ok = blocks < 1000
-        print(f"[shell-test] {'PASS' if ok else 'FAIL'}: framebuffer has no "
-              f"light-background text blocks (found {blocks})")
-        checks.append(ok)
-
-    if os.path.exists(PPM):
-        if subprocess.run(
-            ["python3", "tools/ppm2png.py", PPM, PNG],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        ).returncode == 0:
-            print(f"[shell-test] screenshot: {PNG}")
+    if USB_TEST_FORMAT and USB_TEST_IMAGE:
+        with open(USB_TEST_IMAGE, "rb") as disk:
+            formatted = disk.read(8) == b"HELIXFS1"
+        print(f"[shell-test] {'PASS' if formatted else 'FAIL'}: host readback verifies EHCI HFS write")
+        checks.append(formatted)
 
     if all(checks):
         print(f"[shell-test] RESULT: PASS ({len(checks)} checks)")

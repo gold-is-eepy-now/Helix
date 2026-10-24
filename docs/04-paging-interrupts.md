@@ -5,6 +5,15 @@ memory it controls**, a **CPU exception handler that explains what went wrong**,
 and a **live timer interrupt**. It also produced two genuinely instructive bugs,
 both documented below.
 
+### Physical frame allocator storage
+
+The PMM sizes its bitmap from the highest usable physical frame in Limine's
+memory map. It stores the bitmap in a contiguous usable run reachable through
+the HHDM, marks those backing frames reserved, and includes them in the
+allocated-frame count. `pmm_bitmap_bytes()` reports the actual bitmap size;
+managed memory is no longer capped by a fixed 4 GiB array. Initialization
+fails closed if the bitmap cannot be placed or the memory map/HHDM is missing.
+
 > **Honest scope.** We now own page tables and take hardware interrupts. We do
 > **not** yet have a scheduler, threads, user space, or `mmap` for programs.
 > Those build on exactly this foundation.
@@ -52,7 +61,7 @@ reads a pattern, checks the mapping, flips it read-only, unmaps it, and frees
 the frame. Real captured output:
 
 ```
-helix> vmtest
+helix:/# vmtest
 Virtual memory self-test
   frame 0x0000000000142000 -> virtual 0xffff900000000000
   map: ok
@@ -86,7 +95,7 @@ Exceptions print a report and halt. Captured from a deliberate null
 dereference:
 
 ```
-helix> fault
+helix:/# fault
 Triggering a deliberate page fault (null dereference)...
 
 *** CPU EXCEPTION 14: Page fault ***
@@ -115,7 +124,7 @@ lands in `isr_handler`, which calls `pit_tick()` and acknowledges the PIC.
 Captured:
 
 ```
-helix> ticks
+helix:/# ticks
 PIT timer: 100 Hz, 632 ticks, 6320 ms
 ```
 
@@ -134,15 +143,17 @@ CS = 0x28   SS = 0x30
 ```
 
 **Limine's GDT does not use the `0x08`/`0x10` layout that most tutorials
-assume.** Our gates said `selector = 0x08`, which is not a valid 64-bit code
-segment in this GDT, so the CPU rejected every interrupt.
-
-The fix is not to hardcode `0x28` (another bootloader may differ) but to use
-the selector the CPU is *already running with*:
+assume.** Earlier Helix versions therefore used the selector the CPU was
+already running with:
 
 ```c
 #define KERNEL_CODE_SELECTOR read_cs()
 ```
+
+M9 now installs a small Helix-owned GDT before loading the IDT, with kernel
+code selector `0x08` and kernel data selector `0x10`. It also loads a 64-bit
+TSS for future privilege transitions. See `kernel/src/gdt.c` and
+`kernel/src/gdt_load.S` for the descriptor table and reload sequence.
 
 ### 4.2 The direct map covers RAM, not MMIO
 
@@ -225,7 +236,7 @@ endif
 ## 7. How to test it
 
 ```sh
-make test        # 27 checks: boot, shell, memory, paging, timer, exception
+make test        # 45 checks: boot, shell, memory, paging, stack, objects, capabilities
 ```
 
 `make test` now also verifies that the tick count is genuinely advancing (not
@@ -236,7 +247,10 @@ reported. Everything else from M2 and M3 still passes.
 
 ## 8. What's next
 
-**M5 — the object manager**, the first genuinely Helix-specific subsystem:
-kernel objects with reference counts, and per-process handle tables. Paging is
-what makes address spaces possible; the object manager is what makes them
-Helix rather than Unix.
+`stacktest` checks the dedicated 32 KiB stack, deliberately reads the
+non-present guard page, and tries to execute a page mapped NX. The page-fault
+handler recovers from both probes and the command checks their x86 fault codes.
+The test suite now covers these M3 checks.
+
+The M3 exit gate is complete, and the M5 object manager exit gate passes. Work
+continues with **M6 — capabilities**, built on those object and handle APIs.

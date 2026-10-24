@@ -18,6 +18,7 @@
 
 #include "kstring.h"
 #include "pmm.h"
+#include "sync.h"
 
 #define HEAP_ALIGN 16
 #define GROW_CHUNK (256u * 1024u)
@@ -41,6 +42,7 @@ static size_t align_up(size_t value, size_t align) {
 static bool heap_grow(size_t min_payload);
 
 void heap_init(uint64_t hhdm_offset) {
+    IRQ_GUARD;
     g_hhdm = hhdm_offset;
     g_head = NULL;
     g_used = 0;
@@ -81,6 +83,7 @@ static bool heap_grow(size_t min_payload) {
 }
 
 void *kmalloc(size_t size) {
+    IRQ_GUARD;
     if (size == 0) {
         return NULL;
     }
@@ -120,6 +123,7 @@ void *kmalloc(size_t size) {
 }
 
 void *kzalloc(size_t size) {
+    IRQ_GUARD;
     void *ptr = kmalloc(size);
     if (ptr != NULL) {
         memset(ptr, 0, size);
@@ -128,6 +132,7 @@ void *kzalloc(size_t size) {
 }
 
 void kfree(void *ptr) {
+    IRQ_GUARD;
     if (ptr == NULL) {
         return;
     }
@@ -159,14 +164,17 @@ void kfree(void *ptr) {
 }
 
 uint64_t heap_used_bytes(void) {
+    IRQ_GUARD;
     return g_used;
 }
 
 uint64_t heap_total_bytes(void) {
+    IRQ_GUARD;
     return g_total;
 }
 
 uint64_t heap_block_count(void) {
+    IRQ_GUARD;
     uint64_t count = 0;
     for (block_t *block = g_head; block != NULL; block = block->next) {
         count++;
