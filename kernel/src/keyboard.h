@@ -3,6 +3,7 @@
 #define HELIX_KEYBOARD_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 enum {
     KBD_KEY_UP = 0x100,
@@ -28,6 +29,7 @@ typedef struct {
 
 /* Nothing to configure yet, but keep the call site stable for later. */
 void keyboard_init(void);
+void keyboard_hid_boot_report(uint8_t modifiers, const uint8_t usages[6]);
 
 /* Read one translated character, or -1 if nothing is waiting. Never blocks.
  * Returns printable ASCII, '\n' for Enter, 0x7F for Backspace, '\t' for Tab. */

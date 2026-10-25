@@ -23,6 +23,14 @@ static bool shift_down;
 static bool ctrl_down;
 static bool extended; /* saw the 0xE0 prefix */
 static int pressed_keys[256];
+#define HID_QUEUE_SIZE 64u
+static keyboard_event_t hid_queue[HID_QUEUE_SIZE];
+static unsigned hid_head, hid_tail;
+static uint8_t hid_previous_modifiers;
+static uint8_t hid_previous_usages[6];
+static int hid_previous_keys[6];
+static bool hid_shift;
+static bool hid_ctrl;
 
 /* Unshifted US layout, indexed by make code. */
 static const char keymap_normal[128] = {
@@ -70,6 +78,104 @@ void keyboard_init(void) {
     extended = false;
     for (size_t i = 0; i < sizeof(pressed_keys) / sizeof(pressed_keys[0]); i++)
         pressed_keys[i] = 0;
+    hid_head = hid_tail = 0;
+    hid_previous_modifiers = 0;
+    hid_shift = hid_ctrl = false;
+    for (size_t i = 0; i < 6; i++) {
+        hid_previous_usages[i] = 0;
+        hid_previous_keys[i] = 0;
+    }
+}
+
+static void hid_push(int key, bool pressed) {
+    unsigned next = (hid_head + 1u) % HID_QUEUE_SIZE;
+    if (next == hid_tail) return;
+    hid_queue[hid_head].key = key;
+    hid_queue[hid_head].pressed = pressed;
+    hid_head = next;
+}
+
+static int hid_translate(uint8_t usage, bool shift, bool ctrl) {
+    int key = 0;
+    if (usage >= 0x04u && usage <= 0x1Du) {
+        key = (shift ? 'A' : 'a') + (usage - 0x04u);
+    } else if (usage >= 0x1Eu && usage <= 0x27u) {
+        static const char normal[] = "1234567890";
+        static const char shifted[] = "!@#$%^&*()";
+        key = shift ? shifted[usage - 0x1Eu] : normal[usage - 0x1Eu];
+    } else {
+        switch (usage) {
+            case 0x28: key = KBD_KEY_ENTER; break;
+            case 0x29: key = KBD_KEY_ESCAPE; break;
+            case 0x2A: key = 0x7F; break;
+            case 0x2B: key = '\t'; break;
+            case 0x2C: key = ' '; break;
+            case 0x2D: key = shift ? '_' : '-'; break;
+            case 0x2E: key = shift ? '+' : '='; break;
+            case 0x2F: key = shift ? '{' : '['; break;
+            case 0x30: key = shift ? '}' : ']'; break;
+            case 0x31: key = shift ? '|' : '\\'; break;
+            case 0x33: key = shift ? ':' : ';'; break;
+            case 0x34: key = shift ? '"' : '\''; break;
+            case 0x35: key = shift ? '~' : '`'; break;
+            case 0x36: key = shift ? '<' : ','; break;
+            case 0x37: key = shift ? '>' : '.'; break;
+            case 0x38: key = shift ? '?' : '/'; break;
+            case 0x4F: key = KBD_KEY_RIGHT; break;
+            case 0x50: key = KBD_KEY_LEFT; break;
+            case 0x51: key = KBD_KEY_DOWN; break;
+            case 0x52: key = KBD_KEY_UP; break;
+            case 0x4A: key = KBD_KEY_HOME; break;
+            case 0x4D: key = KBD_KEY_END; break;
+            case 0x4C: key = KBD_KEY_DELETE; break;
+            default: break;
+        }
+    }
+    if (ctrl && key >= 'a' && key <= 'z') key &= 0x1F;
+    if (ctrl && key >= 'A' && key <= 'Z') key &= 0x1F;
+    return key;
+}
+
+void keyboard_hid_boot_report(uint8_t modifiers, const uint8_t usages[6]) {
+    if (usages == NULL) return;
+    static const uint8_t modifier_masks[8] = {1, 2, 4, 8, 16, 32, 64, 128};
+    for (unsigned i = 0; i < 8; i++) {
+        bool was = (hid_previous_modifiers & modifier_masks[i]) != 0;
+        bool now = (modifiers & modifier_masks[i]) != 0;
+        if (was == now) continue;
+        int key = i < 2 ? KBD_KEY_CTRL : i < 4 ? KBD_KEY_SHIFT : KBD_KEY_ALT;
+        hid_push(key, now);
+    }
+    hid_shift = (modifiers & 0x22u) != 0;
+    hid_ctrl = (modifiers & 0x11u) != 0;
+
+    for (unsigned i = 0; i < 6; i++) {
+        uint8_t old_usage = hid_previous_usages[i];
+        if (old_usage != 0) {
+            bool still_down = false;
+            for (unsigned j = 0; j < 6; j++)
+                if (usages[j] == old_usage) still_down = true;
+            if (!still_down && hid_previous_keys[i] != 0)
+                hid_push(hid_previous_keys[i], false);
+        }
+    }
+    for (unsigned i = 0; i < 6; i++) {
+        uint8_t usage = usages[i];
+        if (usage == 0 || usage == 1 || usage == 2 || usage == 3) continue;
+        bool was_down = false;
+        for (unsigned j = 0; j < 6; j++)
+            if (hid_previous_usages[j] == usage) was_down = true;
+        if (!was_down) {
+            int key = hid_translate(usage, hid_shift, hid_ctrl);
+            if (key != 0) hid_push(key, true);
+        }
+    }
+    for (unsigned i = 0; i < 6; i++) {
+        hid_previous_usages[i] = usages[i];
+        hid_previous_keys[i] = usages[i] <= 3 ? 0 :
+            hid_translate(usages[i], hid_shift, hid_ctrl);
+    }
+    hid_previous_modifiers = modifiers;
 }
 
 static int extended_key(uint8_t code) {
@@ -92,6 +198,11 @@ static int extended_key(uint8_t code) {
 
 bool keyboard_read_event(keyboard_event_t *event) {
     if (event == NULL) return false;
+    if (hid_tail != hid_head) {
+        *event = hid_queue[hid_tail];
+        hid_tail = (hid_tail + 1u) % HID_QUEUE_SIZE;
+        return true;
+    }
     uint8_t status = inb(KBD_STATUS);
     if ((status & 0x01) == 0) {
         return false;

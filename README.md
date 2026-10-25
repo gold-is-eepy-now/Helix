@@ -27,6 +27,7 @@ native object model. They are not the foundation.
 | Serial console (16550 UART) | ✅ working (input + output, ANSI colour); absent COM1 is detected so keyboard input can fall back |
 | Framebuffer text console (8×8 font) | ✅ working (cursor, backspace, colour) |
 | PS/2 keyboard input | ✅ working (polling, US layout, shift) |
+| USB HID boot keyboard | 🚧 xHCI hub enumeration and boot-protocol input work in QEMU; MacBook Air hardware validation is pending |
 | Rescue shell (`helix:/#`, kernel diagnostics and 16-entry volatile history) | ✅ working |
 | Kernel-resident commands (help, sysinfo, cpu, mem, uptime, ...) | ✅ working |
 | Time source (TSC calibrated against the PIT) | ✅ working |
@@ -193,7 +194,7 @@ HELIX OS
 Native Object Kernel
 Boot successful.
 
-Helix OS 0.21.0-dev.20261025 "USB Topology"
+Helix OS 0.21.0-dev.20261025 "HID Input"
 
 [helix] console: serial + framebuffer
 [helix] memory:  462 MiB usable

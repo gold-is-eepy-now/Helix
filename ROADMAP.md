@@ -252,6 +252,11 @@ accounts and login are deferred until those foundations exist.
   configure USB Mass Storage Bulk-Only Transport, read SCSI capacity, and
   expose sector reads/writes through a kernel IPC worker. The physical 32 GB drive
   enumerates and reports 60,440,000 512-byte sectors; do not format it.
+- 🚧 xHCI now enumerates a USB 2.0 hub child, inspects its interface and endpoint
+  descriptors, selects HID boot protocol, and polls an interrupt-IN boot
+  keyboard report. QEMU verified injected typing into the user shell. The
+  MacBook Air internal hub and keyboard still need physical validation; the
+  interface shown by QEMU is not evidence of the Air's actual device layout.
 - 🚧 EHCI USB 2.0 support now has a polled async schedule, high-speed USB mass
   storage enumeration, BOT capacity/read/write operations, and shares the
   existing block-storage worker. QEMU EHCI passed enumeration, capacity

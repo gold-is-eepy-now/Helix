@@ -10,6 +10,8 @@ bool xhci_init(uint64_t hhdm_offset);
 bool xhci_ready(void);
 bool xhci_storage_ready(void);
 void xhci_print_status(void);
+void xhci_keyboard_poll(void);
+bool xhci_keyboard_ready(void);
 uint32_t xhci_sector_size(void);
 uint64_t xhci_sector_count(void);
 bool xhci_read_sector(uint64_t lba, void *buffer, size_t length);

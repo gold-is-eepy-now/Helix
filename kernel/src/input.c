@@ -3,12 +3,14 @@
 
 #include "keyboard.h"
 #include "serial.h"
+#include "xhci.h"
 
 static unsigned int serial_escape_state;
 static unsigned int serial_escape_wait;
 static int deferred_serial_key = -1;
 
 int input_getchar(void) {
+    xhci_keyboard_poll();
     if (serial_rx_ready()) {
         return serial_read();
     }
@@ -16,6 +18,7 @@ int input_getchar(void) {
 }
 
 int input_getkey(void) {
+    xhci_keyboard_poll();
     if (deferred_serial_key >= 0) {
         int key = deferred_serial_key;
         deferred_serial_key = -1;

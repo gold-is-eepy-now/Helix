@@ -8,7 +8,9 @@ stdio pipes so it works in restricted environments that cannot create sockets.
 Exit status is 0 only if every check passes.
 """
 import os
+import json
 import re
+import socket
 import select
 import subprocess
 import sys
@@ -55,6 +57,7 @@ USB_TEST_FORMAT = os.environ.get("USB_TEST_FORMAT") == "1"
 USB_TEST_FAT32_WRITE = os.environ.get("USB_TEST_FAT32_WRITE") == "1"
 USB_TEST_FAT32_DELETE = os.environ.get("USB_TEST_FAT32_DELETE") == "1"
 VARS = os.path.join(OUTDIR, "OVMF_VARS.fd")
+QMP_SOCKET = os.path.join(OUTDIR, "qmp.sock")
 
 ANSI = re.compile(rb"\x1b\[[0-9;?]*[A-Za-z]")
 
@@ -177,6 +180,11 @@ def main():
             print("[shell-test] USB_TEST_CONTROLLER must be ehci, ich9-ehci, or xhci")
             return 1
         if USB_TEST_HUB:
+            try:
+                os.unlink(QMP_SOCKET)
+            except FileNotFoundError:
+                pass
+            cmd.extend(["-qmp", f"unix:{QMP_SOCKET},server=on,wait=off"])
             cmd.extend(["-device", f"usb-hub,id=helix-hub,bus={usb_bus},port=1"])
             # A standard HID keyboard behind the hub mirrors the topology of
             # the Air's internal USB 2.0 hub.
@@ -241,7 +249,58 @@ def main():
             check("USB hub interface is identified", "class=0x0000000000000009")
             check("USB hub descriptor and ports are read", "USB hub descriptor: ports=")
             check("downstream USB keyboard is connected",
-                  "hub port 1 status=0x0000000000010101 speed=full connected")
+                  "hub port 1 status=")
+            check("downstream port speed is reported", "speed=full connected")
+            check("downstream device is enumerated", "USB hub child: descriptors read",
+                  timeout=3)
+            check("downstream device matches HID boot keyboard",
+                  "USB HID boot keyboard bound: interrupt-IN polling active", timeout=3)
+            def qmp_key(qcode):
+                for down in (True, False):
+                    message = {
+                        "execute": "input-send-event",
+                        "arguments": {"events": [{"type": "key", "data": {
+                            "down": down,
+                            "key": {"type": "qcode", "data": qcode}
+                        }}]}
+                    }
+                    qmp.sendall((json.dumps(message) + "\n").encode())
+                    response = b""
+                    while b"\n" not in response:
+                        chunk = qmp.recv(4096)
+                        if not chunk:
+                            raise RuntimeError("QMP disconnected")
+                        response += chunk
+                    if b'"error"' in response:
+                        raise RuntimeError(response.decode(errors="replace"))
+                # Allow multiple interrupt intervals for QEMU's full-speed
+                # HID device and the kernel's polled event-loop service.
+                time.sleep(0.1)
+
+            qmp = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            deadline = time.time() + 10
+            while True:
+                try:
+                    qmp.connect(QMP_SOCKET)
+                    break
+                except (FileNotFoundError, ConnectionRefusedError):
+                    if time.time() >= deadline:
+                        raise RuntimeError("QMP socket did not become available")
+                    time.sleep(0.05)
+            qmp.settimeout(3)
+            greeting = b""
+            while b'"QMP"' not in greeting:
+                greeting += qmp.recv(4096)
+            qmp.sendall(b'{"execute":"qmp_capabilities"}\n')
+            response = qmp.recv(4096)
+            if b'"error"' in response:
+                raise RuntimeError(response.decode(errors="replace"))
+            for key in ("e", "c", "h", "o", "spc", "u", "s", "b", "k",
+                        "e", "y", "o", "k", "ret"):
+                qmp_key(key)
+            check("USB HID keyboard types into the user shell",
+                  "usbkeyok", timeout=5)
+            qmp.close()
             if USB_TEST_FORMAT:
                 ser.send("hfs format usb-msd\n")
                 check("EHCI block writes format a blank test disk",
