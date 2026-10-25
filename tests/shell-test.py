@@ -50,6 +50,7 @@ QEMU_MEM = os.environ.get("QEMU_MEM", "512")
 QEMU_ACCEL = os.environ.get("QEMU_ACCEL")
 USB_TEST_CONTROLLER = os.environ.get("USB_TEST_CONTROLLER")
 USB_TEST_IMAGE = os.environ.get("USB_TEST_IMAGE")
+USB_TEST_HUB = os.environ.get("USB_TEST_HUB") == "1"
 USB_TEST_FORMAT = os.environ.get("USB_TEST_FORMAT") == "1"
 USB_TEST_FAT32_WRITE = os.environ.get("USB_TEST_FAT32_WRITE") == "1"
 USB_TEST_FAT32_DELETE = os.environ.get("USB_TEST_FAT32_DELETE") == "1"
@@ -175,9 +176,15 @@ def main():
         else:
             print("[shell-test] USB_TEST_CONTROLLER must be ehci, ich9-ehci, or xhci")
             return 1
+        if USB_TEST_HUB:
+            cmd.extend(["-device", f"usb-hub,id=helix-hub,bus={usb_bus},port=1"])
+            # A standard HID keyboard behind the hub mirrors the topology of
+            # the Air's internal USB 2.0 hub.
+            cmd.extend(["-device", f"usb-kbd,bus={usb_bus},port=1.1"])
         if USB_TEST_IMAGE:
+            storage_port = ",port=1.1" if USB_TEST_HUB else ""
             cmd.extend(["-drive", f"if=none,id=helix-usb-drive,file={USB_TEST_IMAGE},format=raw",
-                        "-device", f"usb-storage,bus={usb_bus},drive=helix-usb-drive"])
+                        "-device", f"usb-storage,bus={usb_bus}{storage_port},drive=helix-usb-drive"])
     print("[shell-test] starting QEMU...")
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.DEVNULL, bufsize=0)
@@ -214,7 +221,7 @@ def main():
         check("user shell calculator", "42")
 
         ser.send("version\n")
-        check("version syscall reports the current build", "0.21.0-dev.20261024")
+        check("version syscall reports the current build", "0.21.0-dev.20261025")
 
         ser.send("sysinfo\n")
         check("sysinfo syscall reaches the kernel", "Helix kernel")
@@ -228,6 +235,13 @@ def main():
             check("USB mass-storage transport is ready", "USB mass storage: BOT transport ready")
             ser.send("usb read 0\n")
             check("USB sector read succeeds", "sector read; first 16 bytes:")
+        elif USB_TEST_HUB:
+            ser.send("usb\n")
+            check("USB controller initializes", "USB host controllers on PCI bus")
+            check("USB hub interface is identified", "class=0x0000000000000009")
+            check("USB hub descriptor and ports are read", "USB hub descriptor: ports=")
+            check("downstream USB keyboard is connected",
+                  "hub port 1 status=0x0000000000010101 speed=full connected")
             if USB_TEST_FORMAT:
                 ser.send("hfs format usb-msd\n")
                 check("EHCI block writes format a blank test disk",

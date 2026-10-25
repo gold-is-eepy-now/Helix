@@ -124,7 +124,10 @@ void _start(void) {
         line[count] = '\0';
         if (string_equal(line, "help")) {
             print_line("apps: edit [HFS_PATH], calc A OP B, about (sysinfo)");
-            print_line("commands: help, echo, version, sysinfo, neofetch, drivers, ls, cd DIR|..|/, pwd, usb, usb read LBA, usb ls [usb0|cluster], usb cat NAME.TXT, usb put NAME.TXT TEXT, usb rm NAME.TXT, hfs ls, hfs cat NAME, hfs rm NAME, hfs format DEVICE, installer, uart X, clear, exit");
+            print_line("commands: help, echo, version, sysinfo, neofetch, drivers");
+            print_line("files: ls, cd DIR|..|/, pwd, usb, hfs ls, hfs cat NAME");
+            print_line("USB: usb read LBA, usb ls [usb0|cluster], usb cat/put/rm NAME");
+            print_line("other: hfs rm/format, installer, uart X, clear, exit");
         } else if (string_equal(line, "version")) {
             (void)helix_version();
         } else if (string_equal(line, "sysinfo") || string_equal(line, "neofetch")) {

@@ -193,7 +193,7 @@ HELIX OS
 Native Object Kernel
 Boot successful.
 
-Helix OS 0.21.0-dev.20261024 "FAT32 Files"
+Helix OS 0.21.0-dev.20261025 "USB Topology"
 
 [helix] console: serial + framebuffer
 [helix] memory:  462 MiB usable

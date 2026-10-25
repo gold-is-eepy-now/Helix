@@ -11,6 +11,7 @@
 #include "kstring.h"
 #include "pci.h"
 #include "pmm.h"
+#include "usb.h"
 
 #define PCI_CONFIG_ADDRESS 0x0CF8u
 #define PCI_CONFIG_DATA    0x0CFcu
@@ -60,6 +61,11 @@ typedef struct {
     uint8_t device_class;
     uint8_t device_subclass;
     uint8_t device_protocol;
+    bool configuration_read;
+    usb_configuration_info_t configuration;
+    bool hub_descriptor_read;
+    usb_hub_info_t hub_info;
+    uint32_t hub_port_status[16];
     uint8_t configuration_value;
     uint8_t interface_number;
     uint8_t bulk_in_address;
@@ -365,6 +371,68 @@ static void write_be32(uint8_t *data, uint32_t value) {
     data[3] = (uint8_t)value;
 }
 
+static bool read_configuration_info(void) {
+    uint64_t header_setup = 0x80u | (6u << 8) |
+                            (0x0200u << 16) | (9uLL << 48);
+    if (!endpoint0_control(header_setup, 3u, g_xhci.descriptor,
+                           g_xhci.descriptor_phys, 9u, true)) return false;
+    uint16_t total = (uint16_t)g_xhci.descriptor[2] |
+                     ((uint16_t)g_xhci.descriptor[3] << 8);
+    if (g_xhci.descriptor[1] != 2u || total < 9u || total > PAGE_SIZE)
+        return false;
+    uint64_t full_setup = 0x80u | (6u << 8) | (0x0200u << 16) |
+                          ((uint64_t)total << 48);
+    if (!endpoint0_control(full_setup, 3u, g_xhci.descriptor,
+                           g_xhci.descriptor_phys, total, true) ||
+        !usb_parse_configuration(g_xhci.descriptor, total,
+                                 &g_xhci.configuration))
+        return false;
+    g_xhci.configuration_read = true;
+    return true;
+}
+
+static bool set_device_configuration(void) {
+    if (!g_xhci.configuration_read) return false;
+    uint64_t setup = (9u << 8) |
+        ((uint64_t)g_xhci.configuration.configuration_value << 16);
+    return endpoint0_control(setup, 0u, NULL, 0u, 0u, false);
+}
+
+static bool control_request(uint8_t request_type, uint8_t request,
+                            uint16_t value, uint16_t index,
+                            uint8_t *data, uint64_t data_phys,
+                            uint16_t length) {
+    uint64_t setup = request_type | ((uint64_t)request << 8) |
+        ((uint64_t)value << 16) | ((uint64_t)index << 32) |
+        ((uint64_t)length << 48);
+    return endpoint0_control(setup, length == 0u ? 0u : 3u,
+                             data, data_phys, length, length != 0u);
+}
+
+static bool probe_hub_descriptors(void) {
+    if (!g_xhci.configuration_read ||
+        !g_xhci.configuration.has_hub_interface ||
+        !set_device_configuration()) return false;
+    if (!control_request(0xA0u, 6u, 0x2900u, 0u, g_xhci.descriptor,
+                         g_xhci.descriptor_phys, 9u) ||
+        !usb_parse_hub_descriptor(g_xhci.descriptor, 9u,
+                                  &g_xhci.hub_info))
+        return false;
+    if (g_xhci.hub_info.port_count > 15u) return false;
+    g_xhci.hub_descriptor_read = true;
+    for (uint8_t port = 1; port <= g_xhci.hub_info.port_count; port++) {
+        if (!control_request(0xA3u, 0u, 0u, port, g_xhci.descriptor,
+                            g_xhci.descriptor_phys, 4u))
+            continue;
+        g_xhci.hub_port_status[port] =
+            (uint32_t)g_xhci.descriptor[0] |
+            ((uint32_t)g_xhci.descriptor[1] << 8) |
+            ((uint32_t)g_xhci.descriptor[2] << 16) |
+            ((uint32_t)g_xhci.descriptor[3] << 24);
+    }
+    return true;
+}
+
 static bool bulk_transfer(uint8_t dci, bool input, uint8_t *buffer,
                           uint64_t buffer_phys, uint32_t length) {
     xhci_trb_t *ring = input ? g_xhci.bulk_in_ring : g_xhci.bulk_out_ring;
@@ -391,22 +459,11 @@ static void init_transfer_ring(xhci_trb_t *ring, uint64_t ring_phys) {
 }
 
 static bool parse_mass_storage_config(void) {
-    /* Fetch the nine-byte configuration header, then the complete descriptor
-     * chain into a DMA-visible page. */
-    uint64_t setup = 0x80u | (6u << 8) | (0x0200u << 16) | (9uLL << 48);
-    if (!endpoint0_control(setup, 3u, g_xhci.descriptor,
-                           g_xhci.descriptor_phys, 9u, true)) return false;
-    uint16_t total = (uint16_t)g_xhci.descriptor[2] |
-                     ((uint16_t)g_xhci.descriptor[3] << 8);
-    if (g_xhci.descriptor[1] != 2u || total < 9u || total > PAGE_SIZE)
-        return false;
+    if (!read_configuration_info()) return false;
+    uint16_t total = g_xhci.configuration.total_length;
     uint8_t configurations = g_xhci.descriptor[17];
     if (configurations == 0) configurations = 1;
-    uint64_t descriptor_setup = 0x80u | (6u << 8) | (0x0200u << 16) |
-                                ((uint64_t)total << 48);
-    if (!endpoint0_control(descriptor_setup, 3u, g_xhci.descriptor,
-                           g_xhci.descriptor_phys, total, true)) return false;
-    if (g_xhci.descriptor[1] != 2u) return false;
+    /* read_configuration_info left the full descriptor chain in the DMA page. */
     g_xhci.configuration_value = g_xhci.descriptor[5];
 
     bool match_interface = false;
@@ -745,10 +802,17 @@ static bool start_controller(const pci_usb_controller_t *controller) {
     g_xhci.ready = true;
     (void)reset_connected_port(controller, &g_xhci.connected_port);
     if (g_xhci.connected_port != 0 &&
-        command_enable_slot(&g_xhci.slot_id))
+        command_enable_slot(&g_xhci.slot_id)) {
         if (address_and_read_descriptor(controller) &&
-            parse_mass_storage_config())
+            read_configuration_info()) {
+            if (g_xhci.configuration.has_hub_interface)
+                (void)probe_hub_descriptors();
+            else if (parse_mass_storage_config())
+                (void)mass_storage_read_capacity();
+        } else if (g_xhci.descriptor_read && parse_mass_storage_config()) {
             (void)mass_storage_read_capacity();
+        }
+    }
     return true;
 }
 
@@ -796,6 +860,59 @@ void xhci_print_status(void) {
         console_write(" protocol=");
         console_write_hex(g_xhci.device_protocol);
         console_putc('\n');
+        if (g_xhci.configuration_read) {
+            for (uint8_t i = 0; i < g_xhci.configuration.interface_count; i++) {
+                const usb_interface_info_t *interface_info =
+                    &g_xhci.configuration.interfaces[i];
+                console_write("  USB interface ");
+                console_write_dec(interface_info->number);
+                console_write(" alt=");
+                console_write_dec(interface_info->alternate_setting);
+                console_write(" class=");
+                console_write_hex(interface_info->class_code);
+                console_write(" subclass=");
+                console_write_hex(interface_info->subclass);
+                console_write(" protocol=");
+                console_write_hex(interface_info->protocol);
+                console_putc('\n');
+            }
+            for (uint8_t i = 0; i < g_xhci.configuration.endpoint_count; i++) {
+                const usb_endpoint_info_t *endpoint =
+                    &g_xhci.configuration.endpoints[i];
+                console_write("  USB endpoint ");
+                console_write_hex(endpoint->address);
+                console_write(" attributes=");
+                console_write_hex(endpoint->attributes);
+                console_write(" max-packet=");
+                console_write_dec(endpoint->max_packet_size);
+                console_write(" interval=");
+                console_write_dec(endpoint->interval);
+                console_write(" interface=");
+                console_write_dec(endpoint->interface_number);
+                console_putc('\n');
+            }
+            if (g_xhci.configuration.has_boot_keyboard_interface)
+                console_write("  USB HID boot-keyboard interface detected (not bound)\n");
+        }
+        if (g_xhci.hub_descriptor_read) {
+            console_write("  USB hub descriptor: ports=");
+            console_write_dec(g_xhci.hub_info.port_count);
+            console_write(" characteristics=");
+            console_write_hex(g_xhci.hub_info.characteristics);
+            console_write(" power-delay=");
+            console_write_dec(g_xhci.hub_info.power_on_delay);
+            console_write(" x2ms\n");
+            for (uint8_t port = 1; port <= g_xhci.hub_info.port_count; port++) {
+                uint32_t status = g_xhci.hub_port_status[port];
+                bool low_speed = (status & (1u << 9)) != 0;
+                bool high_speed = (status & (1u << 10)) != 0;
+                console_write("    hub port "); console_write_dec(port);
+                console_write(" status="); console_write_hex(status);
+                console_write(" speed=");
+                console_write(low_speed ? "low" : high_speed ? "high" : "full");
+                console_write((status & 1u) != 0 ? " connected\n" : " empty\n");
+            }
+        }
         if (g_xhci.mass_storage_ready) {
             console_write("  USB mass storage: BOT transport ready; ");
             console_write_dec(g_xhci.block_count);
