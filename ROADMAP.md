@@ -133,19 +133,23 @@ objects are destroyed exactly when their final reference is released. Document
 handle ownership and the synchronization assumptions before introducing
 concurrent callers in M7.
 
-## M6 — Capabilities 🚧
+## M6 — Capabilities ✅
 
 - ✅ Capability objects bind a target object to an explicit rights subset.
 - ✅ Derivation only reduces rights; revoking a parent invalidates its subtree.
-- ✅ `capability_resolve()` checks revocation, requested rights and target type.
-- ✅ `captest` rejects rights enlargement and verifies subtree revocation.
+- ✅ Unified `capability_allows()` authority gate (live, unrevoked, rights and
+  type check) behind `capability_resolve()`; creation rejects zero granted
+  rights; derivation from a revoked parent fails.
+- ✅ `captest` rejects rights enlargement, zero granted rights, derivation from
+  a revoked parent, missing-handle resolution, revoke of an already-revoked
+  capability, and insufficient derived rights; verifies subtree revocation.
 - ⛔ Capability transfer over channels (M8).
 - 🚧 Migrate privileged operations to require capabilities and establish
   least-privilege defaults as those operations are added.
 
-**M6 exit gate:** self-tests must prove rights cannot be enlarged by
+**M6 exit gate:** passed. Self-tests prove rights cannot be enlarged by
 derivation, revoked capabilities and descendants cannot resolve their targets,
-and kernel operations reject missing or insufficient capabilities. Channel
+and capability checks reject missing or insufficient capabilities. Channel
 transfer remains sequenced with M8.
 
 ## M7 — Threads and scheduler

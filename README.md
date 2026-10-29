@@ -9,10 +9,12 @@ open-source research OS. Linux and BSD compatibility are planned as *runtimes
 that run on top of the Helix kernel*, translating Unix behaviour into Helix's
 native object model. They are not the foundation.
 
-> Status: **M3–M5 are complete; M6 capability work is underway.** The
-> kernel owns its page tables (`map`/`unmap`/`protect`), handles CPU exceptions
-> with readable reports, and takes a 100 Hz timer interrupt. M1–M3 built the
-> boot chain, interactive shell, and physical memory foundations.
+> Status: **M3–M6 are complete; M7 scheduler work is next.** The kernel owns its
+> page tables (`map`/`unmap`/`protect`), handles CPU exceptions with readable
+> reports, takes a 100 Hz timer interrupt, manages objects and rights-bearing
+> handles, and enforces revocable capabilities with a least-privilege check in
+> `capability_allows()`. M1–M3 built the boot chain, interactive shell, and
+> physical memory foundations.
 
 ---
 
@@ -36,7 +38,7 @@ native object model. They are not the foundation.
 | PIC remap + PIT timer interrupt | ✅ working, machine-tested (M4) |
 | Guard pages, non-executable kernel stack | ✅ working, machine-tested (M3) |
 | Object manager and rights-bearing kernel handles | ✅ working, machine-tested (M5) |
-| Capability objects, rights reduction and revocation | 🚧 in progress (M6) |
+| Capability objects, rights reduction and revocation | ✅ working, machine-tested (M6) |
 | Scheduler, threads, IPC | ⛔ not started (M7–M8) |
 | User space / ELF / syscalls | ⛔ not started (M9) |
 | Isolated driver services, filesystems, networking | ⛔ not started (M10–M12) |

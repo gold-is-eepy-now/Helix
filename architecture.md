@@ -86,7 +86,7 @@ A capability is itself an object. Capabilities can be:
 The kernel enforces capabilities at every operation boundary. There is no
 ambient "root".
 
-**Status:** not implemented. Planned for M6.
+**Status:** implemented in M6.
 
 ## IPC: channels and messages
 

@@ -505,6 +505,15 @@ static void cmd_captest(int argc, char **argv) {
                         "create capability and derive reduced rights");
     ok &= objtest_check(overgrant_rejected,
                         "reject capability rights enlargement");
+    ok &= objtest_check(capability_create(&table, source, 0) == 0,
+                        "reject capability creation with zero rights");
+
+    bool allows_write = capability_allows(&table, cap, OBJECT_RIGHT_WRITE,
+                                          OBJECT_TYPE_EVENT);
+    bool allows_insufficient = !capability_allows(&table, child,
+                                                   OBJECT_RIGHT_WRITE, OBJECT_TYPE_NONE);
+    ok &= objtest_check(allows_write && allows_insufficient,
+                        "capability_allows checks granted rights and target type");
 
     object_t *resolved = capability_resolve(&table, cap, OBJECT_RIGHT_WRITE,
                                            OBJECT_TYPE_EVENT);
@@ -528,6 +537,21 @@ static void cmd_captest(int argc, char **argv) {
                         capability_resolve(&table, child, OBJECT_RIGHT_READ,
                                            OBJECT_TYPE_NONE) == NULL,
                         "revoke parent and invalidate every descendant");
+    ok &= objtest_check(!capability_revoke(&table, cap),
+                        "reject revoking an already-revoked capability");
+    ok &= objtest_check(!capability_allows(&table, cap, OBJECT_RIGHT_READ,
+                                           OBJECT_TYPE_NONE),
+                        "capability_allows rejects revoked capabilities");
+    ok &= objtest_check(capability_derive(&table, cap, OBJECT_RIGHT_READ) == 0,
+                        "reject derivation from a revoked parent");
+
+    object_t *missing = capability_resolve(&table, 0x7fffffffu, OBJECT_RIGHT_READ,
+                                          OBJECT_TYPE_NONE);
+    ok &= objtest_check(missing == NULL,
+                        "resolve rejects missing capability handles");
+    ok &= objtest_check(!capability_allows(&table, 0x7fffffffu, OBJECT_RIGHT_READ,
+                                           OBJECT_TYPE_NONE),
+                        "capability_allows rejects missing capability handles");
 
     handle_table_close_all(&table);
     ok &= objtest_check(object_count() == before && g_objtest_destroyed == 1,

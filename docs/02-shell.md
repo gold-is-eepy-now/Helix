@@ -172,7 +172,7 @@ shows it; typing `myprog arg1 arg2` runs it.
 | `stacktest` | checks dedicated stack, guard-page fault recovery and NX enforcement |
 | `objects` | live object count and kernel handle-table usage |
 | `objtest` | self-test for object references, handle rights and closing |
-| `captest` | self-test for capability derivation, rights checks and revocation |
+| `captest` | self-test for capability derivation, rights checks and revocation, including denial cases |
 | `ticks` / `uptime` | PIT timer progress and time since boot |
 | `uptime` | seconds and milliseconds since boot |
 | `version` | name, version, codename |
