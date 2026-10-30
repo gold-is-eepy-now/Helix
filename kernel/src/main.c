@@ -38,6 +38,7 @@
 #include "time.h"
 #include "version.h"
 #include "vmm.h"
+#include "usb_hid.h"
 
 /* -------------------------------------------------------------------------
  * Limine protocol requests
@@ -226,6 +227,7 @@ void kmain(void) {
 
     /* M10: initialize driver framework and drivers. */
     ramdisk_driver_init();
+    usb_hid_init();
     driver_init_all();
     block_device_init_all();
 

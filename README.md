@@ -50,7 +50,8 @@ native object model. They are not the foundation.
 | Driver framework | ✅ complete (M10) |
 | Storage and filesystems | ✅ complete (M11) |
 | Networking, display, and input objects | ✅ complete (M12) |
-| Linux / BSD / POSIX compatibility | ⛔ not started (much later) |
+| Linux / BSD / POSIX compatibility | 🚧 in progress (runtime subsystem) |
+| USB HID support | 🚧 in progress (EHCI/XHCI drivers) |
 
 See [ROADMAP.md](ROADMAP.md) for the full plan, [docs/02-shell.md](docs/02-shell.md)
 for the shell, [docs/03-cpython-requirements.md](docs/03-cpython-requirements.md)
