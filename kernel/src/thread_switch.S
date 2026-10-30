@@ -66,3 +66,76 @@ thread_switch_load:           /* rdi = in_ctx */
     movq 88(%r12), %r12       /* incoming r12: last use of the ctx base */
     ret                       /* pops the rip slot we pushed */
 .size thread_switch_load, .-thread_switch_load
+
+/* thread_save_current(out_ctx = rdi): store the full context of the calling
+ * thread into *out_ctx and return normally. The caller resumes right after
+ * the call; no CPU switch happens here. Blocking IPC uses it to park a
+ * thread's state before marking itself WAITING.
+ *
+ * The context pointer arrives in rdi (System V ABI) and would be clobbered
+ * by the pushq %rdi used later, so the live rdi value is stored into the
+ * context before the push/pop save sequence begins.
+ *
+ * Getting `rip` out without disturbing the saved stack pointer: the `call`
+ * below pushes the address of the next instruction; the caller's real return
+ * address sits 8 bytes above it. */
+.global thread_save_current
+.type thread_save_current, @function
+thread_save_current:
+    movq %rdi, 32(%rdi)       /* ctx->rdi = live rdi value (before clobber) */
+    pushq %rax
+    movq %rax, 0(%rdi)
+    popq %rax
+    pushq %rcx
+    movq %rcx, 8(%rdi)
+    popq %rcx
+    pushq %rdx
+    movq %rdx, 16(%rdi)
+    popq %rdx
+    pushq %rsi
+    movq %rsi, 24(%rdi)
+    popq %rsi
+    pushq %rbp
+    movq %rbp, 80(%rdi)
+    popq %rbp
+    pushq %rbx
+    movq %rbx, 72(%rdi)
+    popq %rbx
+    pushq %r8
+    movq %r8, 40(%rdi)
+    popq %r8
+    pushq %r9
+    movq %r9, 48(%rdi)
+    popq %r9
+    pushq %r10
+    movq %r10, 56(%rdi)
+    popq %r10
+    pushq %r11
+    movq %r11, 64(%rdi)
+    popq %r11
+    pushq %r12
+    movq %r12, 88(%rdi)
+    popq %r12
+    pushq %r13
+    movq %r13, 96(%rdi)
+    popq %r13
+    pushq %r14
+    movq %r14,104(%rdi)
+    popq %r14
+    pushq %r15
+    movq %r15,112(%rdi)
+    popq %r15
+    pushfq
+    popq %rax
+    movq %rax, 136(%rdi)      /* rflags */
+    movq %rsp, %rax
+    movq %rax, 120(%rdi)      /* rsp */
+    call .Lss_ret              /* rsp[0] = .Lss_ret addr, rsp[8] = real ret addr */
+.Lss_ret:
+    movq 8(%rsp), %rax         /* real return address of the caller */
+    movq %rax, 128(%rdi)       /* rip */
+    movq (%rsp), %rbx          /* .Lss_ret address: drop it */
+    addq $8, %rsp
+    movq %rbx, %rax
+    ret                         /* pops the real return address */
+.size thread_save_current, .-thread_save_current

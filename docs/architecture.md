@@ -97,7 +97,9 @@ native mechanism for:
 - transferring handles and capabilities,
 - driver I/O.
 
-**Status:** not implemented. Planned for M8.
+**Status:** implemented in M8 — synchronous rendezvous channels between
+kernel threads (`kernel/src/channel.c`), with blocking park/resume through the
+scheduler.
 
 ## Drivers
 

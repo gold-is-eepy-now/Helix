@@ -36,6 +36,21 @@ typedef struct thread thread_t;
  * failure; the caller checks the object manager afterwards. */
 thread_t *thread_create(void (*entry)(void));
 
+/* Implemented in thread_switch.S. Save the full context of the calling
+ * thread into `out_ctx` and return normally; the caller resumes right after
+ * the call. Used by blocking IPC to park a thread's state before sleeping. */
+void thread_save_current(thread_context_t *out_ctx);
+
+/* Implemented in thread_switch.S. Save the caller (out_ctx) and load the
+ * incoming context (in_ctx): the run-queue hop for `thread_yield`. */
+void thread_switch_to(thread_context_t *out_ctx, thread_context_t *in_ctx);
+
+/* Implemented in thread_switch.S. Load `in_ctx` and jump into it. The
+ * caller must already have stored its own state (thread_yield via
+ * thread_switch_to, timer preemption via the interrupt frame rebuild in
+ * thread_tick). */
+void thread_switch_load(thread_context_t *in_ctx);
+
 /* Mark the current thread (the boot thread on entry) as RUNNING. */
 void thread_init(void);
 
@@ -49,8 +64,16 @@ void thread_yield(void);
  * The interrupted thread's full context comes from the interrupt frame. */
 void thread_tick(void);
 
-/* Mark the current thread WAITING (used by blocking IPC later). */
+/* Mark the current thread WAITING (used by blocking IPC). */
 void thread_block_current(void);
+
+/* Mark an arbitrary thread's state (READY / RUNNING / WAITING / DONE). */
+void thread_set_state(thread_t *thread, thread_state_t state);
+
+/* Hand the CPU to a thread whose context was parked via thread_save_current
+ * (blocking IPC deliver). The caller marks the target thread READY first; the
+ * jump lands at the parked thread's saved rip and never returns. */
+void thread_resume_context(thread_context_t *ctx, thread_t *thread);
 
 /* Mark the current thread DONE and release it. */
 void thread_exit_current(void);
@@ -58,7 +81,10 @@ void thread_exit_current(void);
 /* The thread that is running right now (NULL before thread_init). */
 thread_t *thread_current(void);
 
-/* Demo body for the first extra thread: yields forever. */
-void thread_demo_main(void);
+/* Sender demo: parks or delivers on the default rendezvous channel. */
+void thread_sender_main(void);
+
+/* Receiver demo: blocks until the sender delivers a value. */
+void thread_receiver_main(void);
 
 #endif /* HELIX_THREAD_H */

@@ -16,6 +16,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "channel.h"
 #include "heap.h"
 #include "idt.h"
 #include "kernel_stack.h"
@@ -25,6 +26,7 @@
 
 #define THREAD_STACK_BYTES (2u * 4096u)
 #define THREAD_QUANTUM_TICKS 2u
+
 
 /* RFLAGS value for a freshly created thread: interrupts enabled (bit 1 is
  * the architecturally fixed "always 1"). */
@@ -41,6 +43,7 @@ struct thread {
 /* Implemented in thread_switch.S. */
 void thread_switch_to(thread_context_t *out_ctx, thread_context_t *in_ctx);
 void thread_switch_load(thread_context_t *in_ctx);
+void thread_save_current(thread_context_t *out_ctx);
 
 static thread_t *g_run_queue;
 static thread_t *g_current;
@@ -72,6 +75,14 @@ void thread_init(void) {
     /* Only rip/rsp/rflags matter until the boot thread first yields, and
      * thread_switch_to overwrites all three then. */
     boot->ctx.rflags = THREAD_INITIAL_RFLAGS;
+
+    /* M8: the demo pair shares one rendezvous channel. The receiver is
+     * queued first and parks; the sender is queued ahead of it, so the first
+     * context switch lands on the sender, which delivers to the parked
+     * receiver. */
+    channel_init();
+    thread_create(thread_receiver_main);
+    thread_create(thread_sender_main);
 }
 
 thread_t *thread_create(void (*entry)(void)) {
@@ -161,7 +172,25 @@ void thread_tick(void) {
 
 void thread_block_current(void) {
     thread_t *cur = thread_current();
-    if (cur != NULL) cur->state = THREAD_WAITING;
+    if (cur == NULL) return;
+    /* A delivery marks the parked thread READY and resumes it through the
+     * saved context; the load-only switch lands back here. Such a thread must
+     * fall through instead of parking again. */
+    if (cur->state == THREAD_READY || cur->state == THREAD_DONE) return;
+    thread_set_state(cur, THREAD_WAITING);
+    thread_t *next = rr_next(g_run_queue, cur);
+    if (next == cur) return;
+    g_current = next;
+    thread_switch_load(&next->ctx);
+}
+
+void thread_set_state(thread_t *thread, thread_state_t state) {
+    if (thread != NULL) thread->state = state;
+}
+
+void thread_resume_context(thread_context_t *ctx, thread_t *thread) {
+    g_current = thread;
+    thread_switch_load(ctx);
 }
 
 void thread_exit_current(void) {
@@ -177,6 +206,23 @@ void thread_exit_current(void) {
     }
     kfree(cur);
     g_current = g_run_queue;
+}
+
+void thread_sender_main(void) {
+    channel_send(channel_default(), 0x2a);
+    for (;;) {
+        thread_yield();
+    }
+}
+
+void thread_receiver_main(void) {
+    uint64_t value = 0;
+    bool ok = channel_recv(channel_default(), &value);
+    kprintf("[thread] receiver got value=%llu ok=%d\n",
+            (unsigned long long)value, ok ? 1 : 0);
+    for (;;) {
+        thread_yield();
+    }
 }
 
 thread_t *thread_current(void) {

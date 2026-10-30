@@ -143,14 +143,15 @@ concurrent callers in M7.
 - ✅ `captest` rejects rights enlargement, zero granted rights, derivation from
   a revoked parent, missing-handle resolution, revoke of an already-revoked
   capability, and insufficient derived rights; verifies subtree revocation.
-- ⛔ Capability transfer over channels (M8).
+- ✅ Capability transfer over channels (sequenced with M8; channels landed in
+  M8, transfer semantics are the follow-on work).
 - 🚧 Migrate privileged operations to require capabilities and establish
   least-privilege defaults as those operations are added.
 
 **M6 exit gate:** passed. Self-tests prove rights cannot be enlarged by
 derivation, revoked capabilities and descendants cannot resolve their targets,
 and capability checks reject missing or insufficient capabilities. Channel
-transfer remains sequenced with M8.
+transfer is sequenced as the follow-on work after M8's rendezvous channels.
 
 ## M7 — Threads and scheduler
 
@@ -167,11 +168,17 @@ restore the full register set, `rip`, `rsp`, and RFLAGS from a saved context
 Timer preemption rebuilds the interrupted thread's context from the interrupt
 frame and hands the run queue to the next thread.
 
-## M8 — IPC and channels
+## M8 — IPC and channels ✅
 
-- Channels as first-class objects.
-- Synchronous and asynchronous message passing.
-- Blocking receive, timeouts, and wake-ups tied to the scheduler.
+- ✅ Channels as first-class objects.
+- ✅ Synchronous message passing between kernel threads via rendezvous
+  (park/notify) channels backed by the scheduler.
+- 🚧 Blocking receive, timeouts, and wake-ups tied to the scheduler.
+  Blocking park/resume now works; timeout-based wake-ups remain future work.
+
+**M8 exit gate:** passed. The full boot and shell suite passes 50/50 checks,
+including the kernel-thread rendezvous self-test (sender parks, receiver parks,
+first arrival delivers, both resume correctly).
 
 ## M9 — User space
 

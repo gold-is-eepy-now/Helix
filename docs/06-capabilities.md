@@ -25,9 +25,10 @@ object, the granted rights, and a shared revocation domain.
   `CONTROL` by default.
 
 Capability creation rejects zero granted rights. Derivation can only reduce
-rights, and derivation from a revoked parent fails. Channel transfer is
-sequenced with M8 because channels do not provide message delivery yet. The
-current implementation inherits M5's single-CPU, kernel-context-only
+rights, and derivation from a revoked parent fails. Capability transfer over
+channels landed with the M8 rendezvous channels; end-to-end transfer semantics
+are the follow-on work. The current implementation inherits M5's single-CPU,
+kernel-context-only
 synchronization assumption.
 
 ## Self-test

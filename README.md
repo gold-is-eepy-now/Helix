@@ -9,14 +9,14 @@ open-source research OS. Linux and BSD compatibility are planned as *runtimes
 that run on top of the Helix kernel*, translating Unix behaviour into Helix's
 native object model. They are not the foundation.
 
-> Status: **M3–M6 are complete; M7 scheduler is done; M8+ planned.** The kernel
-> owns its page tables (`map`/`unmap`/`protect`), handles CPU exceptions with
-> readable reports, takes a 100 Hz timer interrupt, manages objects and
-> rights-bearing handles, enforces revocable capabilities with a
-> least-privilege check in `capability_allows()`, and runs kernel threads with a
-> round-robin scheduler and timer preemption (`thread_context_t` +
-> `thread_switch_to`). M1–M3 built the boot chain, interactive shell, and
-> physical memory foundations.
+> Status: **M3–M8 are complete; M9+ planned.** The kernel owns its page tables
+> (`map`/`unmap`/`protect`), handles CPU exceptions with readable reports, takes a
+> 100 Hz timer interrupt, manages objects and rights-bearing handles, enforces
+> revocable capabilities with a least-privilege check in `capability_allows()`,
+> runs kernel threads with a round-robin scheduler and timer preemption
+> (`thread_context_t` + `thread_switch_to`), and passes rendezvous messages
+> between kernel threads through channels (`channel_send`/`channel_recv`).
+> M1–M3 built the boot chain, interactive shell, and physical memory foundations.
 
 ---
 
@@ -41,7 +41,7 @@ native object model. They are not the foundation.
 | Guard pages, non-executable kernel stack | ✅ working, machine-tested (M3) |
 | Object manager and rights-bearing kernel handles | ✅ working, machine-tested (M5) |
 | Capability objects, rights reduction and revocation | ✅ working, machine-tested (M6) |
-| Scheduler, threads, IPC | ✅ threads/scheduler working, machine-tested (M7); IPC ⛔ (M8) |
+| Scheduler, threads, IPC | ✅ threads/scheduler working, machine-tested (M7); ✅ IPC rendezvous channels working, machine-tested (M8) |
 | User space / ELF / syscalls | ⛔ not started (M9) |
 | Isolated driver services, filesystems, networking | ⛔ not started (M10–M12) |
 | Linux / BSD / POSIX compatibility | ⛔ not started (much later) |
