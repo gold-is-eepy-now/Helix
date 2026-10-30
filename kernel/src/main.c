@@ -28,6 +28,9 @@
 #include "pic.h"
 #include "pit.h"
 #include "pmm.h"
+#include "ramdisk_driver.h"
+#include "driver.h"
+#include "block_device.h"
 #include "shell.h"
 #include "sysinfo.h"
 #include "thread.h"
@@ -219,6 +222,11 @@ void kmain(void) {
     pmm_init(memmap_request.response, hhdm_offset);
     heap_init(hhdm_offset);
     object_manager_init();
+
+    /* M10: initialize driver framework and drivers. */
+    ramdisk_driver_init();
+    driver_init_all();
+    block_device_init_all();
 
     /* Adopt page tables, install exceptions, map a protected stack, then move
      * all ordinary kernel execution onto it before enabling interrupts. */
