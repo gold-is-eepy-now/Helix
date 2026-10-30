@@ -15,6 +15,7 @@
 
 #include "console.h"
 #include "doom_wad.h"
+#include "filesystem.h"
 #include "apic.h"
 #include "fb.h"
 #include "heap.h"
@@ -227,6 +228,12 @@ void kmain(void) {
     ramdisk_driver_init();
     driver_init_all();
     block_device_init_all();
+
+    /* M11: initialize and mount boot filesystem. */
+    fs_boot_init();
+    fs_mount(NULL, "/", "helixfs", true);
+    fs_boot_add_file("README", "Helix OS\nboot filesystem active.\n", 0);
+    fs_boot_add_file("LICENSE", "MIT License\n\nCopyright (c) 2025 Helix OS\n\nPermission is hereby granted, free of charge, ...\n", 0);
 
     /* Adopt page tables, install exceptions, map a protected stack, then move
      * all ordinary kernel execution onto it before enabling interrupts. */

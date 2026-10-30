@@ -29,6 +29,7 @@
 #include "time.h"
 #include "version.h"
 #include "vmm.h"
+#include "filesystem.h"
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -707,6 +708,106 @@ static void cmd_reboot(int argc, char **argv) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Filesystem commands                                                 */
+/* ------------------------------------------------------------------ */
+
+extern void fs_boot_init(void);
+extern void fs_boot_add_file(const char *name, const void *data, uint64_t size);
+extern const char *fs_boot_root(void);
+extern uint64_t fs_list_dir(file_entry_t *dir, file_entry_t **out_entries,
+                            uint64_t max_entries);
+extern uint64_t fs_file_size(file_entry_t *file);
+extern bool fs_file_is_dir(file_entry_t *file);
+extern void *file_get_data(file_entry_t *file);
+extern file_entry_t *fs_open(const char *path);
+
+static void cmd_fsinfo(int argc, char **argv) {
+    (void)argc; (void)argv;
+    console_write("Helix native filesystem (helixfs)\n");
+    console_write("Mounted at: /\n");
+    console_write("Read-only boot filesystem\n");
+    console_write("Files:\n");
+    const char *root = fs_boot_root();
+    if (root) {
+        file_entry_t *dir = fs_open("/");
+        if (dir) {
+            file_entry_t *entries[32];
+            uint64_t count = fs_list_dir(dir, entries, 32);
+            for (uint64_t i = 0; i < count; i++) {
+                file_entry_t *entry = entries[i];
+                console_write("  ");
+                if (fs_file_is_dir(entry)) {
+                    console_write("[DIR] ");
+                } else {
+                    console_write("[FILE] ");
+                }
+                console_write(entry->name);
+                if (!fs_file_is_dir(entry)) {
+                    console_write(" (");
+                    console_write_dec(fs_file_size(entry));
+                    console_write(" bytes)");
+                }
+                console_putc('\n');
+            }
+        }
+    }
+}
+
+static void cmd_ls(int argc, char **argv) {
+    (void)argc;
+    const char *path = argc > 1 ? argv[1] : "/";
+    file_entry_t *dir = fs_open(path);
+    if (dir == NULL || !fs_file_is_dir(dir)) {
+        console_write("ls: not a directory: ");
+        console_write(path);
+        console_putc('\n');
+        return;
+    }
+    file_entry_t *entries[64];
+    uint64_t count = fs_list_dir(dir, entries, 64);
+    for (uint64_t i = 0; i < count; i++) {
+        file_entry_t *entry = entries[i];
+        if (fs_file_is_dir(entry)) {
+            console_set_fg(CONSOLE_BRIGHT_CYAN);
+            console_write("[DIR]  ");
+        } else {
+            console_write("[FILE] ");
+        }
+        console_write(entry->name);
+        console_putc('\n');
+        console_reset_color();
+    }
+}
+
+static void cmd_cat(int argc, char **argv) {
+    if (argc < 2) {
+        console_write("cat: missing file operand\n");
+        return;
+    }
+    file_entry_t *file = fs_open(argv[1]);
+    if (file == NULL) {
+        console_write("cat: ");
+        console_write(argv[1]);
+        console_write(": No such file\n");
+        return;
+    }
+    if (fs_file_is_dir(file)) {
+        console_write("cat: ");
+        console_write(argv[1]);
+        console_write(": Is a directory\n");
+        return;
+    }
+    uint64_t size = fs_file_size(file);
+    void *data = file_get_data(file);
+    if (data && size > 0) {
+        console_write((const char *)data);
+    }
+    if (size == 0 || ((const char *)data)[size - 1] != '\n') {
+        console_putc('\n');
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /* The table                                                           */
 /* ------------------------------------------------------------------ */
 
@@ -737,6 +838,9 @@ const command_t helix_commands[] = {
     {"version", "show the OS version",                  cmd_version},
     {"halt",    "halt the machine",                     cmd_halt},
     {"reboot",  "restart the machine",                  cmd_reboot},
+    {"fsinfo",  "show filesystem information",          cmd_fsinfo},
+    {"ls",      "list directory contents",              cmd_ls},
+    {"cat",     "display file contents",                cmd_cat},
 };
 
 const size_t helix_command_count = sizeof(helix_commands) / sizeof(helix_commands[0]);
