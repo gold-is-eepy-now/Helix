@@ -42,8 +42,8 @@ native object model. They are not the foundation.
 | Object manager and rights-bearing kernel handles | ✅ working, machine-tested (M5) |
 | Capability objects, rights reduction and revocation | ✅ working, machine-tested (M6) |
 | Scheduler, threads, IPC | ✅ threads/scheduler working, machine-tested (M7); ✅ IPC rendezvous channels working, machine-tested (M8) |
-| User space / ELF / syscalls | ✅ finished |
-| Isolated driver services, filesystems, networking | ✅ OK |
+| User space / ELF / syscalls | ✅ finished (M9) |
+| Isolated driver services, filesystems, networking | ✅ OK (M10-M12) |
 | Linux / BSD / POSIX compatibility | ⛔ not started (much later) |
 
 See [ROADMAP.md](ROADMAP.md) for the full plan, [docs/02-shell.md](docs/02-shell.md)
