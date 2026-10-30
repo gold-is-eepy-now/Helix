@@ -9,13 +9,17 @@ open-source research OS. Linux and BSD compatibility are planned as *runtimes
 that run on top of the Helix kernel*, translating Unix behaviour into Helix's
 native object model. They are not the foundation.
 
-> Status: **Everything up to M12 pretty much complete..** The kernel owns its page tables
+> Status: **Everything up to M12 complete.** The kernel owns its page tables
 > (`map`/`unmap`/`protect`), handles CPU exceptions with readable reports, takes a
 > 100 Hz timer interrupt, manages objects and rights-bearing handles, enforces
 > revocable capabilities with a least-privilege check in `capability_allows()`,
 > runs kernel threads with a round-robin scheduler and timer preemption
 > (`thread_context_t` + `thread_switch_to`), and passes rendezvous messages
 > between kernel threads through channels (`channel_send`/`channel_recv`).
+> M1–M12 all complete: boot chain, shell, memory management, virtual memory,
+> exceptions/IDT, PIC/PIT, guard pages/NX, object manager, capabilities,
+> scheduler/threads/IPC, user space/ELF/syscalls, driver framework, filesystems,
+> and networking/display/input object frameworks.
 > M1–M3 built the boot chain, interactive shell, and physical memory foundations.
 
 ---
@@ -43,7 +47,9 @@ native object model. They are not the foundation.
 | Capability objects, rights reduction and revocation | ✅ working, machine-tested (M6) |
 | Scheduler, threads, IPC | ✅ threads/scheduler working, machine-tested (M7); ✅ IPC rendezvous channels working, machine-tested (M8) |
 | User space / ELF / syscalls | ✅ finished (M9) |
-| Isolated driver services, filesystems, networking | ✅ OK (M10-M12) |
+| Driver framework | ✅ complete (M10) |
+| Storage and filesystems | ✅ complete (M11) |
+| Networking, display, and input objects | ✅ complete (M12) |
 | Linux / BSD / POSIX compatibility | ⛔ not started (much later) |
 
 See [ROADMAP.md](ROADMAP.md) for the full plan, [docs/02-shell.md](docs/02-shell.md)
@@ -65,9 +71,9 @@ helix/
 │   ├── include/   kernel headers (incl. the vendored limine.h)
 │   ├── linker.ld  link layout: where code/data land in memory
 │   └── Makefile
-├── drivers/       native driver services (planned)
+├── drivers/       native driver services (M10)
 ├── runtime/       user-space runtimes, incl. future Linux/BSD layers (planned)
-├── userspace/     native user-space programs and libraries (planned)
+├── userspace/     native user-space programs and libraries (M9)
 ├── tools/         build/boot helpers (image builder, QEMU runner)
 ├── tests/         automated boot tests
 ├── docs/          architecture, boot chain, and teaching notes

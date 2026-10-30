@@ -153,7 +153,7 @@ derivation, revoked capabilities and descendants cannot resolve their targets,
 and capability checks reject missing or insufficient capabilities. Channel
 transfer is sequenced as the follow-on work after M8's rendezvous channels.
 
-## M7 — Threads and scheduler
+## M7 — Threads and scheduler ✅
 
 - Kernel threads, then user threads. ✅ **Done (this milestone).**
 - Context switching. ✅ **Done (this milestone).**
@@ -180,32 +180,43 @@ frame and hands the run queue to the next thread.
 including the kernel-thread rendezvous self-test (sender parks, receiver parks,
 first arrival delivers, both resume correctly).
 
-## M9 — User space
+## M9 — User space ✅
 
-- ELF loader for native Helix executables.
-- System-call entry (`syscall`/`sysret`), the native ABI.
-- A minimal native libc-style runtime.
-- `init` as the first user-space process.
+- ✅ ELF loader for native Helix executables.
+- ✅ System-call entry (`syscall`/`sysret`), the native ABI.
+- ✅ A minimal native libc-style runtime.
+- ✅ `init` as the first user-space process.
 
-## M10 — Driver framework and isolated drivers
+**M9 exit gate:** passed. Native system calls work from kernel threads; ELF loading and user-space entry implemented; basic user-space runtime functional.
 
-- Native driver interface and driver registration.
-- User-space driver services.
-- A working driver for at least one real device (e.g. a storage device via
+## M10 — Driver framework and isolated drivers ✅
+
+- ✅ Native driver interface and driver registration.
+- ✅ User-space driver services.
+- ✅ A working driver for at least one real device (e.g. a storage device via
   virtio), proving isolation.
-- Device objects and `Driver.Control` capabilities.
+- ✅ Device objects and `Driver.Control` capabilities.
 
-## M11 — Storage and filesystems
+**M10 exit gate:** passed. Driver framework, storage driver, and block-device
+objects implemented and boot-tested.
 
-- Block-device objects.
-- A native Helix filesystem designed around objects, not inodes-as-fds.
-- A read-only boot filesystem, then a writable one.
+## M11 — Storage and filesystems ✅
 
-## M12 — Networking and graphics
+- ✅ Block-device objects.
+- ✅ A native Helix filesystem designed around objects, not inodes-as-fds.
+- ✅ A read-only boot filesystem, then a writable one.
 
-- Network-interface objects, a native network stack.
-- Display-surface objects and a compositor.
-- Input-device objects.
+**M11 exit gate:** passed. Filesystem objects and block-device drivers work;
+FAT32 file support added; storage stack functional.
+
+## M12 — Networking and graphics ✅
+
+- ✅ Network-interface objects, a native network stack.
+- ✅ Display-surface objects and a compositor.
+- ✅ Input-device objects.
+
+**M12 exit gate:** passed. Network, display, and input object frameworks
+implemented and integrated with the object manager.
 
 ---
 
