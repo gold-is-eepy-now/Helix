@@ -14,6 +14,10 @@ typedef struct {
     uint64_t rip, cs, rflags;
 } registers_t;
 
+/* Interrupt frame pointer set by the isr stubs before calling isr_handler.
+ * The timer scheduler reads it on IRQ0 to rebuild the running context. */
+extern uint64_t *g_interrupt_frame;
+
 /* Build and load the IDT. */
 void idt_init(void);
 

@@ -7,6 +7,12 @@
 
 #include "object.h"
 
+/* True when `capability` is live, unrevoked, and grants `required_rights`
+ * for `expected_type`. Does not retain the target object; kernel operations
+ * that must act on a resolved target should use capability_resolve(). */
+bool capability_allows(handle_table_t *table, handle_t capability,
+                       uint32_t required_rights, object_type_t expected_type);
+
 /* Create authority from a source handle that has INSPECT and DUPLICATE.
  * Requested rights must be a non-empty subset of that handle's rights. */
 handle_t capability_create(handle_table_t *table, handle_t source,

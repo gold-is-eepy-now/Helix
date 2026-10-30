@@ -15,6 +15,7 @@
 
 #include "console.h"
 #include "doom_wad.h"
+#include "filesystem.h"
 #include "apic.h"
 #include "fb.h"
 #include "heap.h"
@@ -28,8 +29,12 @@
 #include "pic.h"
 #include "pit.h"
 #include "pmm.h"
+#include "ramdisk_driver.h"
+#include "driver.h"
+#include "block_device.h"
 #include "shell.h"
 #include "sysinfo.h"
+#include "thread.h"
 #include "time.h"
 #include "version.h"
 #include "vmm.h"
@@ -178,6 +183,12 @@ static void kernel_main_continue(void) {
     console_putc('\n');
 
     console_write("Type 'help' for a list of commands, 'sysinfo' for system info.\n\n");
+
+    /* M8: boot the scheduler. The boot thread runs the kernel; thread_init
+     * queues the demo pair (rendezvous sender/receiver) before returning. */
+    thread_init();
+    thread_yield();
+
     shell_run();
     kernel_idle_loop();
 }
@@ -212,6 +223,17 @@ void kmain(void) {
     pmm_init(memmap_request.response, hhdm_offset);
     heap_init(hhdm_offset);
     object_manager_init();
+
+    /* M10: initialize driver framework and drivers. */
+    ramdisk_driver_init();
+    driver_init_all();
+    block_device_init_all();
+
+    /* M11: initialize and mount boot filesystem. */
+    fs_boot_init();
+    fs_mount(NULL, "/", "helixfs", true);
+    fs_boot_add_file("README", "Helix OS\nboot filesystem active.\n", 0);
+    fs_boot_add_file("LICENSE", "MIT License\n\nCopyright (c) 2025 Helix OS\n\nPermission is hereby granted, free of charge, ...\n", 0);
 
     /* Adopt page tables, install exceptions, map a protected stack, then move
      * all ordinary kernel execution onto it before enabling interrupts. */

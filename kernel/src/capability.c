@@ -123,25 +123,38 @@ bool capability_revoke(handle_table_t *table, handle_t capability) {
     return result;
 }
 
+bool capability_allows(handle_table_t *table, handle_t capability,
+                       uint32_t required_rights, object_type_t expected_type) {
+    if (required_rights == 0 || (required_rights & ~OBJECT_RIGHT_ALL) != 0)
+        return false;
+    object_t *cap_object = handle_get(table, capability, OBJECT_RIGHT_READ,
+                                      OBJECT_TYPE_CAPABILITY);
+    if (cap_object == NULL) return false;
+    capability_payload_t *payload = object_payload(cap_object);
+    bool allowed = payload != NULL && payload->domain != NULL &&
+                   !payload->domain->revoked &&
+                   (payload->rights & required_rights) == required_rights &&
+                   (expected_type == OBJECT_TYPE_NONE ||
+                    object_type(payload->target) == expected_type);
+    object_release(cap_object);
+    return allowed;
+}
+
 object_t *capability_resolve(handle_table_t *table, handle_t capability,
                              uint32_t required_rights,
                              object_type_t expected_type) {
     if (required_rights == 0 || (required_rights & ~OBJECT_RIGHT_ALL) != 0)
         return NULL;
+    if (!capability_allows(table, capability, required_rights, expected_type))
+        return NULL;
     object_t *cap_object = handle_get(table, capability, OBJECT_RIGHT_READ,
                                       OBJECT_TYPE_CAPABILITY);
-    if (cap_object == NULL) return NULL;
-    capability_payload_t *payload = object_payload(cap_object);
     object_t *target = NULL;
-    if (payload != NULL && payload->domain != NULL &&
-        !payload->domain->revoked &&
-        (payload->rights & required_rights) == required_rights &&
-        (expected_type == OBJECT_TYPE_NONE ||
-         object_type(payload->target) == expected_type) &&
-        object_retain(payload->target)) {
-        target = payload->target;
+    if (cap_object != NULL) {
+        capability_payload_t *payload = object_payload(cap_object);
+        if (payload != NULL && object_retain(payload->target)) target = payload->target;
+        object_release(cap_object);
     }
-    object_release(cap_object);
     return target;
 }
 

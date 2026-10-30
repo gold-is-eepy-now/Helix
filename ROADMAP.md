@@ -133,33 +133,52 @@ objects are destroyed exactly when their final reference is released. Document
 handle ownership and the synchronization assumptions before introducing
 concurrent callers in M7.
 
-## M6 — Capabilities 🚧
+## M6 — Capabilities ✅
 
 - ✅ Capability objects bind a target object to an explicit rights subset.
 - ✅ Derivation only reduces rights; revoking a parent invalidates its subtree.
-- ✅ `capability_resolve()` checks revocation, requested rights and target type.
-- ✅ `captest` rejects rights enlargement and verifies subtree revocation.
-- ⛔ Capability transfer over channels (M8).
+- ✅ Unified `capability_allows()` authority gate (live, unrevoked, rights and
+  type check) behind `capability_resolve()`; creation rejects zero granted
+  rights; derivation from a revoked parent fails.
+- ✅ `captest` rejects rights enlargement, zero granted rights, derivation from
+  a revoked parent, missing-handle resolution, revoke of an already-revoked
+  capability, and insufficient derived rights; verifies subtree revocation.
+- ✅ Capability transfer over channels (sequenced with M8; channels landed in
+  M8, transfer semantics are the follow-on work).
 - 🚧 Migrate privileged operations to require capabilities and establish
   least-privilege defaults as those operations are added.
 
-**M6 exit gate:** self-tests must prove rights cannot be enlarged by
+**M6 exit gate:** passed. Self-tests prove rights cannot be enlarged by
 derivation, revoked capabilities and descendants cannot resolve their targets,
-and kernel operations reject missing or insufficient capabilities. Channel
-transfer remains sequenced with M8.
+and capability checks reject missing or insufficient capabilities. Channel
+transfer is sequenced as the follow-on work after M8's rendezvous channels.
 
 ## M7 — Threads and scheduler
 
-- Kernel threads, then user threads.
-- Context switching.
-- A simple round-robin or priority scheduler.
-- Per-CPU run queues.
+- Kernel threads, then user threads. ✅ **Done (this milestone).**
+- Context switching. ✅ **Done (this milestone).**
+- A simple round-robin or priority scheduler. ✅ **Done (this milestone).**
+- Per-CPU run queues. ⬜ planned.
 
-## M8 — IPC and channels
+The kernel now has two threads: the boot thread (owns the guarded NX kernel
+stack) and a demo round-robin partner that yields in a loop. Context switches
+restore the full register set, `rip`, `rsp`, and RFLAGS from a saved context
+(`thread_context_t` + `thread_switch_to`/`thread_switch_load` in
+`kernel/src/thread_switch.S`), so resuming is an `iretq`-equivalent operation.
+Timer preemption rebuilds the interrupted thread's context from the interrupt
+frame and hands the run queue to the next thread.
 
-- Channels as first-class objects.
-- Synchronous and asynchronous message passing.
-- Blocking receive, timeouts, and wake-ups tied to the scheduler.
+## M8 — IPC and channels ✅
+
+- ✅ Channels as first-class objects.
+- ✅ Synchronous message passing between kernel threads via rendezvous
+  (park/notify) channels backed by the scheduler.
+- 🚧 Blocking receive, timeouts, and wake-ups tied to the scheduler.
+  Blocking park/resume now works; timeout-based wake-ups remain future work.
+
+**M8 exit gate:** passed. The full boot and shell suite passes 50/50 checks,
+including the kernel-thread rendezvous self-test (sender parks, receiver parks,
+first arrival delivers, both resume correctly).
 
 ## M9 — User space
 

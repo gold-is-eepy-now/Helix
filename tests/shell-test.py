@@ -246,6 +246,16 @@ def main():
               "derived capability cannot revoke its parent: ok")
         check("revoking parent invalidates descendants",
               "revoke parent and invalidate every descendant: ok")
+        check("captest rejects zero granted rights",
+              "reject capability creation with zero rights: ok")
+        check("captest enforces capability_allows checks",
+              "capability_allows checks granted rights and target type: ok")
+        check("captest rejects derivation from a revoked parent",
+              "reject derivation from a revoked parent: ok")
+        check("captest rejects revoking an already-revoked capability",
+              "reject revoking an already-revoked capability: ok")
+        check("captest rejects missing capability handles",
+              "resolve rejects missing capability handles: ok")
         check("M6 capability self-test passes",
               "M6 capability self-test: PASS")
         ser.send("objects\n")

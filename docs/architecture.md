@@ -97,7 +97,9 @@ native mechanism for:
 - transferring handles and capabilities,
 - driver I/O.
 
-**Status:** not implemented. Planned for M8.
+**Status:** implemented in M8 — synchronous rendezvous channels between
+kernel threads (`kernel/src/channel.c`), with blocking park/resume through the
+scheduler.
 
 ## Drivers
 
@@ -127,10 +129,13 @@ compatibility is explicitly out of scope until the native interface is mature.
 
 - IDT with readable exception dumps.
 - Interrupt controllers and a monotonic timer.
-- Kernel threads, then user threads.
-- A simple, fair scheduler; SMP later.
+- Kernel threads, then user threads. ✅ **Done — M7.**
+- A simple, fair scheduler; SMP later. ✅ **M7 scheduler implemented**
+  (round-robin over a single run queue of kernel threads; context switching
+  via saved `thread_context_t`).
 
-**Status:** not implemented. Planned for M4 and M7.
+**Status:** scheduler and kernel threads implemented in M7; user threads,
+SMP run queues and richer policy remain future work. IPC is M8.
 
 ## The native object API and system calls
 

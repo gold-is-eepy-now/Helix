@@ -91,3 +91,11 @@ char *strncpy(char *dest, const char *src, size_t n) {
     }
     return dest;
 }
+
+char *strchr(const char *s, int c) {
+    while (*s != (char)c) {
+        if (*s == '\0') return NULL;
+        s++;
+    }
+    return (char *)s;
+}

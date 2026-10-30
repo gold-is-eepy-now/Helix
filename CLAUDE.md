@@ -75,10 +75,15 @@ make BUILD_DIR=/tmp/hb test   # build + boot headlessly and verify the banner
   `vmm_protect`)**, an **IDT with readable CPU exception handlers**, and a
   **100 Hz PIT timer interrupt** (PIC remapped; LAPIC LINT0 opened for the
   8259).
-- **Not implemented:** guard pages, a non-executable stack, APIC/IOAPIC
-  timers, a scheduler, threads, IPC, user space, ELF loading, syscalls, the
-  object manager, capabilities, isolated driver services, filesystems,
-  networking, graphics, compatibility layers.
+- **Implemented:** the object manager with rights-bearing kernel handles
+  (`object_*`/`handle_*`) and capability objects with derivation, revocation,
+  and the unified `capability_allows()` authority gate (`capability_*`) — M5
+  and M6, machine-tested via the `objtest` and `captest` shell commands.
+- **Implemented:** kernel threads with a round-robin scheduler and timer
+  preemption via saved context switches — M7, machine-tested via the boot and
+  shell suites.
+- **Not implemented:** IPC, user space, ELF loading, syscalls, isolated driver
+  services, filesystems, networking, graphics, compatibility layers.
 
 Do not write documentation or commit messages that imply unimplemented systems
 exist.

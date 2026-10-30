@@ -15,6 +15,7 @@
 #include "panic.h"
 #include "pic.h"
 #include "pit.h"
+#include "thread.h"
 
 typedef struct {
     uint16_t offset_low;
@@ -38,11 +39,15 @@ static bool g_page_fault_caught;
 static uint64_t g_expected_fault_address;
 static uint64_t g_fault_recovery_rip;
 static uint64_t g_expected_fault_error;
+uint64_t *g_interrupt_frame;
 
 /* Provided by isr.S. */
 extern void (*const interrupt_stubs[])(void);
 extern const uint64_t interrupt_stub_count;
 extern void isr_default(void);
+
+/* Provided by syscall_entry.S. */
+extern void syscall_interrupt_handler(void);
 
 /* The kernel code selector is whatever the bootloader set up in the GDT.
  * Limine uses 0x28 (not the 0x08 you see in many tutorials), so we read the
@@ -95,6 +100,10 @@ void idt_init(void) {
     for (uint64_t i = 0; i < interrupt_stub_count && i < 256; i++) {
         set_gate((uint8_t)i, interrupt_stubs[i]);
     }
+    /* Install syscall gate at vector 0x80 (software interrupt).
+     * User code invokes the kernel via `int $0x80`. Vector 0x80 avoids
+     * conflicts with CPU exceptions (0-31) and PIC IRQs (32-47). */
+    set_gate(0x80, syscall_interrupt_handler);
     g_idt_ptr.limit = (uint16_t)(sizeof(g_idt) - 1);
     g_idt_ptr.base = (uint64_t)&g_idt;
     __asm__ volatile("lidt %0" : : "m"(g_idt_ptr) : "memory");
@@ -120,6 +129,8 @@ bool idt_expected_page_fault_caught(void) { return g_page_fault_caught; }
 uint64_t idt_expected_page_fault_error(void) { return g_expected_fault_error; }
 
 void isr_handler(registers_t *regs) {
+    /* The scheduler needs the interrupted thread's context; hand it the frame. */
+    g_interrupt_frame = (uint64_t *)regs;
     if (regs->vector < 32) {
         if (regs->vector == 14 && g_page_fault_armed &&
             read_cr2() == g_expected_fault_address) {
@@ -145,7 +156,14 @@ void isr_handler(registers_t *regs) {
     if (regs->vector < 48) {
         uint8_t irq = (uint8_t)(regs->vector - 32);
         if (irq == 0) {
+            /* Acknowledge the PIC *before* the scheduler runs: if the
+             * quantum expired, thread_tick switches away and never returns
+             * to this frame, so a later EOI would never happen and the PIC
+             * would stop delivering timer interrupts. */
+            pic_send_eoi(irq);
             pit_tick();
+            thread_tick();
+            return;
         }
         pic_send_eoi(irq);
         return;
