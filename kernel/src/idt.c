@@ -46,6 +46,9 @@ extern void (*const interrupt_stubs[])(void);
 extern const uint64_t interrupt_stub_count;
 extern void isr_default(void);
 
+/* Provided by syscall_entry.S. */
+extern void syscall_interrupt_handler(void);
+
 /* The kernel code selector is whatever the bootloader set up in the GDT.
  * Limine uses 0x28 (not the 0x08 you see in many tutorials), so we read the
  * current CS instead of hardcoding it. */
@@ -97,6 +100,10 @@ void idt_init(void) {
     for (uint64_t i = 0; i < interrupt_stub_count && i < 256; i++) {
         set_gate((uint8_t)i, interrupt_stubs[i]);
     }
+    /* Install syscall gate at vector 0x80 (software interrupt).
+     * User code invokes the kernel via `int $0x80`. Vector 0x80 avoids
+     * conflicts with CPU exceptions (0-31) and PIC IRQs (32-47). */
+    set_gate(0x80, syscall_interrupt_handler);
     g_idt_ptr.limit = (uint16_t)(sizeof(g_idt) - 1);
     g_idt_ptr.base = (uint64_t)&g_idt;
     __asm__ volatile("lidt %0" : : "m"(g_idt_ptr) : "memory");
