@@ -9,7 +9,7 @@ open-source research OS. Linux and BSD compatibility are planned as *runtimes
 that run on top of the Helix kernel*, translating Unix behaviour into Helix's
 native object model. They are not the foundation.
 
-> Status: **M3–M8 are complete; M9+ planned.** The kernel owns its page tables
+> Status: **Everything up to M12 pretty much complete..** The kernel owns its page tables
 > (`map`/`unmap`/`protect`), handles CPU exceptions with readable reports, takes a
 > 100 Hz timer interrupt, manages objects and rights-bearing handles, enforces
 > revocable capabilities with a least-privilege check in `capability_allows()`,
