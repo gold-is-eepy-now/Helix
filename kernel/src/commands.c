@@ -30,6 +30,9 @@
 #include "version.h"
 #include "vmm.h"
 #include "filesystem.h"
+#include "display_surface.h"
+#include "input_device.h"
+#include "net_interface.h"
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
