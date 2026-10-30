@@ -30,6 +30,7 @@
 #include "pmm.h"
 #include "shell.h"
 #include "sysinfo.h"
+#include "thread.h"
 #include "time.h"
 #include "version.h"
 #include "vmm.h"
@@ -178,6 +179,13 @@ static void kernel_main_continue(void) {
     console_putc('\n');
 
     console_write("Type 'help' for a list of commands, 'sysinfo' for system info.\n\n");
+
+    /* M7: boot the scheduler. The boot thread runs the kernel; a demo worker
+     * is queued so the first context switch has something to switch to. */
+    thread_init();
+    thread_create(thread_demo_main);
+    thread_yield();
+
     shell_run();
     kernel_idle_loop();
 }

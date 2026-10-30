@@ -79,9 +79,11 @@ make BUILD_DIR=/tmp/hb test   # build + boot headlessly and verify the banner
   (`object_*`/`handle_*`) and capability objects with derivation, revocation,
   and the unified `capability_allows()` authority gate (`capability_*`) — M5
   and M6, machine-tested via the `objtest` and `captest` shell commands.
-- **Not implemented:** scheduler, kernel threads, IPC, user space, ELF loading,
-  syscalls, isolated driver services, filesystems, networking, graphics,
-  compatibility layers.
+- **Implemented:** kernel threads with a round-robin scheduler and timer
+  preemption via saved context switches — M7, machine-tested via the boot and
+  shell suites.
+- **Not implemented:** IPC, user space, ELF loading, syscalls, isolated driver
+  services, filesystems, networking, graphics, compatibility layers.
 
 Do not write documentation or commit messages that imply unimplemented systems
 exist.
