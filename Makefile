@@ -31,9 +31,12 @@ IMAGE          := $(BUILD_DIR)/helix.img
 LINUX_SUBMODULE_DIR ?= third-party/linux
 LINUX_SUBMODULE_INITIALIZED ?= $(shell test -d "$(LINUX_SUBMODULE_DIR)" && echo yes || echo no)
 
-.PHONY: all kernel deps linux-submodule linux-drivers linux-drivers-ethernet linux-drivers-wifi linux-drivers-graphics linux-drivers-sound image iso disks run test clean install userspace-apps
+.PHONY: all kernel deps linux-submodule linux-drivers linux-drivers-ethernet linux-drivers-wifi linux-drivers-graphics linux-drivers-sound image iso disks run test clean install userspace-apps img-with-linux-drivers
 
 all: image
+
+img-with-linux-drivers: linux-submodule linux-drivers all
+	@make image
 
 install: kernel deps
 	@BUILD_DIR="$(BUILD_DIR)" sh tools/install.sh
