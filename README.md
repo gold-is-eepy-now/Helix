@@ -74,14 +74,25 @@ helix/
 │   └── Makefile
 ├── drivers/       native driver services (M10)
 ├── runtime/       user-space runtimes, incl. future Linux/BSD layers (planned)
+│   ├── optional_drivers/   optional Linux driver adapters (Ethernet, WiFi, Graphics, Sound)
+│   │   ├── transport/      transport adapter headers
+│   │   ├── ethernet.c     RealTek + Intel Ethernet adapter
+│   │   ├── wifi.c         Intel + RealTek + FOSS Broadcom WiFi adapter
+│   │   ├── graphics.c     Mesa + NVK/Zinc (NVIDIA) graphics adapter
+│   │   ├── sound.c        Intel HDA + Realtek Codec sound adapter
+│   │   └── Makefile
+│   └── userspace/apps/     userspace test apps (DHCP, WiFi, WGet, WAV, volume)
 ├── userspace/     native user-space programs and libraries (M9)
+│   └── apps/      test apps for optional drivers (dhcp, wifi, wget, wav, volume)
 ├── tools/         build/boot helpers (image builder, QEMU runner)
 ├── tests/         automated boot tests
 ├── docs/          architecture, boot chain, and teaching notes
+├── third-party/   optional third-party dependencies
+│   └── linux/     Linux kernel git submodule (optional driver sources)
 ├── README.md
 ├── ROADMAP.md
 ├── CONTRIBUTING.md
-└── CLAUDE.md
+├── CLAUDE.md
 └── third-party.zip Planned doom support, before building extract me!! delete the old third-party folder
 ```
 
@@ -133,6 +144,35 @@ make CC=x86_64-elf-gcc test
 (`make TOOLCHAIN=llvm` is also supported if you prefer `brew install llvm`.)
 Firmware paths differ on macOS; `tools/ovmf.sh` finds them automatically.
 
+### Optional Linux driver support
+
+Helix can optionally include Linux kernel drivers for Ethernet, WiFi, Graphics,
+and Sound. These are built from the `third-party/linux` git submodule and are
+NOT built by default.
+
+```sh
+# Initialize the Linux kernel submodule
+make linux-submodule
+
+# Build optional Ethernet drivers (RealTek r815x/r8120, Intel e1000/igb)
+make linux-drivers:ethernet
+
+# Build optional WiFi drivers (Intel iwlwifi, RealTek rtlwifi, FOSS Broadcom)
+make linux-drivers:wifi
+
+# Build optional Graphics drivers (Mesa, NVK/Zinc for NVIDIA)
+make linux-drivers:graphics
+
+# Build optional Sound drivers (Intel HDA, Realtek Codec)
+make linux-drivers:sound
+
+# Build all optional drivers at once
+make linux-drivers
+
+# Build userspace test apps (DHCP client, WiFi config, WGet, WAV player, volume control)
+make userspace-apps
+```
+
 ### Commands
 
 ```sh
@@ -143,6 +183,9 @@ make kernel     # build just the kernel ELF
 make run        # boot the image in QEMU (serial output on your terminal)
 make test       # boot headlessly and drive the shell (CI-style)
 make clean      # remove build output
+make linux-submodule   # init the optional Linux kernel submodule
+make linux-drivers   # build optional Linux drivers from the submodule
+make userspace-apps  # build userspace apps for testing
 ```
 
 Everything is built into `build/` by default. You can redirect it:
