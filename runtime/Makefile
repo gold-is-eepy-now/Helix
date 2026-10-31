@@ -78,7 +78,7 @@ virtio:
 
 # Userspace apps
 USERSpace_APPS_DIR := ../userspace/apps
-USERSpace_APPS := dhcp wifi wget wav volume x11server start-gui boxwm
+USERSpace_APPS := dhcp wifi wget wav volume terminal browser cc x11server start-gui boxwm
 USERSpace_APP_BINS := $(addprefix $(USERSpace_APPS_DIR)/,$(USERSpace_APPS))
 
 userspace-apps: $(USERSpace_APP_BINS)

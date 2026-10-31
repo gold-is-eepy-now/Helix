@@ -219,7 +219,10 @@ make test-with-linux-drivers   # boot test with optional drivers
 ### GUI / X11
 
 ```sh
-make userspace-apps            # build X11 server, start-gui, boxwm
+make userspace-apps            # build terminal, browser, cc, X11 server, start-gui, boxwm
+terminal                       # run terminal emulator
+browser [URL]                  # run web browser
+cc <file.c> -o <out>           # compile C code
 start-gui                      # launch graphical environment
 ```
 ```

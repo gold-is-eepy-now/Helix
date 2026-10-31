@@ -14,6 +14,9 @@ the ELF loader and native system-call ABI exist (milestone M9).
 * wget.c — wget client utility
 * wav.c — WAV audio player for optional Sound driver
 * volume.c — Volume control utility for optional Sound driver
+* terminal.c — Simple terminal emulator
+* browser.c — Minimal web browser with HTML/CSS/JS support
+* cc.c — Simple C compiler
 * x11server.c — Minimal X11 server implementation
 * start-gui.c — Graphical application launcher (startx-like)
 * boxwm.c — Window manager (openbox-like DE starter)
