@@ -33,6 +33,7 @@
 #include "display_surface.h"
 #include "input_device.h"
 #include "net_interface.h"
+#include "ext4.h"
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -811,6 +812,579 @@ static void cmd_cat(int argc, char **argv) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Filesystem commands (ext4)                                         */
+/* ------------------------------------------------------------------ */
+
+static uint64_t g_cwd_ino = EXT4_ROOT_INO;
+
+/* Helper: resolve path to inode, handling relative/absolute */
+static uint64_t resolve_path(ext4_fs_t *fs, const char *path, ext4_stat_t *out) {
+    if (!path || *path == '\0') return 0;
+    uint64_t ino;
+    if (*path == '/') {
+        ino = ext4_root(fs);
+        path++;
+    } else {
+        ino = g_cwd_ino;
+    }
+    ext4_stat_t st;
+    if (!ext4_stat(fs, ino, &st) || !EXT4_S_ISDIR(st.mode)) return 0;
+    if (*path == '\0') {
+        if (out) *out = st;
+        return ino;
+    }
+    while (*path) {
+        const char *slash = strchr(path, '/');
+        size_t len = slash ? (size_t)(slash - path) : strlen(path);
+        if (len == 0) {
+            path = slash ? slash + 1 : path + len;
+            continue;
+        }
+        char name[EXT4_NAME_MAX + 1];
+        if (len > EXT4_NAME_MAX) return 0;
+        memcpy(name, path, len);
+        name[len] = '\0';
+        if (!ext4_lookup(fs, ino, name, &st)) return 0;
+        if (!EXT4_S_ISDIR(st.mode)) {
+            if (slash) return 0; /* not a dir but more path remains */
+            if (out) *out = st;
+            return st.ino;
+        }
+        ino = st.ino;
+        path = slash ? slash + 1 : path + len;
+    }
+    if (out) *out = st;
+    return ino;
+}
+
+static void cmd_cd(int argc, char **argv) {
+    if (!ext4_get_current_fs()) {
+        console_write("cd: no ext4 filesystem mounted\n");
+        return;
+    }
+    const char *path = argc > 1 ? argv[1] : "/";
+    ext4_stat_t st;
+    uint64_t ino = resolve_path(ext4_get_current_fs(), path, &st);
+    if (!ino || !EXT4_S_ISDIR(st.mode)) {
+        console_write("cd: not a directory: ");
+        console_write(path);
+        console_putc('\n');
+        return;
+    }
+    g_cwd_ino = ino;
+}
+
+static void cmd_pwd(int argc, char **argv) {
+    (void)argc; (void)argv;
+    if (!ext4_get_current_fs()) {
+        console_write("/ (no ext4 fs)\n");
+        return;
+    }
+    /* For simplicity, we just show the current working directory inode.
+     * Full path reconstruction would require walking up parent directories. */
+    console_write("/ (inode ");
+    console_write_dec(g_cwd_ino);
+    console_write(")\n");
+}
+
+static void cmd_mkdir(int argc, char **argv) {
+    if (!ext4_get_current_fs()) {
+        console_write("mkdir: no ext4 filesystem mounted\n");
+        return;
+    }
+    if (argc < 2) {
+        console_write("mkdir: missing operand\n");
+        return;
+    }
+    const char *path = argv[1];
+    const char *slash = strrchr(path, '/');
+    char dir_path[256] = "/";
+    char name[EXT4_NAME_MAX + 1];
+    uint64_t parent_ino;
+    if (slash) {
+        size_t dir_len = slash - path;
+        if (dir_len > 0) {
+            memcpy(dir_path, path, dir_len);
+            dir_path[dir_len] = '\0';
+        }
+        size_t name_len = strlen(slash + 1);
+        if (name_len > EXT4_NAME_MAX) {
+            console_write("mkdir: name too long\n");
+            return;
+        }
+        memcpy(name, slash + 1, name_len);
+        name[name_len] = '\0';
+    } else {
+        size_t name_len = strlen(path);
+        if (name_len > EXT4_NAME_MAX) {
+            console_write("mkdir: name too long\n");
+            return;
+        }
+        memcpy(name, path, name_len);
+        name[name_len] = '\0';
+    }
+    ext4_stat_t st;
+    parent_ino = resolve_path(ext4_get_current_fs(), dir_path, &st);
+    if (!parent_ino || !EXT4_S_ISDIR(st.mode)) {
+        console_write("mkdir: parent directory not found\n");
+        return;
+    }
+    uint64_t new_ino;
+    if (!ext4_mkdir(ext4_get_current_fs(), parent_ino, name, EXT4_S_IFDIR | 0755, &new_ino)) {
+        console_write("mkdir: failed to create directory\n");
+        return;
+    }
+    console_write("mkdir: created ");
+    console_write(path);
+    console_putc('\n');
+}
+
+static void cmd_rmdir(int argc, char **argv) {
+    if (!ext4_get_current_fs()) {
+        console_write("rmdir: no ext4 filesystem mounted\n");
+        return;
+    }
+    if (argc < 2) {
+        console_write("rmdir: missing operand\n");
+        return;
+    }
+    const char *path = argv[1];
+    const char *slash = strrchr(path, '/');
+    char dir_path[256] = "/";
+    char name[EXT4_NAME_MAX + 1];
+    uint64_t parent_ino;
+    if (slash) {
+        size_t dir_len = slash - path;
+        if (dir_len > 0) {
+            memcpy(dir_path, path, dir_len);
+            dir_path[dir_len] = '\0';
+        }
+        size_t name_len = strlen(slash + 1);
+        if (name_len > EXT4_NAME_MAX) {
+            console_write("rmdir: name too long\n");
+            return;
+        }
+        memcpy(name, slash + 1, name_len);
+        name[name_len] = '\0';
+    } else {
+        size_t name_len = strlen(path);
+        if (name_len > EXT4_NAME_MAX) {
+            console_write("rmdir: name too long\n");
+            return;
+        }
+        memcpy(name, path, name_len);
+        name[name_len] = '\0';
+    }
+    ext4_stat_t st;
+    parent_ino = resolve_path(ext4_get_current_fs(), dir_path, &st);
+    if (!parent_ino || !EXT4_S_ISDIR(st.mode)) {
+        console_write("rmdir: parent directory not found\n");
+        return;
+    }
+    if (!ext4_unlink(ext4_get_current_fs(), parent_ino, name, true)) {
+        console_write("rmdir: failed to remove directory\n");
+        return;
+    }
+    console_write("rmdir: removed ");
+    console_write(path);
+    console_putc('\n');
+}
+
+static void cmd_touch(int argc, char **argv) {
+    if (!ext4_get_current_fs()) {
+        console_write("touch: no ext4 filesystem mounted\n");
+        return;
+    }
+    if (argc < 2) {
+        console_write("touch: missing operand\n");
+        return;
+    }
+    const char *path = argv[1];
+    const char *slash = strrchr(path, '/');
+    char dir_path[256] = "/";
+    char name[EXT4_NAME_MAX + 1];
+    uint64_t parent_ino;
+    if (slash) {
+        size_t dir_len = slash - path;
+        if (dir_len > 0) {
+            memcpy(dir_path, path, dir_len);
+            dir_path[dir_len] = '\0';
+        }
+        size_t name_len = strlen(slash + 1);
+        if (name_len > EXT4_NAME_MAX) {
+            console_write("touch: name too long\n");
+            return;
+        }
+        memcpy(name, slash + 1, name_len);
+        name[name_len] = '\0';
+    } else {
+        size_t name_len = strlen(path);
+        if (name_len > EXT4_NAME_MAX) {
+            console_write("touch: name too long\n");
+            return;
+        }
+        memcpy(name, path, name_len);
+        name[name_len] = '\0';
+    }
+    ext4_stat_t st;
+    parent_ino = resolve_path(ext4_get_current_fs(), dir_path, &st);
+    if (!parent_ino || !EXT4_S_ISDIR(st.mode)) {
+        console_write("touch: parent directory not found\n");
+        return;
+    }
+    uint64_t ino;
+    if (ext4_lookup(ext4_get_current_fs(), parent_ino, name, &st)) {
+        /* File exists, just update timestamp (not fully implemented) */
+        console_write("touch: ");
+        console_write(path);
+        console_write(" (updated)\n");
+        return;
+    }
+    if (!ext4_create(ext4_get_current_fs(), parent_ino, name, EXT4_S_IFREG | 0644, &ino)) {
+        console_write("touch: failed to create file\n");
+        return;
+    }
+    console_write("touch: created ");
+    console_write(path);
+    console_putc('\n');
+}
+
+static void cmd_rm(int argc, char **argv) {
+    if (!ext4_get_current_fs()) {
+        console_write("rm: no ext4 filesystem mounted\n");
+        return;
+    }
+    if (argc < 2) {
+        console_write("rm: missing operand\n");
+        return;
+    }
+    bool recursive = false;
+    int arg_start = 1;
+    if (argc > 2 && str_eq(argv[1], "-r")) {
+        recursive = true;
+        arg_start = 2;
+    }
+    for (int i = arg_start; i < argc; i++) {
+        const char *path = argv[i];
+        const char *slash = strrchr(path, '/');
+        char dir_path[256] = "/";
+        char name[EXT4_NAME_MAX + 1];
+        uint64_t parent_ino;
+        if (slash) {
+            size_t dir_len = slash - path;
+            if (dir_len > 0) {
+                memcpy(dir_path, path, dir_len);
+                dir_path[dir_len] = '\0';
+            }
+            size_t name_len = strlen(slash + 1);
+            if (name_len > EXT4_NAME_MAX) {
+                console_write("rm: name too long\n");
+                continue;
+            }
+            memcpy(name, slash + 1, name_len);
+            name[name_len] = '\0';
+        } else {
+            size_t name_len = strlen(path);
+            if (name_len > EXT4_NAME_MAX) {
+                console_write("rm: name too long\n");
+                continue;
+            }
+            memcpy(name, path, name_len);
+            name[name_len] = '\0';
+        }
+        ext4_stat_t st;
+        parent_ino = resolve_path(ext4_get_current_fs(), dir_path, &st);
+        if (!parent_ino || !EXT4_S_ISDIR(st.mode)) {
+            console_write("rm: parent directory not found\n");
+            continue;
+        }
+        if (!ext4_lookup(ext4_get_current_fs(), parent_ino, name, &st)) {
+            console_write("rm: cannot remove '");
+            console_write(path);
+            console_write("': No such file\n");
+            continue;
+        }
+        if (EXT4_S_ISDIR(st.mode) && !recursive) {
+            console_write("rm: cannot remove '");
+            console_write(path);
+            console_write("': Is a directory (use -r)\n");
+            continue;
+        }
+        if (!ext4_unlink(ext4_get_current_fs(), parent_ino, name, EXT4_S_ISDIR(st.mode))) {
+            console_write("rm: failed to remove '");
+            console_write(path);
+            console_write("'\n");
+            continue;
+        }
+    }
+}
+
+static void cmd_cp(int argc, char **argv) {
+    if (!ext4_get_current_fs()) {
+        console_write("cp: no ext4 filesystem mounted\n");
+        return;
+    }
+    if (argc < 3) {
+        console_write("cp: missing operand\n");
+        return;
+    }
+    const char *src = argv[1];
+    const char *dst = argv[2];
+    ext4_stat_t st;
+    uint64_t src_ino = resolve_path(ext4_get_current_fs(), src, &st);
+    if (!src_ino) {
+        console_write("cp: cannot stat '");
+        console_write(src);
+        console_write("'\n");
+        return;
+    }
+    if (EXT4_S_ISDIR(st.mode)) {
+        console_write("cp: omitting directory '");
+        console_write(src);
+        console_write("'\n");
+        return;
+    }
+    /* Read source */
+    char *buf = kmalloc(st.size + 1);
+    if (!buf) {
+        console_write("cp: out of memory\n");
+        return;
+    }
+    uint64_t read = ext4_read(ext4_get_current_fs(), src_ino, 0, buf, st.size);
+    if (read != st.size) {
+        console_write("cp: read error\n");
+        kfree(buf);
+        return;
+    }
+    /* Create destination */
+    const char *slash = strrchr(dst, '/');
+    char dir_path[256] = "/";
+    char name[EXT4_NAME_MAX + 1];
+    uint64_t parent_ino;
+    if (slash) {
+        size_t dir_len = slash - dst;
+        if (dir_len > 0) {
+            memcpy(dir_path, dst, dir_len);
+            dir_path[dir_len] = '\0';
+        }
+        size_t name_len = strlen(slash + 1);
+        if (name_len > EXT4_NAME_MAX) {
+            console_write("cp: name too long\n");
+            kfree(buf);
+            return;
+        }
+        memcpy(name, slash + 1, name_len);
+        name[name_len] = '\0';
+    } else {
+        size_t name_len = strlen(dst);
+        if (name_len > EXT4_NAME_MAX) {
+            console_write("cp: name too long\n");
+            kfree(buf);
+            return;
+        }
+        memcpy(name, dst, name_len);
+        name[name_len] = '\0';
+    }
+    parent_ino = resolve_path(ext4_get_current_fs(), dir_path, &st);
+    if (!parent_ino || !EXT4_S_ISDIR(st.mode)) {
+        console_write("cp: parent directory not found\n");
+        kfree(buf);
+        return;
+    }
+    uint64_t dst_ino;
+    if (!ext4_create(ext4_get_current_fs(), parent_ino, name, EXT4_S_IFREG | 0644, &dst_ino)) {
+        console_write("cp: failed to create destination\n");
+        kfree(buf);
+        return;
+    }
+    if (ext4_write(ext4_get_current_fs(), dst_ino, 0, buf, st.size) != st.size) {
+        console_write("cp: write error\n");
+        kfree(buf);
+        return;
+    }
+    console_write("cp: copied ");
+    console_write(src);
+    console_write(" -> ");
+    console_write(dst);
+    console_putc('\n');
+    kfree(buf);
+}
+
+static void cmd_mv(int argc, char **argv) {
+    if (!ext4_get_current_fs()) {
+        console_write("mv: no ext4 filesystem mounted\n");
+        return;
+    }
+    if (argc < 3) {
+        console_write("mv: missing operand\n");
+        return;
+    }
+    const char *src = argv[1];
+    const char *dst = argv[2];
+    ext4_stat_t st;
+    uint64_t src_ino = resolve_path(ext4_get_current_fs(), src, &st);
+    if (!src_ino) {
+        console_write("mv: cannot stat '");
+        console_write(src);
+        console_write("'\n");
+        return;
+    }
+    const char *slash = strrchr(dst, '/');
+    char dir_path[256] = "/";
+    char name[EXT4_NAME_MAX + 1];
+    uint64_t dst_parent;
+    if (slash) {
+        size_t dir_len = slash - dst;
+        if (dir_len > 0) {
+            memcpy(dir_path, dst, dir_len);
+            dir_path[dir_len] = '\0';
+        }
+        size_t name_len = strlen(slash + 1);
+        if (name_len > EXT4_NAME_MAX) {
+            console_write("mv: name too long\n");
+            return;
+        }
+        memcpy(name, slash + 1, name_len);
+        name[name_len] = '\0';
+    } else {
+        size_t name_len = strlen(dst);
+        if (name_len > EXT4_NAME_MAX) {
+            console_write("mv: name too long\n");
+            return;
+        }
+        memcpy(name, dst, name_len);
+        name[name_len] = '\0';
+    }
+    ext4_stat_t dst_st;
+    dst_parent = resolve_path(ext4_get_current_fs(), dir_path, &dst_st);
+    if (!dst_parent || !EXT4_S_ISDIR(dst_st.mode)) {
+        console_write("mv: parent directory not found\n");
+        return;
+    }
+    /* Check if destination exists and is directory */
+    if (ext4_lookup(ext4_get_current_fs(), dst_parent, name, &dst_st) && EXT4_S_ISDIR(dst_st.mode)) {
+        /* Move into directory: use source basename */
+        const char *src_slash = strrchr(src, '/');
+        const char *src_name = src_slash ? src_slash + 1 : src;
+        size_t name_len = strlen(src_name);
+        if (name_len > EXT4_NAME_MAX) {
+            console_write("mv: name too long\n");
+            return;
+        }
+        memcpy(name, src_name, name_len);
+        name[name_len] = '\0';
+    }
+    /* For now, implement as copy + unlink (not true rename) */
+    if (EXT4_S_ISDIR(st.mode)) {
+        console_write("mv: directory move not fully supported\n");
+        return;
+    }
+    /* Read source */
+    char *buf = kmalloc(st.size + 1);
+    if (!buf) {
+        console_write("mv: out of memory\n");
+        return;
+    }
+    uint64_t read = ext4_read(ext4_get_current_fs(), src_ino, 0, buf, st.size);
+    if (read != st.size) {
+        console_write("mv: read error\n");
+        kfree(buf);
+        return;
+    }
+    uint64_t dst_ino;
+    if (!ext4_create(ext4_get_current_fs(), dst_parent, name, EXT4_S_IFREG | 0644, &dst_ino)) {
+        console_write("mv: failed to create destination\n");
+        kfree(buf);
+        return;
+    }
+    if (ext4_write(ext4_get_current_fs(), dst_ino, 0, buf, st.size) != st.size) {
+        console_write("mv: write error\n");
+        kfree(buf);
+        return;
+    }
+    /* Unlink source */
+    const char *src_slash = strrchr(src, '/');
+    char src_dir[256] = "/";
+    char src_name[EXT4_NAME_MAX + 1];
+    uint64_t src_parent;
+    if (src_slash) {
+        size_t dir_len = src_slash - src;
+        if (dir_len > 0) {
+            memcpy(src_dir, src, dir_len);
+            src_dir[dir_len] = '\0';
+        }
+        size_t name_len = strlen(src_slash + 1);
+        memcpy(src_name, src_slash + 1, name_len);
+        src_name[name_len] = '\0';
+    } else {
+        size_t name_len = strlen(src);
+        memcpy(src_name, src, name_len);
+        src_name[name_len] = '\0';
+    }
+    src_parent = resolve_path(ext4_get_current_fs(), src_dir, &st);
+    if (src_parent && EXT4_S_ISDIR(st.mode)) {
+        ext4_unlink(ext4_get_current_fs(), src_parent, src_name, false);
+    }
+    console_write("mv: moved ");
+    console_write(src);
+    console_write(" -> ");
+    console_write(dst);
+    console_putc('\n');
+    kfree(buf);
+}
+
+static void cmd_exit(int argc, char **argv) {
+    (void)argc; (void)argv;
+    console_write("Use 'halt' to stop the machine.\n");
+}
+
+static void cmd_uname(int argc, char **argv) {
+    (void)argc; (void)argv;
+    console_write("Helix OS\n");
+}
+
+static void cmd_whoami(int argc, char **argv) {
+    (void)argc; (void)argv;
+    console_write("root\n");
+}
+
+static void cmd_df(int argc, char **argv) {
+    (void)argc; (void)argv;
+    if (!ext4_get_current_fs()) {
+        console_write("df: no ext4 filesystem mounted\n");
+        return;
+    }
+    uint64_t total_b, free_b, total_i, free_i;
+    ext4_space(ext4_get_current_fs(), &total_b, &free_b, &total_i, &free_i);
+    console_write("Filesystem     Blocks      Free   Inodes   Free\n");
+    console_write("ext4-root  ");
+    print_u64(total_b / 1024);
+    console_write("  ");
+    print_u64(free_b / 1024);
+    console_write("  ");
+    print_u64(total_i);
+    console_write("  ");
+    print_u64(free_i);
+    console_putc('\n');
+}
+
+/* Placeholder commands */
+static void cmd_chmod(int argc, char **argv) {
+    (void)argc; (void)argv;
+    console_write("chmod: not implemented\n");
+}
+
+static void cmd_chown(int argc, char **argv) {
+    (void)argc; (void)argv;
+    console_write("chown: not implemented\n");
+}
+
+static void cmd_find(int argc, char **argv) {
+    (void)argc; (void)argv;
+    console_write("find: not implemented\n");
+}
+
+/* ------------------------------------------------------------------ */
 /* The table                                                           */
 /* ------------------------------------------------------------------ */
 
@@ -844,6 +1418,21 @@ const command_t helix_commands[] = {
     {"fsinfo",  "show filesystem information",          cmd_fsinfo},
     {"ls",      "list directory contents",              cmd_ls},
     {"cat",     "display file contents",                cmd_cat},
+    {"cd",      "change working directory",             cmd_cd},
+    {"pwd",     "print working directory",              cmd_pwd},
+    {"mkdir",   "create a directory",                   cmd_mkdir},
+    {"rmdir",   "remove a directory",                   cmd_rmdir},
+    {"touch",   "create or update a file",              cmd_touch},
+    {"rm",      "remove files",                         cmd_rm},
+    {"cp",      "copy a file",                          cmd_cp},
+    {"mv",      "move or rename a file",                cmd_mv},
+    {"df",      "show disk free space",                 cmd_df},
+    {"uname",   "show OS name",                         cmd_uname},
+    {"whoami",  "show current user",                    cmd_whoami},
+    {"chmod",   "change file mode bits",                cmd_chmod},
+    {"chown",   "change file owner",                    cmd_chown},
+    {"find",    "search for files in a directory tree", cmd_find},
+    {"exit",    "halt the machine",                     cmd_exit},
 };
 
 const size_t helix_command_count = sizeof(helix_commands) / sizeof(helix_commands[0]);

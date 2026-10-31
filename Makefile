@@ -20,9 +20,12 @@ DEPS_DIR       := $(BUILD_DIR)/deps
 LIMINE_DIR     := $(DEPS_DIR)/limine-binary
 IMAGE          := $(BUILD_DIR)/helix.img
 
-.PHONY: all kernel deps image iso disks run test clean
+.PHONY: all kernel deps image iso disks run test clean install
 
 all: image
+
+install: kernel deps
+	@BUILD_DIR="$(BUILD_DIR)" sh tools/install.sh
 
 kernel:
 	@$(MAKE) -C kernel BUILD_DIR="$(BUILD_DIR)"

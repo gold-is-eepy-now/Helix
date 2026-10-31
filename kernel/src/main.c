@@ -39,6 +39,12 @@
 #include "version.h"
 #include "vmm.h"
 #include "usb_hid.h"
+#include "ext4.h"
+
+/* M11: ext4 root time source (seconds since boot). */
+static uint32_t uptime_secs(void) {
+    return time_available() ? (uint32_t)(time_uptime_ms() / 1000u) : 0u;
+}
 
 /* -------------------------------------------------------------------------
  * Limine protocol requests
@@ -231,11 +237,17 @@ void kmain(void) {
     driver_init_all();
     block_device_init_all();
 
-    /* M11: initialize and mount boot filesystem. */
-    fs_boot_init();
-    fs_mount(NULL, "/", "helixfs", true);
-    fs_boot_add_file("README", "Helix OS\nboot filesystem active.\n", 0);
-    fs_boot_add_file("LICENSE", "MIT License\n\nCopyright (c) 2025 Helix OS\n\nPermission is hereby granted, free of charge, ...\n", 0);
+    /* M11: mount ext4 root from ramdisk block device as root filesystem. */
+    ext4_set_time_source(uptime_secs);
+    block_device_t *rbd = block_device_ramdisk();
+    if (rbd == NULL) {
+        panic("failed to get ramdisk block device");
+    }
+    ext4_fs_t *ext4fs = ext4_mount(rbd, false);
+    if (ext4fs == NULL) {
+        panic("failed to mount ext4 root");
+    }
+    console_write("[main] mounted ext4 from ramdisk as root\n");
 
     /* Adopt page tables, install exceptions, map a protected stack, then move
      * all ordinary kernel execution onto it before enabling interrupts. */
