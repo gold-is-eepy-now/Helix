@@ -1,73 +1,63 @@
 # runtime/
-User-space runtimes (planned).
+User-space runtimes for Helix.
 
-This is where the native runtime (a minimal libc-style support layer for
-Helix programs) lives, and — much later — the compatibility runtimes:
-
-- **POSIX layer** — maps file descriptors, `fork`/`exec` and signals onto
-  Helix handles, objects and channels.
-- **Linux runtime** — translates Linux system calls into the native object API.
-  Provides an ELF loader for Linux binaries and a syscall translation layer
-  that maps Linux syscalls to Helix native calls via the object manager,
-  handles, and channels.
-- **BSD runtime** — translates BSD system calls into the native object API.
+The **Linux/BSD runtime** (this directory) hosts Unix ELF binaries in
+userspace and translates their system calls onto Helix's native syscall
+ABI (`int $0x80`). The **POSIX layer** remains planned.
 
 These runtimes sit **above** the kernel. They translate Unix behaviour into
 Helix's native model; they do not change the kernel's native design.
 
-## Linux Runtime
+## What is here
 
-The Linux runtime is a userspace process that hosts Linux ELF binaries. It
-provides:
+- **ELF loader** (`elf_loader.c`) — parses ELF64 headers and PT_LOAD program
+  headers for x86_64 ET_EXEC/ET_DYN binaries (Linux and BSD share this
+  format; only `e_ident[7]` OSABI differs).
+- **Linux syscall translation** (`linux_syscall.c`) — direct-indexed table
+  covering every known x86_64 Linux syscall number (0..511). Translates via
+  `native_syscall_invoke()` → `int $0x80` with the kernel's register ABI
+  (rax = native number, rdi/rsi/rdx/r10/r8/r9 = args).
+- **BSD syscall translation** (`bsd_syscall.c`) — FreeBSD/NetBSD/OpenBSD
+  numbering (3=read, 4=write, 5=open, 6=close, 1=exit, 189=brk) onto the
+  same native syscalls, sharing the Linux FD table.
+- **File descriptor layer** (`linux_runtime.c`) — maps Linux/BSD fds to
+  Helix handles (`linux_fd_to_handle` / `linux_set_fd_handle`).
+- **Entry point** (`linux_runtime_main.c`) — runtime process startup and
+  ABI dispatch stub.
 
-1. **ELF loader** — loads Linux/BSD ELF binaries, sets up memory mappings,
-   and starts execution. Uses the `elf_load()` function to parse ELF64
-   headers (magic, class, machine, type) and program headers.
-2. **Syscall translation** — intercepts Linux system calls (int $0x80 or
-   `syscall` instruction in x86_64 ABI) and maps them to native Helix syscalls
-   via the translation table defined in `linux_syscall.c`. Common mappings:
-   - Linux read(0, buf, count) -> Helix read(handle, buf, count)
-   - Linux write(1, buf, count) -> Helix write(handle, buf, count)
-   - Linux exit(status) -> Helix exit(status)
-   - Linux brk(addr) -> Helix brk(addr)
-3. **File descriptor layer** — maps Linux file descriptors (0=stdin, 1=stdout,
-   2=stderr) to Helix file handles via `linux_fd_to_handle()`. Uses the object
-   manager for file-backed operations (currently ramdisk-backed).
-4. **Minimal libc emulation** — provides basic C library functions
-   (`write`, `exit`) translated to native calls.
+## Syscall translation table
 
-### Syscall Translation Table
+All known Linux x86_64 syscall numbers are covered: those with a native
+Helix equivalent are mapped, everything else returns ENOSYS (-38). Invalid
+Linux FDs return EBADF (-9) before any native call.
 
-The translation table maps Linux syscall numbers to native Helix syscall
-indices:
+| Linux | nr | Native Helix | nr |
+|-------|----|--------------|----|
+| read | 0 | SYSCALL_READ | 20 |
+| write | 1 | SYSCALL_WRITE | 21 |
+| open / creat | 2 / 85 | SYSCALL_HANDLE_CREATE | 11 |
+| close | 3 | SYSCALL_HANDLE_CLOSE | 12 |
+| dup / dup2 / dup3 | 32 / 33 / 292 | SYSCALL_HANDLE_DUPLICATE | 13 |
+| mmap | 9 | SYSCALL_MAP | 4 |
+| munmap | 11 | SYSCALL_UNMAP | 5 |
+| brk | 12 | SYSCALL_BRK | 24 |
+| sched_yield | 24 | SYSCALL_THREAD_YIELD | 8 |
+| clone | 56 | SYSCALL_THREAD_CREATE | 6 |
+| execve | 59 | SYSCALL_EXECVE | 25 |
+| exit / exit_group | 60 / 231 | SYSCALL_EXIT | 23 |
 
-| Linux | Native Helix | Description |
-|-------|-------------|-------------|
-| 0     | SYSCALL_READ (20) | read() |
-| 1     | SYSCALL_WRITE (21) | write() |
-| 60    | SYSCALL_EXIT (23) | exit() |
-| 12    | SYSCALL_BRK (24) | brk() |
-
-Unmapped syscalls return ENOSYS (-38). Invalid Linux FDs return EBADF (-9).
-
-### Building and Running
-
-The runtime code is pure C (freestanding, no host libc). It can be compiled
-with `make` from the `runtime/` directory:
-
-```sh
-make
-```
-
-The build produces `linux_runtime` binary. After building the kernel
-(`make` in the project root), the runtime can be launched from the Helix
-shell or as the init process.
-
-See the individual source files for API details and implementation notes.
+Not yet mapped (ENOSYS until the kernel grows a native counterpart):
+signals, stat, sockets, timers, ioctl, openat-style calls needing an
+argument shifter. Native numbers must match the enum in
+`kernel/src/syscall.h`; `runtime_test.c` pins them to literals.
 
 ## Building and Running
 
 ```sh
-make              # build linux_runtime in runtime/
-make clean        # remove object files and binary
+make              # build runtime binary
+make test         # run the translation self-check (39 checks)
+make clean        # remove object files and binaries
 ```
+
+Top-level `make test` runs this self-check after the kernel boot test.
+The runtime code is pure freestanding C — no host libc.

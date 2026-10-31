@@ -59,11 +59,11 @@ void linux_runtime_start(void) {
      * 5. Start executing the binary
      */
 
-    /* For now: trigger syscall map init by calling the translate functions
-     * with dummy numbers (this validates the tables build correctly).
+    /* For now: trigger both syscall map inits with pure lookups
+     * (no int $0x80 — this validates the tables build correctly).
      */
-    (void)linux_translate_number(0);  /* Initialize Linux syscall map */
-    (void)bsd_translate_syscall(3, 0, 0, 0, 0, 0, 0, 0);  /* Initialize BSD map */
+    (void)linux_translate_number(0);   /* Linux table */
+    (void)bsd_map_to_native(3);        /* BSD table */
 
     /* Spin while waiting for events */
     while (1) {

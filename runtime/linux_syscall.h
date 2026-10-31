@@ -18,6 +18,10 @@
 extern "C" {
 #endif
 
+/* Map a Linux syscall number to its native Helix index (0..511 covering all
+ * known x86_64 Linux calls). Returns -1 if the kernel has no equivalent. */
+int map_linux_to_native(int linux_num);
+
 /* Translate a single Linux system call.
  *
  * `number` is the Linux syscall number (e.g., 1 = write, 2 = open, etc.).

@@ -8,22 +8,37 @@
 extern "C" {
 #endif
 
-/* -- Constants (must match kernel/src/syscall.h) -- */
-
-/* Native Helix syscall numbers. These are defined in the kernel's
- * syscall.h header and must be kept in sync. */
-#define SYSCALL_READ        20
-#define SYSCALL_WRITE       21
-#define SYSCALL_EXIT        23
-#define SYSCALL_BRK         24
-#define SYSCALL_HANDLE_CREATE  37
-#define SYSCALL_HANDLE_CLOSE   38
-#define SYSCALL_HANDLE_DUPLICATE 39
-#define SYSCALL_HANDLE_GET  40
-#define SYSCALL_OBJECT_LOOKUP  41
-#define SYSCALL_OBJECT_RELEASE 42
-#define SYSCALL_OBJECT_COUNT   43
-#define SYSCALL_OBJECT_CREATE  44
+/* -- Constants (must match the enum in kernel/src/syscall.h) --
+ *
+ * The kernel dispatches int $0x80 by indexing syscall_table[rax] with these
+ * numbers; a wrong value silently hits a NULL slot. Keep in sync manually —
+ * runtime_test.c pins the critical ones to literals. */
+#define SYSCALL_TEST             1
+#define SYSCALL_ALLOC            2
+#define SYSCALL_FREE             3
+#define SYSCALL_MAP              4
+#define SYSCALL_UNMAP            5
+#define SYSCALL_THREAD_CREATE    6
+#define SYSCALL_THREAD_EXIT      7
+#define SYSCALL_THREAD_YIELD     8
+#define SYSCALL_CHANNEL_SEND     9
+#define SYSCALL_CHANNEL_RECV    10
+#define SYSCALL_HANDLE_CREATE   11
+#define SYSCALL_HANDLE_CLOSE    12
+#define SYSCALL_HANDLE_DUPLICATE 13
+#define SYSCALL_HANDLE_GET      14
+#define SYSCALL_OBJECT_LOOKUP   15
+#define SYSCALL_OBJECT_RELEASE  16
+#define SYSCALL_OBJECT_COUNT    17
+#define SYSCALL_OBJECT_CREATE   18
+#define SYSCALL_OBJECT_RETAIN   19
+#define SYSCALL_READ            20
+#define SYSCALL_WRITE           21
+#define SYSCALL_READ_INPUT      22
+#define SYSCALL_EXIT            23
+#define SYSCALL_BRK             24
+#define SYSCALL_EXECVE          25
+#define SYSCALL_NATIVE_MAX      26  /* one past the last native number */
 
 /* Handle type for the object manager. Defined in kernel/src/object.h */
 typedef uint32_t handle_t;

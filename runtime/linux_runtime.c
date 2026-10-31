@@ -12,6 +12,7 @@
  */
 
 #include "linux_runtime.h"
+#include "linux_syscall.h"
 #include "elf_loader.h"
 #include <stddef.h>
 
@@ -50,85 +51,12 @@ int linux_set_fd_handle(int fd, handle_t handle) {
     return 0;
 }
 
-/* --- Linux syscall dispatch table ---
-
- * Each entry maps a Linux syscall number to:
- * - The native Helix syscall index
- * - A function that translates arguments from Linux format to Helix format
- * - A function that translates the return value
- *
- * The dispatch uses the kernel's native syscall table placed at .syscall_table.
- */
-
-#define LINUX_SYSCALL_MAX 64
-
-typedef struct {
-    int linux_num;
-    int native_index;   /* Index into kernel syscall_table, or negative for special */
-    int has_arg_translate;
-} linux_native_map_t;
-
-static linux_native_map_t g_syscall_map[LINUX_SYSCALL_MAX];
-static int g_syscall_map_initialized = 0;
-
-static void syscall_map_init(void) {
-    int i;
-    if (g_syscall_map_initialized) return;
-    /* Initialize all entries as unmapped */
-    for (i = 0; i < LINUX_SYSCALL_MAX; i++) {
-        g_syscall_map[i].linux_num = -1;
-        g_syscall_map[i].native_index = -1;
-        g_syscall_map[i].has_arg_translate = 0;
-    }
-
-    /* Map common Linux syscalls to native Helix equivalents */
-    /* Linux read(0, buf, count) -> Helix read(handle, buf, count) */
-    g_syscall_map[0].linux_num = 0;
-    g_syscall_map[0].native_index = SYSCALL_READ;  /* Native read syscall */
-    g_syscall_map[0].has_arg_translate = 1;
-
-    /* Linux write(1, buf, count) -> Helix write(handle, buf, count) */
-    g_syscall_map[1].linux_num = 1;
-    g_syscall_map[1].native_index = SYSCALL_WRITE;
-    g_syscall_map[1].has_arg_translate = 1;
-
-    /* Linux exit(status) -> Helix exit(status) */
-    g_syscall_map[60].linux_num = 60;  /* Linux exit */
-    g_syscall_map[60].native_index = SYSCALL_EXIT;
-    g_syscall_map[60].has_arg_translate = 0;
-
-    /* Linux brk(addr) -> Helix brk(addr) */
-    g_syscall_map[12].linux_num = 12;  /* Linux brk */
-    g_syscall_map[12].native_index = SYSCALL_BRK;
-    g_syscall_map[12].has_arg_translate = 0;
-
-    /* Linux open(filename, flags, mode) -> Helix handle_create */
-    g_syscall_map[2].linux_num = 2;  /* Linux open */
-    g_syscall_map[2].native_index = SYSCALL_HANDLE_CREATE;
-    g_syscall_map[2].has_arg_translate = 0;
-
-    /* Linux close(fd) -> Helix handle_close */
-    g_syscall_map[3].linux_num = 3;  /* Linux close */
-    g_syscall_map[3].native_index = SYSCALL_HANDLE_CLOSE;
-    g_syscall_map[3].has_arg_translate = 1;
-
-    g_syscall_map_initialized = 1;
-}
-
 /* --- Syscall translation ---
 
- * Translate a Linux syscall number and arguments to native Helix format.
- * Returns the native syscall index, or -1 if not mapped.
+ * Thin wrapper over the master table in linux_syscall.c. Single source of
+ * truth: every known Linux x86_64 number maps there (or -1 = ENOSYS).
  */
 
 int linux_translate_number(int linux_num) {
-    if (!g_syscall_map_initialized) syscall_map_init();
-    
-    int i;
-    for (i = 0; i < LINUX_SYSCALL_MAX; i++) {
-        if (g_syscall_map[i].linux_num == linux_num) {
-            return g_syscall_map[i].native_index;
-        }
-    }
-    return -1;  /* Unmapped syscall */
+    return map_linux_to_native(linux_num);
 }

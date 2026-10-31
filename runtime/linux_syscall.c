@@ -59,95 +59,71 @@ uint64_t native_syscall_invoke(int native_num, uint64_t arg1, uint64_t arg2,
 }
 
 /* ---------------------------------------------------------------------------
- * Translation table
+ * Translation table — all known Linux x86_64 system calls
  *
- * Maps Linux syscall numbers to native Helix syscall indices. The table is
- * populated at first use (lazy initialization).
+ * Direct-indexed by Linux syscall number. Linux x86_64 currently assigns
+ * numbers 0..466 (arch/x86/entry/syscalls/syscall_64.tbl); 512 slots cover
+ * every known call with headroom. Slots default to -1, so any call the
+ * kernel cannot serve becomes ENOSYS rather than hitting an unrelated
+ * native syscall.
+ *
+ * Mapped entries are the closest native equivalent. read/write/open/
+ * close/dup/exit/brk match argument-for-argument; mmap/clone/execve land on
+ * native stubs whose argument layout still needs kernel-side agreement.
+ *
+ * ponytail: openat(257) and friends pass dirfd as arg1 (path is arg2);
+ * mapping them needs a per-syscall argument shifter. Add one here when a
+ * real Linux binary needs openat/statx — until then they return ENOSYS.
  * ------------------------------------------------------------------------- */
 
-#define LINUX_SYSCALL_MAX 64
+#define LINUX_NR_MAX 512   /* covers all known x86_64 Linux syscall numbers */
+
+_Static_assert(SYSCALL_NATIVE_MAX <= 64, "kernel syscall_table has 64 slots");
 
 typedef struct {
-    int linux_num;
-    int native_index;       /* Index into kernel syscall_table, -1 = unmapped */
-    int wants_fd_translate; /* True if arg1 is a Linux fd needing handle mapping */
-} syscall_map_entry_t;
+    int16_t linux_nr;
+    int16_t native;        /* native Helix syscall index */
+    uint8_t fd_arg1;       /* arg1 is a Linux fd needing handle translation */
+} linux_map_entry_t;
 
-/* Translation table: Linux syscall number -> native syscall index */
-static syscall_map_entry_t g_syscall_map[LINUX_SYSCALL_MAX];
+static const linux_map_entry_t k_linux_map[] = {
+    /* memory */
+    {  9, SYSCALL_MAP,           0},  /* mmap */
+    { 11, SYSCALL_UNMAP,         0},  /* munmap */
+    { 12, SYSCALL_BRK,           0},  /* brk */
+    /* files and descriptors */
+    {  0, SYSCALL_READ,          1},  /* read */
+    {  1, SYSCALL_WRITE,         1},  /* write */
+    {  2, SYSCALL_HANDLE_CREATE, 0},  /* open */
+    {  3, SYSCALL_HANDLE_CLOSE,  1},  /* close */
+    { 32, SYSCALL_HANDLE_DUPLICATE, 1},  /* dup */
+    { 33, SYSCALL_HANDLE_DUPLICATE, 1},  /* dup2 */
+    { 85, SYSCALL_HANDLE_CREATE, 0},  /* creat */
+    {292, SYSCALL_HANDLE_DUPLICATE, 1},  /* dup3 */
+    /* processes and threads */
+    { 24, SYSCALL_THREAD_YIELD,  0},  /* sched_yield */
+    { 56, SYSCALL_THREAD_CREATE, 0},  /* clone */
+    { 59, SYSCALL_EXECVE,        0},  /* execve */
+    { 60, SYSCALL_EXIT,          0},  /* exit */
+    {231, SYSCALL_EXIT,          0},  /* exit_group */
+};
+
+static int16_t g_linux_to_native[LINUX_NR_MAX];
+static uint8_t g_linux_fd_arg1[LINUX_NR_MAX];
 static int g_syscall_map_initialized = 0;
 
-/* Populate the syscall translation table with known Linux->Helix mappings. */
 static void syscall_table_init(void) {
     int i;
     if (g_syscall_map_initialized) return;
 
-    for (i = 0; i < LINUX_SYSCALL_MAX; i++) {
-        g_syscall_map[i].linux_num = -1;
-        g_syscall_map[i].native_index = -1;
-        g_syscall_map[i].wants_fd_translate = 0;
+    for (i = 0; i < LINUX_NR_MAX; i++) {
+        g_linux_to_native[i] = -1;   /* unknown -> ENOSYS */
+        g_linux_fd_arg1[i] = 0;
     }
-
-    /* Linux read(0, buf, count) -> Helix read */
-    for (i = 0; i < LINUX_SYSCALL_MAX; i++) {
-        if (g_syscall_map[i].linux_num == -1) {
-            g_syscall_map[i].linux_num = 0;
-            g_syscall_map[i].native_index = SYSCALL_READ;
-            g_syscall_map[i].wants_fd_translate = 1;
-            break;
-        }
+    for (i = 0; i < (int)(sizeof(k_linux_map) / sizeof(k_linux_map[0])); i++) {
+        g_linux_to_native[k_linux_map[i].linux_nr] = k_linux_map[i].native;
+        g_linux_fd_arg1[k_linux_map[i].linux_nr] = k_linux_map[i].fd_arg1;
     }
-
-    /* Linux write(1, buf, count) -> Helix write */
-    for (i = 0; i < LINUX_SYSCALL_MAX; i++) {
-        if (g_syscall_map[i].linux_num == -1) {
-            g_syscall_map[i].linux_num = 1;
-            g_syscall_map[i].native_index = SYSCALL_WRITE;
-            g_syscall_map[i].wants_fd_translate = 1;
-            break;
-        }
-    }
-
-    /* Linux exit(status) -> Helix exit */
-    for (i = 0; i < LINUX_SYSCALL_MAX; i++) {
-        if (g_syscall_map[i].linux_num == -1) {
-            g_syscall_map[i].linux_num = 60;
-            g_syscall_map[i].native_index = SYSCALL_EXIT;
-            g_syscall_map[i].wants_fd_translate = 0;
-            break;
-        }
-    }
-
-    /* Linux brk(addr) -> Helix brk */
-    for (i = 0; i < LINUX_SYSCALL_MAX; i++) {
-        if (g_syscall_map[i].linux_num == -1) {
-            g_syscall_map[i].linux_num = 12;
-            g_syscall_map[i].native_index = SYSCALL_BRK;
-            g_syscall_map[i].wants_fd_translate = 0;
-            break;
-        }
-    }
-
-    /* Linux open(filename, flags, mode) -> Helix handle_create */
-    for (i = 0; i < LINUX_SYSCALL_MAX; i++) {
-        if (g_syscall_map[i].linux_num == -1) {
-            g_syscall_map[i].linux_num = 2;
-            g_syscall_map[i].native_index = SYSCALL_HANDLE_CREATE;
-            g_syscall_map[i].wants_fd_translate = 0;
-            break;
-        }
-    }
-
-    /* Linux close(fd) -> Helix handle_close */
-    for (i = 0; i < LINUX_SYSCALL_MAX; i++) {
-        if (g_syscall_map[i].linux_num == -1) {
-            g_syscall_map[i].linux_num = 3;
-            g_syscall_map[i].native_index = SYSCALL_HANDLE_CLOSE;
-            g_syscall_map[i].wants_fd_translate = 1;
-            break;
-        }
-    }
-
     g_syscall_map_initialized = 1;
 }
 
@@ -156,17 +132,12 @@ static void syscall_table_init(void) {
  * ------------------------------------------------------------------------- */
 
 /* Map a Linux syscall number to its native Helix equivalent.
- * Returns the native syscall index, or -1 if unmapped. */
+ * Returns the native syscall index, or -1 if unmapped. Every known Linux
+ * x86_64 number is accepted; ones without a native equivalent return -1. */
 int map_linux_to_native(int linux_num) {
     if (!g_syscall_map_initialized) syscall_table_init();
-
-    int i;
-    for (i = 0; i < LINUX_SYSCALL_MAX; i++) {
-        if (g_syscall_map[i].linux_num == linux_num) {
-            return g_syscall_map[i].native_index;
-        }
-    }
-    return -1;
+    if (linux_num < 0 || linux_num >= LINUX_NR_MAX) return -1;
+    return g_linux_to_native[linux_num];
 }
 
 /* translate_linux_syscall — translate a Linux syscall to Helix native.
@@ -189,14 +160,12 @@ uint64_t linux_translate_syscall(int number, uint64_t arg1, uint64_t arg2,
         return (uint64_t)-38;
     }
 
-    /* For fd-based syscalls, translate Linux fd to Helix handle */
-    if (number == 0 || number == 1 || number == 3) {
-        /* read/write/close: arg1 is the Linux fd, translate it */
+    /* fd-based syscalls: arg1 is a Linux fd, map it to a Helix handle */
+    if (number >= 0 && number < LINUX_NR_MAX && g_linux_fd_arg1[number]) {
         handle_t handle = linux_fd_to_handle((int)arg1);
         if (handle == 0) {
             return (uint64_t)-9;  /* EBADF */
         }
-        /* Replace arg1 with the Helix handle */
         arg1 = (uint64_t)handle;
     }
 
