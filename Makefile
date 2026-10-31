@@ -31,7 +31,7 @@ IMAGE          := $(BUILD_DIR)/helix.img
 LINUX_SUBMODULE_DIR ?= third-party/linux
 LINUX_SUBMODULE_INITIALIZED ?= $(shell test -d "$(LINUX_SUBMODULE_DIR)" && echo yes || echo no)
 
-.PHONY: all kernel deps linux-submodule linux-drivers linux-drivers-ethernet linux-drivers-wifi linux-drivers-graphics linux-drivers-sound image iso disks run test test-with-linux-drivers clean install userspace-apps img-with-linux-drivers
+.PHONY: all kernel deps linux-submodule linux-drivers linux-drivers-ethernet linux-drivers-wifi linux-drivers-graphics linux-drivers-sound linux-drivers-kvm linux-drivers-virtio image iso disks run test test-with-linux-drivers clean install userspace-apps img-with-linux-drivers
 
 all: image
 
@@ -88,6 +88,13 @@ linux-drivers-graphics: linux-submodule
 
 linux-drivers-sound: linux-submodule
 	@$(MAKE) -C runtime LIB_SRCDIR="$(LINUX_SUBMODULE_DIR)" optional-drivers
+
+# KVM (Kernel-based Virtual Machine) and Virtio driver support
+linux-drivers-kvm: linux-submodule
+	@$(MAKE) -C runtime LIB_SRCDIR="$(LINUX_SUBMODULE_DIR)" kvm
+
+linux-drivers-virtio: linux-submodule
+	@$(MAKE) -C runtime LIB_SRCDIR="$(LINUX_SUBMODULE_DIR)" virtio
 
 # Build userspace apps (dhcp, wifi, wget, wav, volume)
 userspace-apps:

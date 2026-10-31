@@ -9,8 +9,21 @@ OPTIONAL_DRIVERS_LIB := $(OPTIONAL_DRIVERS_DIR)/build/optional_drivers.a
 OPTIONAL_DRIVERS_SRCS := $(OPTIONAL_DRIVERS_DIR)/ethernet.c \
                          $(OPTIONAL_DRIVERS_DIR)/wifi.c \
                          $(OPTIONAL_DRIVERS_DIR)/graphics.c \
-                         $(OPTIONAL_DRIVERS_DIR)/sound.c
+                         $(OPTIONAL_DRIVERS_DIR)/sound.c \
+                         $(OPTIONAL_DRIVERS_DIR)/kvm/kvm_driver.c
 OPTIONAL_DRIVERS_OBJS := $(OPTIONAL_DRIVERS_SRCS:.c=.o)
+
+# KVM driver
+KVM_DIR := $(OPTIONAL_DRIVERS_DIR)/kvm
+KVM_LIB := $(KVM_DIR)/build/kvm_driver.a
+KVM_SRCS := $(KVM_DIR)/kvm_driver.c
+KVM_OBJS := $(KVM_SRCS:.c=.o)
+
+# Virtio drivers (stub)
+VIRTIO_DIR := $(OPTIONAL_DRIVERS_DIR)/virtio
+VIRTIO_LIB := $(VIRTIO_DIR)/build/virtio_driver.a
+VIRTIO_SRCS :=
+VIRTIO_OBJS := $(VIRTIO_SRCS:.c=.o)
 
 all: $(TARGET)
 
@@ -45,6 +58,24 @@ $(OPTIONAL_DRIVERS_DIR)/%.o: $(OPTIONAL_DRIVERS_DIR)/%.c $(OPTIONAL_DRIVERS_DIR)
 	@mkdir -p $(OPTIONAL_DRIVERS_DIR)/build
 	$(CC) $(CFLAGS) -I$(OPTIONAL_DRIVERS_DIR)/transport -c $< -o $@
 
+# KVM driver build targets
+kvm: $(KVM_LIB)
+
+$(KVM_DIR)/build:
+	mkdir -p $(KVM_DIR)/build
+
+$(KVM_LIB): $(KVM_OBJS) | $(KVM_DIR)/build
+	ar rcs $@ $(KVM_OBJS)
+	@echo "[runtime] KVM driver library built: $@"
+
+$(KVM_OBJS): $(KVM_DIR)/%.o: $(KVM_DIR)/%.c
+	$(CC) $(CFLAGS) -I$(KVM_DIR) -c $< -o $@
+
+# Virtio driver build targets (stub placeholder)
+virtio:
+	@echo "[runtime] Virtio driver library: not yet implemented"
+
+
 # Userspace apps
 USERSpace_APPS_DIR := ../userspace/apps
 USERSpace_APPS := dhcp wifi wget wav volume
@@ -71,4 +102,4 @@ runtime_test: runtime_test.o linux_runtime.o linux_syscall.o bsd_syscall.o elf_l
 runtime_test.o: runtime_test.c linux_runtime.h linux_syscall.h bsd_syscall.h
 	$(CC) $(CFLAGS) -c runtime_test.c -o runtime_test.o
 
-.PHONY: all clean test optional-drivers userspace-apps
+.PHONY: all clean test optional-drivers userspace-apps kvm virtio
