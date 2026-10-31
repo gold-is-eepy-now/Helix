@@ -31,7 +31,7 @@ IMAGE          := $(BUILD_DIR)/helix.img
 LINUX_SUBMODULE_DIR ?= third-party/linux
 LINUX_SUBMODULE_INITIALIZED ?= $(shell test -d "$(LINUX_SUBMODULE_DIR)" && echo yes || echo no)
 
-.PHONY: all kernel deps linux-submodule linux-drivers linux-drivers-ethernet linux-drivers-wifi linux-drivers-graphics linux-drivers-sound image iso disks run test clean install userspace-apps img-with-linux-drivers
+.PHONY: all kernel deps linux-submodule linux-drivers linux-drivers-ethernet linux-drivers-wifi linux-drivers-graphics linux-drivers-sound image iso disks run test test-with-linux-drivers clean install userspace-apps img-with-linux-drivers
 
 all: image
 
@@ -119,6 +119,10 @@ run: image
 	@sh tools/run-qemu.sh "$(IMAGE)"
 
 test: image
+	@BUILD_DIR="$(BUILD_DIR)" python3 tests/shell-test.py "$(IMAGE)"
+	@$(MAKE) -C runtime test
+
+test-with-linux-drivers: linux-submodule linux-drivers
 	@BUILD_DIR="$(BUILD_DIR)" python3 tests/shell-test.py "$(IMAGE)"
 	@$(MAKE) -C runtime test
 
