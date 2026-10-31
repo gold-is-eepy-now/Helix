@@ -204,7 +204,10 @@ objects implemented and boot-tested.
 
 - ✅ Block-device objects.
 - ✅ A native Helix filesystem designed around objects, not inodes-as-fds.
-- ✅ A read-only boot filesystem, then a writable one.
+- ✅ ext4 read/write driver with extents, 64-bit group descriptors, filetype, flex_bg, extra_isize.
+- ✅ ext4 mount from ramdisk block device as root filesystem.
+- ✅ UNIX-like shell commands: cd, pwd, ls, cat, mkdir, rmdir, touch, rm, cp, mv, df, uname, whoami, chmod, chown, find.
+- ✅ Installer script populates /etc, /var, /home directories in ext4 image.
 
 **M11 exit gate:** passed. Filesystem objects and block-device drivers work;
 FAT32 file support added; storage stack functional.

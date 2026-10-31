@@ -19,6 +19,9 @@ typedef struct ext4_fs ext4_fs_t;
 
 #define EXT4_NAME_MAX 255
 
+/* Root inode number for ext4. */
+#define EXT4_ROOT_INO 2u
+
 /* Mode bits, shaped like POSIX so VFS code reads naturally. */
 #define EXT4_S_IFMT  0xF000
 #define EXT4_S_IFREG 0x8000

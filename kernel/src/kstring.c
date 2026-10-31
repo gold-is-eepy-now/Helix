@@ -99,3 +99,14 @@ char *strchr(const char *s, int c) {
     }
     return (char *)s;
 }
+
+char *strrchr(const char *s, int c) {
+    const char *p = NULL;
+    while (*s != '\0') {
+        if (*s == (char)c) {
+            p = s;
+        }
+        s++;
+    }
+    return (char *)p;
+}

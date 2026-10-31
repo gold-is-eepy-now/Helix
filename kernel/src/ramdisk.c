@@ -16,8 +16,8 @@
 #include "heap.h"
 #include "kstring.h"
 
-#define RAMDISK_BLOCK_SIZE 512u
-#define RAMDISK_BLOCK_COUNT 4096u   /* 2 MiB */
+#define RAMDISK_BLOCK_SIZE 4096u  /* ext4 block size */
+#define RAMDISK_BLOCK_COUNT 2048u  /* 8 MiB (2048 * 4096) */
 
 typedef struct ramdisk {
     block_device_t base;
