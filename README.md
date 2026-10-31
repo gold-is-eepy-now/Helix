@@ -80,6 +80,10 @@ helix/
 │   │   ├── wifi.c         Intel + RealTek + FOSS Broadcom WiFi adapter
 │   │   ├── graphics.c     Mesa + NVK/Zinc (NVIDIA) graphics adapter
 │   │   ├── sound.c        Intel HDA + Realtek Codec sound adapter
+│   │   ├── kvm/           KVM driver skeleton (guest-side virtualization)
+│   │   │   ├── kvm_driver.c   KVM driver implementation
+│   │   │   ├── kvm_driver.h   KVM driver header
+│   │   │   └── Makefile       KVM build rules
 │   │   └── Makefile
 │   └── userspace/apps/     userspace test apps (DHCP, WiFi, WGet, WAV, volume)
 ├── userspace/     native user-space programs and libraries (M9)
@@ -160,17 +164,34 @@ make linux-drivers:ethernet
 # Build optional WiFi drivers (Intel iwlwifi, RealTek rtlwifi, FOSS Broadcom)
 make linux-drivers:wifi
 
-# Build optional Graphics drivers (Mesa, NVK/Zinc for NVIDIA)
+# Build optional Graphics drivers (Mesa + NVK/Zinc for NVIDIA)
 make linux-drivers:graphics
 
 # Build optional Sound drivers (Intel HDA, Realtek Codec)
 make linux-drivers:sound
+
+# Build KVM/virtio drivers (for running Helix under QEMU/KVM)
+make linux-drivers:kvm
 
 # Build all optional drivers at once
 make linux-drivers
 
 # Build userspace test apps (DHCP client, WiFi config, WGet, WAV player, volume control)
 make userspace-apps
+```
+
+### KVM/virtio subsystem
+
+```sh
+make linux-drivers-kvm  # Build KVM driver skeleton
+make linux-drivers-virtio  # Build Virtio driver stub
+```
+
+These targets compile optional KVM and Virtio drivers that allow Helix to
+run as a guest under QEMU/KVM. This is an optional subsystem - Helix boots
+and runs cleanly without it.
+
+For more information, see `runtime/optional_drivers/kvm/`.
 ```
 
 ### Commands
@@ -185,7 +206,15 @@ make test       # boot headlessly and drive the shell (CI-style)
 make clean      # remove build output
 make linux-submodule   # init the optional Linux kernel submodule
 make linux-drivers   # build optional Linux drivers from the submodule
+make linux-drivers:ethernet   # build Ethernet drivers only
+make linux-drivers:wifi   # build WiFi drivers only
+make linux-drivers:graphics   # build graphics drivers only
+make linux-drivers:sound   # build sound drivers only
+make linux-drivers:kvm   # build KVM driver only
+make linux-drivers:virtio   # build virtio stub only
 make userspace-apps  # build userspace apps for testing
+make img-with-linux-drivers   # full build with optional drivers
+make test-with-linux-drivers   # boot test with optional drivers
 ```
 
 Everything is built into `build/` by default. You can redirect it:
