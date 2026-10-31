@@ -40,6 +40,13 @@ uint64_t linux_translate_syscall(int number, uint64_t arg1, uint64_t arg2,
 /* Get the current error number (errno) for the calling Linux process. */
 int linux_errno(void);
 
+/* Invoke a native Helix syscall directly via int $0x80.
+ * `native_num` is the Helix syscall index (e.g., SYSCALL_READ).
+ * Used by both Linux and BSD translation layers. */
+uint64_t native_syscall_invoke(int native_num, uint64_t arg1, uint64_t arg2,
+                                uint64_t arg3, uint64_t arg4,
+                                uint64_t arg5, uint64_t arg6, uint64_t arg7);
+
 #ifdef __cplusplus
 }
 #endif

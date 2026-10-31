@@ -63,6 +63,7 @@ run: image
 
 test: image
 	@BUILD_DIR="$(BUILD_DIR)" python3 tests/shell-test.py "$(IMAGE)"
+	@$(MAKE) -C runtime test
 
 clean:
 	@$(MAKE) -C kernel BUILD_DIR="$(BUILD_DIR)" clean

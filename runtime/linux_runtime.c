@@ -69,9 +69,11 @@ typedef struct {
 } linux_native_map_t;
 
 static linux_native_map_t g_syscall_map[LINUX_SYSCALL_MAX];
+static int g_syscall_map_initialized = 0;
 
 static void syscall_map_init(void) {
     int i;
+    if (g_syscall_map_initialized) return;
     /* Initialize all entries as unmapped */
     for (i = 0; i < LINUX_SYSCALL_MAX; i++) {
         g_syscall_map[i].linux_num = -1;
@@ -99,6 +101,18 @@ static void syscall_map_init(void) {
     g_syscall_map[12].linux_num = 12;  /* Linux brk */
     g_syscall_map[12].native_index = SYSCALL_BRK;
     g_syscall_map[12].has_arg_translate = 0;
+
+    /* Linux open(filename, flags, mode) -> Helix handle_create */
+    g_syscall_map[2].linux_num = 2;  /* Linux open */
+    g_syscall_map[2].native_index = SYSCALL_HANDLE_CREATE;
+    g_syscall_map[2].has_arg_translate = 0;
+
+    /* Linux close(fd) -> Helix handle_close */
+    g_syscall_map[3].linux_num = 3;  /* Linux close */
+    g_syscall_map[3].native_index = SYSCALL_HANDLE_CLOSE;
+    g_syscall_map[3].has_arg_translate = 1;
+
+    g_syscall_map_initialized = 1;
 }
 
 /* --- Syscall translation ---
@@ -108,8 +122,7 @@ static void syscall_map_init(void) {
  */
 
 int linux_translate_number(int linux_num) {
-    /* Check if the syscall map is initialized by checking the first entry's linux_num. */
-    if (g_syscall_map[0].linux_num == -1) syscall_map_init();
+    if (!g_syscall_map_initialized) syscall_map_init();
     
     int i;
     for (i = 0; i < LINUX_SYSCALL_MAX; i++) {

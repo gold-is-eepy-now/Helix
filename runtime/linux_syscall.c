@@ -51,6 +51,13 @@ static inline uint64_t invoke_native_syscall(int native_num, uint64_t arg1,
     return result;
 }
 
+/* Public wrapper for native syscall invocation. */
+uint64_t native_syscall_invoke(int native_num, uint64_t arg1, uint64_t arg2,
+                                uint64_t arg3, uint64_t arg4,
+                                uint64_t arg5, uint64_t arg6, uint64_t arg7) {
+    return invoke_native_syscall(native_num, arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+}
+
 /* ---------------------------------------------------------------------------
  * Translation table
  *
