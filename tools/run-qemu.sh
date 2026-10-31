@@ -8,6 +8,10 @@
 #   HEADLESS=0 sh tools/run-qemu.sh build/helix.img
 # and a QEMU window will open (requires a desktop session).
 #
+# For VNC support (remote graphical display), run with:
+#   VNC=1 sh tools/run-qemu.sh build/helix.img
+# Then connect with a VNC client to localhost:5900 (or VNC_DISPLAY).
+#
 # Firmware is auto-detected (see tools/ovmf.sh); override with the OVMF_CODE
 # and OVMF_VARS_SRC environment variables if needed.
 set -eu
@@ -18,6 +22,8 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 IMAGE="${1:-build/helix.img}"
 HEADLESS="${HEADLESS:-1}"
 QEMU_MEM="${QEMU_MEM:-512}"
+VNC="${VNC:-0}"
+VNC_DISPLAY="${VNC_DISPLAY:-:0}"
 
 [ -f "$IMAGE" ] || { echo "run-qemu: no image at $IMAGE (run 'make image' first)" >&2; exit 1; }
 if [ -z "$OVMF_CODE" ] || [ ! -f "$OVMF_CODE" ]; then
@@ -35,17 +41,30 @@ VARS="$(mktemp "${TMPDIR:-/tmp}/helix-ovmf-vars.XXXXXX")"
 cp "$OVMF_VARS_SRC" "$VARS"
 trap 'rm -f "$VARS"' EXIT INT TERM
 
-if [ "$HEADLESS" = "1" ]; then
-    DISPLAY_ARGS="-display none"
+if [ "$VNC" = "1" ]; then
+    VNC_ARGS="-vnc $VNC_DISPLAY"
+    if [ "$HEADLESS" = "1" ]; then
+        DISPLAY_ARGS="-display none"
+    else
+        DISPLAY_ARGS=""
+    fi
 else
-    DISPLAY_ARGS=""
+    if [ "$HEADLESS" = "1" ]; then
+        DISPLAY_ARGS="-display none"
+    else
+        DISPLAY_ARGS=""
+    fi
+    VNC_ARGS=""
 fi
 
 echo "[run-qemu] booting $IMAGE (Ctrl-A X to quit QEMU)"
+if [ "$VNC" = "1" ]; then
+    echo "[run-qemu] VNC enabled on $VNC_DISPLAY (connect with vncviewer localhost:5900)"
+fi
 # shellcheck disable=SC2086
 qemu-system-x86_64 \
     -M q35 -m "$QEMU_MEM" \
     -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \
     -drive if=pflash,format=raw,unit=1,file="$VARS" \
     -drive file="$IMAGE",format=raw,if=ide,index=0,media=disk \
-    -serial stdio $DISPLAY_ARGS
+    -serial stdio $DISPLAY_ARGS $VNC_ARGS

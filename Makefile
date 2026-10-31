@@ -31,7 +31,7 @@ IMAGE          := $(BUILD_DIR)/helix.img
 LINUX_SUBMODULE_DIR ?= third-party/linux
 LINUX_SUBMODULE_INITIALIZED ?= $(shell test -d "$(LINUX_SUBMODULE_DIR)" && echo yes || echo no)
 
-.PHONY: all kernel deps linux-submodule linux-drivers linux-drivers-ethernet linux-drivers-wifi linux-drivers-graphics linux-drivers-sound linux-drivers-kvm linux-drivers-virtio image iso disks run test test-with-linux-drivers clean install userspace-apps img-with-linux-drivers
+.PHONY: all kernel deps linux-submodule linux-drivers linux-drivers-ethernet linux-drivers-wifi linux-drivers-graphics linux-drivers-sound linux-drivers-kvm linux-drivers-virtio image iso disks run run-with-linux-drivers test test-with-linux-drivers clean install userspace-apps img-with-linux-drivers
 
 all: image
 
@@ -123,6 +123,9 @@ disks: image
 	@sh tools/mkdisk.sh "$(IMAGE)" "$(BUILD_DIR)"
 
 run: image
+	@sh tools/run-qemu.sh "$(IMAGE)"
+
+run-with-linux-drivers: img-with-linux-drivers
 	@sh tools/run-qemu.sh "$(IMAGE)"
 
 test: image
