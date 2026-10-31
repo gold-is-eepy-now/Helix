@@ -215,6 +215,13 @@ make linux-drivers:virtio   # build virtio stub only
 make userspace-apps  # build userspace apps for testing
 make img-with-linux-drivers   # full build with optional drivers
 make test-with-linux-drivers   # boot test with optional drivers
+
+### GUI / X11
+
+```sh
+make userspace-apps            # build X11 server, start-gui, boxwm
+start-gui                      # launch graphical environment
+```
 ```
 
 Everything is built into `build/` by default. You can redirect it:
