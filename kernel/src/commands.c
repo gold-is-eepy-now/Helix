@@ -1366,6 +1366,21 @@ static void cmd_chown(int argc, char **argv) {
     console_write("chown: not implemented\n");
 }
 
+static void cmd_mkusr(int argc, char **argv) {
+    (void)argc; (void)argv;
+    console_write("mkusr: not implemented\n");
+}
+
+static void cmd_su(int argc, char **argv) {
+    (void)argc; (void)argv;
+    console_write("su: not implemented\n");
+}
+
+static void cmd_dosu(int argc, char **argv) {
+    (void)argc; (void)argv;
+    console_write("dosu: not implemented\n");
+}
+
 static void cmd_find(int argc, char **argv) {
     (void)argc; (void)argv;
     console_write("find: not implemented\n");
@@ -1462,6 +1477,9 @@ const command_t helix_commands[] = {
     {"whoami",  "show current user",                    cmd_whoami},
     {"chmod",   "change file mode bits",                cmd_chmod},
     {"chown",   "change file owner",                    cmd_chown},
+    {"mkusr",   "create a user account",                cmd_mkusr},
+    {"su",      "switch user identity",                 cmd_su},
+    {"dosu",    "switch user and execute command",       cmd_dosu},
     {"find",    "search for files in a directory tree", cmd_find},
     {"exit",    "halt the machine",                     cmd_exit},
     {"free",    "show free memory summary",              cmd_free},
