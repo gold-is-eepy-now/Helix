@@ -274,7 +274,13 @@ static uint64_t handle_brk(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, u
 
 static uint64_t handle_execve(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
-    kprintf("[syscall] execve\n");
+    /* a1 = filename pointer (user-space virtual address)
+     * a2 = argv pointer
+     * a3 = envp pointer
+     * 
+     * For now, we just print the filename. The full ELF loader is a
+     * future milestone. */
+    kprintf("[syscall] execve: filename=%p\n", a1);
     return 0;
 }
 
