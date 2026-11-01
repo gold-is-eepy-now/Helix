@@ -102,8 +102,14 @@ void idt_init(void) {
     }
     /* Install syscall gate at vector 0x80 (software interrupt).
      * User code invokes the kernel via `int $0x80`. Vector 0x80 avoids
-     * conflicts with CPU exceptions (0-31) and PIC IRQs (32-47). */
+     * conflicts with CPU exceptions (0-31) and PIC IRQs (32-47).
+     * This gate is DPL 3 so ring-3 code can use it. The handler runs at
+     * ring 0. In 64-bit mode, int pushes the frame onto the current stack
+     * (user stack if in ring 3). The kernel handler must read the frame
+     * from the stack and process the syscall.
+     */
     set_gate(0x80, syscall_interrupt_handler);
+    g_idt[0x80].type_attr = 0xEFu;  /* present, DPL 3, 64-bit interrupt gate */
     g_idt_ptr.limit = (uint16_t)(sizeof(g_idt) - 1);
     g_idt_ptr.base = (uint64_t)&g_idt;
     __asm__ volatile("lidt %0" : : "m"(g_idt_ptr) : "memory");
