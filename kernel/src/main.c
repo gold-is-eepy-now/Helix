@@ -20,6 +20,7 @@
 #include "fb.h"
 #include "heap.h"
 #include "idt.h"
+#include "gdt.h"
 #include "io.h"
 #include "kernel_stack.h"
 #include "keyboard.h"
@@ -272,6 +273,8 @@ void kmain(void) {
     /* Adopt page tables, install exceptions, map a protected stack, then move
      * all ordinary kernel execution onto it before enabling interrupts. */
     vmm_init(hhdm_offset);
+    gdt_init();
+
     idt_init();
     if (!kernel_stack_init(hhdm_offset)) {
         panic("failed to establish NX kernel stack");
