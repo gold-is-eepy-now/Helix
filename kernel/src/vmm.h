@@ -11,9 +11,20 @@
 #define VMM_HUGE    (1ULL << 7)
 #define VMM_NX      (1ULL << 63)
 
+/* A per-process address space. Holds the physical address of its PML4 table. */
+typedef struct {
+    uint64_t *pml4;
+} vmm_as_t;
+
 /* Adopt the current address space (from CR3) and remember the direct-map
  * offset so we can reach page-table frames by physical address. */
 void vmm_init(uint64_t hhdm_offset);
+
+/* Create a new address space (AS) by copying the current kernel AS. */
+vmm_as_t *vmm_create_as(void);
+
+/* Switch to a different address space. */
+void vmm_switch_as(vmm_as_t *as);
 
 /* Map one 4 KiB page. Returns false if a page table could not be allocated. */
 bool vmm_map(uint64_t virt, uint64_t phys, uint64_t flags);

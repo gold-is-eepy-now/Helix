@@ -160,3 +160,46 @@ bool vmm_get_mapping(uint64_t virt, uint64_t *phys_out, uint64_t *flags_out) {
     }
     return true;
 }
+
+/* Copy the kernel's PML4 from g_pml4, but allow the new AS to have its own
+ * user mappings. The kernel mappings (code/data/bss) are in the upper half
+ * (virt >= 0xFFFF800000000000). We copy the entire PML4, then clear the
+ * user entries in the upper half so new AS starts empty. */
+static uint64_t *copy_kernel_pml4(void) {
+    uintptr_t frame = pmm_alloc_frame();
+    if (frame == 0) return NULL;
+
+    uint64_t *src = g_pml4;
+    uint64_t *dst = table_at(frame);
+    memcpy(dst, src, PAGE_SIZE);
+
+    /* Clear the user entries in the upper half (kernel AS space). */
+    /* The upper half is virt >= 0xFFFF800000000000 (i.e., PML4 index >= 0x100).
+     * For simplicity, we clear all entries for indices >= 0x100 in the PML4 itself. */
+    for (int i = 0x100; i < 0x200; i++) {
+        dst[i] = 0;
+    }
+
+    return dst;
+}
+
+vmm_as_t *vmm_create_as(void) {
+    uint64_t *pml4 = copy_kernel_pml4();
+    if (pml4 == NULL) return NULL;
+
+    vmm_as_t *as = (vmm_as_t *)pmm_alloc_frame();
+    if (as == NULL) {
+        pmm_free_frame((uintptr_t)pml4 - g_hhdm);
+        return NULL;
+    }
+
+    as->pml4 = pml4;
+    return as;
+}
+
+void vmm_switch_as(vmm_as_t *as) {
+    if (as == NULL) return;
+
+    g_pml4 = as->pml4;
+    write_cr3((uint64_t)as->pml4 - g_hhdm);
+}
