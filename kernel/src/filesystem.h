@@ -84,4 +84,7 @@ uint64_t fs_list_dir(file_entry_t *dir, file_entry_t **out_entries,
 uint64_t fs_file_size(file_entry_t *file);
 bool fs_file_is_dir(file_entry_t *file);
 
+/* Get file data pointer */
+void *file_get_data(file_entry_t *file);
+
 #endif /* HELIX_FILESYSTEM_H */
