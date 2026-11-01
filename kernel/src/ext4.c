@@ -1868,3 +1868,317 @@ void ext4_unmount(ext4_fs_t *fs) {
     kfree(fs->sb);
     kfree(fs);
 }
+
+/* ------------------------------------------------------------------ */
+/* Format                                                              */
+/* ------------------------------------------------------------------ */
+
+/* Format a block device with a minimal ext4 filesystem.
+ * Creates: superblock, group descriptors, block/inode bitmaps,
+ * inode table, and root directory with . and ..
+ * Geometry: 4096-byte blocks, 64 inodes per group, extents + 64bit + filetype.
+ */
+bool ext4_format(block_device_t *dev) {
+    if (dev == NULL || dev->block_size == 0 || dev->block_count == 0) {
+        console_write("[ext4_format] invalid device\n");
+        return false;
+    }
+
+    const uint32_t block_size = 4096u;
+    if (dev->block_size != block_size) {
+        console_write("[ext4_format] block size mismatch: expected 4096, got ");
+        console_write_dec(dev->block_size);
+        console_putc('\n');
+        return false;
+    }
+
+    uint64_t blocks_count = dev->block_count;
+    uint32_t blocks_per_group = 32768u; /* standard ext4 */
+    uint32_t groups = (uint32_t)((blocks_count + blocks_per_group - 1) / blocks_per_group);
+    if (groups == 0) groups = 1;
+    if (groups > 8192) groups = 8192;
+
+    /* Inode geometry: 64 inodes per group, 256-byte inodes */
+    uint32_t inodes_per_group = 64u;
+    uint32_t inode_size = 256u;
+    uint32_t inodes_count = groups * inodes_per_group;
+
+    /* Calculate blocks needed for inode tables */
+    uint32_t inodes_per_block = block_size / inode_size; /* 16 */
+    uint32_t inode_table_blocks = (inodes_per_group + inodes_per_block - 1) / inodes_per_block;
+
+    /* Allocate working buffers */
+    void *buf = kzalloc(block_size);
+    if (buf == NULL) {
+        console_write("[ext4_format] out of memory\n");
+        return false;
+    }
+
+    uint32_t now = now_secs();
+
+    /* ------------------------------------------------------------------ */
+    /* Write superblock at offset 1024 (byte offset within block 0)        */
+    /* ------------------------------------------------------------------ */
+    ext4_sb_t *sb = (ext4_sb_t *)((uint8_t *)buf + 1024);
+    memset(buf, 0, block_size);
+
+    sb->inodes_count = inodes_count;
+    sb->blocks_count_lo = (uint32_t)blocks_count;
+    sb->blocks_count_hi = (uint32_t)(blocks_count >> 32);
+    sb->r_blocks_count_lo = 0;
+    sb->free_blocks_count_lo = (uint32_t)(blocks_count - 1 - groups * (2 + inode_table_blocks));
+    sb->free_blocks_count_hi = 0;
+    sb->free_inodes_count = inodes_count - 2; /* root inode allocated */
+    sb->first_data_block = 0; /* 0 for 4k blocks */
+    sb->log_block_size = 2; /* 1024 << 2 = 4096 */
+    sb->log_cluster_size = 0;
+    sb->blocks_per_group = blocks_per_group;
+    sb->clusters_per_group = blocks_per_group;
+    sb->inodes_per_group = inodes_per_group;
+    sb->mtime = now;
+    sb->wtime = now;
+    sb->mnt_count = 0;
+    sb->max_mnt_count = 20;
+    sb->magic = EXT4_MAGIC;
+    sb->state = 1; /* clean */
+    sb->errors = 1; /* continue */
+    sb->minor_rev_level = 0;
+    sb->lastcheck = now;
+    sb->checkinterval = 0;
+    sb->creator_os = 0; /* Linux */
+    sb->rev_level = 1; /* dynamic rev */
+    sb->def_resuid = 0;
+    sb->def_resgid = 0;
+    sb->first_ino = 11;
+    sb->inode_size = inode_size;
+    sb->block_group_nr = 0;
+    sb->feature_compat = 0;
+    sb->feature_incompat = INCOMPAT_FILETYPE | INCOMPAT_EXTENTS | INCOMPAT_64BIT | INCOMPAT_FLEX_BG;
+    sb->feature_ro_compat = 0;
+    /* Generate a simple UUID */
+    for (int i = 0; i < 16; i++) {
+        sb->uuid[i] = (uint8_t)(now ^ (now >> 8) ^ (now >> 16) ^ (now >> 24) ^ i);
+    }
+    memcpy(sb->volume_name, "HelixRoot", 10);
+    memcpy(sb->last_mounted, "/", 2);
+    sb->desc_size = 64;
+
+    /* Write superblock at byte offset 1024 */
+    if (block_device_write(dev, 0, buf, 1) != 1) {
+        console_write("[ext4_format] failed to write superblock\n");
+        kfree(buf);
+        return false;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Write group descriptors starting at block 1                        */
+    /* ------------------------------------------------------------------ */
+    uint32_t gd_size = 64;
+    uint8_t *gd_buf = kzalloc(block_size);
+    if (gd_buf == NULL) {
+        kfree(buf);
+        return false;
+    }
+
+    /* For each group: block_bitmap, inode_bitmap, inode_table, then data blocks */
+    /* Layout per group: [superblock+GDT padding] [block_bitmap] [inode_bitmap] [inode_table] [data] */
+    /* For group 0: block 0 = superblock, block 1 = GDT, then bitmaps and inode table */
+    /* Simplified: put bitmaps and inode table at predictable locations per group */
+
+    uint32_t gd_blocks = (groups * gd_size + block_size - 1) / block_size;
+    for (uint32_t g = 0; g < groups; g++) {
+        ext4_gd_t *gd = (ext4_gd_t *)(gd_buf + g * gd_size);
+        memset(gd, 0, gd_size);
+
+        uint32_t group_start_block = g * blocks_per_group;
+        uint32_t bitmap_start;
+
+        if (g == 0) {
+            /* Group 0: skip superblock and GDT blocks */
+            bitmap_start = 1 + gd_blocks;
+        } else {
+            bitmap_start = group_start_block;
+        }
+
+        gd->block_bitmap_lo = bitmap_start;
+        gd->inode_bitmap_lo = bitmap_start + 1;
+        gd->inode_table_lo = bitmap_start + 2;
+
+        uint32_t group_blocks = group_start_block + blocks_per_group > blocks_count
+            ? (uint32_t)(blocks_count - group_start_block) : blocks_per_group;
+
+        uint32_t metadata_blocks = (g == 0) ? (1 + gd_blocks + 2 + inode_table_blocks) : (2 + inode_table_blocks);
+        uint32_t free_blocks = group_blocks > metadata_blocks ? group_blocks - metadata_blocks : 0;
+
+        gd->free_blocks_count_lo = (uint16_t)free_blocks;
+        gd->free_inodes_count_lo = (uint16_t)(inodes_per_group - (g == 0 ? 1 : 0));
+        gd->used_dirs_count_lo = (g == 0) ? 1 : 0;
+        gd->flags = 0;
+    }
+
+    /* Write group descriptors */
+    memcpy(buf, gd_buf, block_size);
+    if (block_device_write(dev, 1, buf, 1) != 1) {
+        console_write("[ext4_format] failed to write group descriptors\n");
+        kfree(gd_buf);
+        kfree(buf);
+        return false;
+    }
+    if (gd_blocks > 1) {
+        for (uint32_t i = 1; i < gd_blocks; i++) {
+            memcpy(buf, gd_buf + i * block_size, block_size);
+            if (block_device_write(dev, 1 + i, buf, 1) != 1) {
+                console_write("[ext4_format] failed to write GDT block\n");
+                kfree(gd_buf);
+                kfree(buf);
+                return false;
+            }
+        }
+    }
+    kfree(gd_buf);
+
+    /* ------------------------------------------------------------------ */
+    /* Write block and inode bitmaps for each group                       */
+    /* ------------------------------------------------------------------ */
+    for (uint32_t g = 0; g < groups; g++) {
+        uint32_t group_start_block = g * blocks_per_group;
+        uint32_t bitmap_start;
+
+        if (g == 0) {
+            bitmap_start = 1 + gd_blocks;
+        } else {
+            bitmap_start = group_start_block;
+        }
+
+        /* Block bitmap: mark metadata blocks as used */
+        memset(buf, 0, block_size);
+
+        if (g == 0) {
+            /* Mark superblock, GDT, bitmaps, and inode table as used */
+            for (uint32_t b = 0; b < (1 + gd_blocks + 2 + inode_table_blocks); b++) {
+                bit_set((uint8_t *)buf, b, true);
+            }
+        } else {
+            /* Mark bitmaps and inode table as used */
+            for (uint32_t b = 0; b < (2 + inode_table_blocks); b++) {
+                bit_set((uint8_t *)buf, b, true);
+            }
+        }
+        if (block_device_write(dev, bitmap_start, buf, 1) != 1) {
+            console_write("[ext4_format] failed to write block bitmap\n");
+            kfree(buf);
+            return false;
+        }
+
+        /* Inode bitmap: mark inode 2 (root) as used in group 0 */
+        memset(buf, 0, block_size);
+        if (g == 0) {
+            bit_set((uint8_t *)buf, 0, true); /* inode 1 is reserved */
+            bit_set((uint8_t *)buf, 1, true); /* inode 2 is root */
+        }
+        if (block_device_write(dev, bitmap_start + 1, buf, 1) != 1) {
+            console_write("[ext4_format] failed to write inode bitmap\n");
+            kfree(buf);
+            return false;
+        }
+
+        /* Zero out inode table blocks */
+        memset(buf, 0, block_size);
+        for (uint32_t i = 0; i < inode_table_blocks; i++) {
+            if (block_device_write(dev, bitmap_start + 2 + i, buf, 1) != 1) {
+                console_write("[ext4_format] failed to zero inode table\n");
+                kfree(buf);
+                return false;
+            }
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Write root inode (inode 2)                                         */
+    /* ------------------------------------------------------------------ */
+    uint32_t root_inode_table_start = 1 + gd_blocks + 2;
+
+    /* Root inode lives at index 1 (inode numbers are 1-based) */
+    ext4_inode_t *root_ino = (ext4_inode_t *)((uint8_t *)buf + inode_size);
+    memset(root_ino, 0, inode_size);
+    root_ino->mode = EXT4_S_IFDIR | 0755;
+    root_ino->uid = 0;
+    root_ino->size_lo = block_size;
+    root_ino->atime = now;
+    root_ino->ctime = now;
+    root_ino->mtime = now;
+    root_ino->dtime = 0;
+    root_ino->gid = 0;
+    root_ino->links = 2; /* . and .. */
+    root_ino->blocks_lo = (block_size / 512); /* 512-byte sectors */
+    root_ino->flags = EXT4_EXTENTS_FL;
+
+    /* Create extent tree header in i_block */
+    ext4_eh_t *eh = (ext4_eh_t *)root_ino->i_block;
+    eh->eh_magic = EXT4_EXT_MAGIC;
+    eh->eh_entries = 1;
+    eh->eh_max = 4;
+    eh->eh_depth = 0;
+
+    /* Allocate first data block for root directory */
+    uint32_t root_data_block = root_inode_table_start + inode_table_blocks;
+
+    ext4_eent_t *ee = (ext4_eent_t *)(root_ino->i_block + sizeof(ext4_eh_t));
+    ext_set(ee, 0, 1, root_data_block);
+
+    /* Write inode block (root inode already built at buf + inode_size) */
+    if (block_device_write(dev, root_inode_table_start, buf, 1) != 1) {
+        console_write("[ext4_format] failed to write root inode\n");
+        kfree(buf);
+        return false;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Write root directory data block with . and .. entries              */
+    /* ------------------------------------------------------------------ */
+    memset(buf, 0, block_size);
+    uint8_t *dir = (uint8_t *)buf;
+
+    /* Entry for "." */
+    dir[0] = 2;  /* inode = 2, stored as 4 bytes LE */
+    dir[1] = 0;
+    dir[2] = 0;
+    dir[3] = 0;
+    dir[4] = 12; /* rec_len */
+    dir[5] = 0;
+    dir[6] = 1;  /* name_len */
+    dir[7] = EXT4_FT_DIR; /* file type */
+    dir[8] = '.';
+    dir[9] = 0;
+    dir[10] = 0;
+    dir[11] = 0;
+
+    /* Entry for ".." */
+    dir[12] = 2;  /* inode = 2 (parent = root) */
+    dir[13] = 0;
+    dir[14] = 0;
+    dir[15] = 0;
+    dir[16] = (block_size - 12) & 0xFF; /* rec_len = rest of block */
+    dir[17] = ((block_size - 12) >> 8) & 0xFF;
+    dir[18] = 2;  /* name_len */
+    dir[19] = EXT4_FT_DIR; /* file type */
+    dir[20] = '.';
+    dir[21] = '.';
+
+    if (block_device_write(dev, root_data_block, buf, 1) != 1) {
+        console_write("[ext4_format] failed to write root directory\n");
+        kfree(buf);
+        return false;
+    }
+
+    kfree(buf);
+    console_write("[ext4_format] formatted ");
+    console_write(dev->name);
+    console_write(" with ext4 (");
+    console_write_dec(blocks_count);
+    console_write(" blocks, ");
+    console_write_dec(inodes_count);
+    console_write(" inodes)\n");
+
+    return true;
+}

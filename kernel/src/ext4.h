@@ -88,4 +88,9 @@ void ext4_set_time_source(uint32_t (*seconds)(void));
 /* Return the currently mounted ext4 filesystem, if any. */
 ext4_fs_t *ext4_get_current(void);
 
+/* Format a block device with a minimal ext4 filesystem.
+ * Creates superblock, group descriptors, bitmaps, inode table, and root dir.
+ * Returns true on success, false on error. */
+bool ext4_format(block_device_t *dev);
+
 #endif /* HELIX_EXT4_H */

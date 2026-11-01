@@ -27,7 +27,7 @@ static uint8_t g_driver_count;
 static bool g_driver_initialized;
 
 void driver_register(driver_t *driver) {
-    if (!g_driver_initialized || g_driver_count >= MAX_DRIVERS) {
+    if (g_driver_count >= MAX_DRIVERS) {
         return;
     }
     g_drivers[g_driver_count++] = driver;

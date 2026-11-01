@@ -240,9 +240,25 @@ void kmain(void) {
     /* M11: mount ext4 root from ramdisk block device as root filesystem. */
     ext4_set_time_source(uptime_secs);
     block_device_t *rbd = block_device_ramdisk();
+    if (rbd == NULL) {
+        console_write("[main] ramdisk device is NULL\n");
+    } else if (rbd->block_size == 0 || rbd->block_count == 0) {
+        console_write("[main] ramdisk not initialized: block_size=");
+        console_write_dec(rbd->block_size);
+        console_write(", block_count=");
+        console_write_dec(rbd->block_count);
+        console_putc('\n');
+    }
     ext4_fs_t *ext4fs = ext4_mount(rbd, false);
     if (ext4fs == NULL) {
-        console_write("[main] ext4 mount failed, falling back to helixfs\n");
+        /* Ramdisk is empty - format it with ext4 like a live Linux distro */
+        console_write("[main] formatting ramdisk with ext4...\n");
+        if (ext4_format(rbd)) {
+            ext4fs = ext4_mount(rbd, false);
+        }
+    }
+    if (ext4fs == NULL) {
+        console_write("[main] ext4 mount failed after format, falling back to helixfs\n");
         /* Fall back to the original helix boot filesystem */
         fs_boot_init();
         fs_mount(NULL, "/", "helixfs", true);
