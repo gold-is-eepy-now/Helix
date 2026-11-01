@@ -113,6 +113,8 @@ thread_t *thread_create(void (*entry)(void)) {
     t->ctx.rip = (uint64_t)(uintptr_t)entry;
     t->ctx.rsp = vaddr + THREAD_STACK_BYTES - 16u;
     t->ctx.rflags = THREAD_INITIAL_RFLAGS;
+    t->ctx.cs = 0x08;  /* kernel code selector */
+    t->ctx.ss = 0x10;  /* kernel data selector */
     return t;
 }
 
@@ -160,6 +162,8 @@ void thread_tick(void) {
     ctx->rip = frame[17];
     ctx->rflags = frame[19];
     ctx->rsp = frame[20];
+    ctx->cs = frame[18];  /* saved CS from interrupt frame */
+    ctx->ss = frame[18];  /* SS stays same as CS in kernel mode for now */
 
     thread_t *next = rr_next(g_run_queue, cur);
     if (next == cur) return;

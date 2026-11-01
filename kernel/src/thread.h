@@ -19,6 +19,8 @@ typedef struct {
     uint64_t rsp;     /* offset 120 */
     uint64_t rip;     /* offset 128 */
     uint64_t rflags;  /* offset 136 */
+    uint64_t cs;      /* offset 144 - code segment selector */
+    uint64_t ss;      /* offset 144 - data segment selector */
 } thread_context_t;
 
 typedef enum {
