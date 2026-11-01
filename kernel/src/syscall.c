@@ -27,6 +27,7 @@
 #include "thread.h"
 #include "channel.h"
 #include "vmm.h"
+#include "ext4.h"
 
 /* Per-process system call table. Currently one system table for kernel
  * initialization; M9 will add per-process tables when user threads exist.
@@ -272,15 +273,71 @@ static uint64_t handle_brk(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, u
     return 0;
 }
 
+/* ELF segment loading flags. */
+#define ELF_PROT_READ  (1u << 0)
+#define ELF_PROT_WRITE (1u << 1)
+#define ELF_PROT_EXEC  (1u << 2)
+
+/* Map a memory region into the current address space. */
+static bool map_region(uint64_t virt, uint64_t phys, uint64_t flags) {
+    bool ret = vmm_map(virt, phys, flags);
+    (void)ret;  /* For now we don't check the return value */
+    return ret;
+}
+
+/* Simple ELF loader that loads an ELF binary from the ramdisk filesystem.
+ * For now, this is a basic implementation that reads the ELF file and
+ * sets up basic mappings. The full ELF loading (including copying segment
+ * data, setting up the user stack with argv/envp, etc.) is deferred.
+ *
+ * Returns 0 on success, or -errno on failure. */
+static int elf_load_from_ramdisk(const char *filename, uint64_t *ret_rip) {
+    (void)ret_rip;
+    
+    ext4_fs_t *fs = ext4_get_current();
+    if (fs == NULL) {
+        kprintf("[elf] ext4 not mounted\n");
+        return -1;
+    }
+    
+    /* Read the file from ramdisk. First, we need to find the inode.
+     * The ramdisk root is inode 2. */
+    uint64_t ino = 2;  /* root inode */
+    
+    /* Look up the file by name in the root directory. This is simplified -
+     * we just read inode 2 directly as a stub. */
+    uint8_t buf[4096];
+    uint64_t nread = ext4_read(fs, ino, 0, buf, sizeof(buf));
+    if (nread == 0) {
+        kprintf("[elf] failed to read root inode\n");
+        return -1;
+    }
+    
+    /* Scan the directory entry for our filename. This is very simplified. */
+    /* For now, just check if we can read the file at a known path. */
+    kprintf("[elf] loading: %s from ramdisk\n", filename);
+    
+    /* Return the entry point at the start of the mapped region. */
+    return 0;
+}
+
+/* Execute a new program. */
 static uint64_t handle_execve(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
-    /* a1 = filename pointer (user-space virtual address)
-     * a2 = argv pointer
-     * a3 = envp pointer
-     * 
-     * For now, we just print the filename. The full ELF loader is a
-     * future milestone. */
-    kprintf("[syscall] execve: filename=%p\n", a1);
+    /* a1 = filename pointer (user-space virtual address) */
+    
+    /* Convert user virtual address to physical (temporarily) to look up the file.
+     * For now, just print and return. */
+    kprintf("[syscall] execve: filename=%p\n", (void *)a1);
+    
+    /* TODO: Full ELF loader implementation:
+     * 1. Convert a1 from user virtual to kernel physical
+     * 2. Read ELF header from ramdisk
+     * 3. Map PT_LOAD segments into user address space
+     * 4. Set up user stack with argc/argv/environ
+     * 5. Switch to new address space with vmm_switch_as
+     * 6. Return entry point (rip) to user mode
+     */
     return 0;
 }
 
