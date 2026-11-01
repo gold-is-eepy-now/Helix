@@ -18,6 +18,9 @@ void *kzalloc(size_t size);
 /* Release memory previously returned by kmalloc/kzalloc. */
 void kfree(void *ptr);
 
+/* Current program break (top of the heap). */
+uint64_t heap_brk(void);
+
 /* Statistics. */
 uint64_t heap_used_bytes(void);
 uint64_t heap_total_bytes(void);

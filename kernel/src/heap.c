@@ -33,6 +33,7 @@ static uint64_t g_hhdm;
 static block_t *g_head;
 static uint64_t g_used;
 static uint64_t g_total;
+static uint64_t g_brk;
 
 static size_t align_up(size_t value, size_t align) {
     return (value + align - 1) & ~(align - 1);
@@ -45,6 +46,7 @@ void heap_init(uint64_t hhdm_offset) {
     g_head = NULL;
     g_used = 0;
     g_total = 0;
+    g_brk = 0;
     /* Reserve a first chunk so ordinary allocations do not each pay for a
      * frame run. */
     heap_grow(256u * 1024u);
@@ -160,6 +162,10 @@ void kfree(void *ptr) {
 
 uint64_t heap_used_bytes(void) {
     return g_used;
+}
+
+uint64_t heap_brk(void) {
+    return g_brk;
 }
 
 uint64_t heap_total_bytes(void) {

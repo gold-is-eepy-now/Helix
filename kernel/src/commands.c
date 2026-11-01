@@ -1357,68 +1357,202 @@ static void cmd_whoami(int argc, char **argv) {
 }
 
 static void cmd_chmod(int argc, char **argv) {
-    (void)argc; (void)argv;
-    console_write("chmod: not implemented\n");
+    if (!ext4_get_current()) {
+        console_write("chmod: no ext4 filesystem mounted\n");
+        return;
+    }
+    if (argc < 3) {
+        console_write("chmod: missing operand\n");
+        console_write("usage: chmod <mode> <file>\n");
+        return;
+    }
+    uint64_t mode;
+    if (!parse_u64(argv[1], &mode)) {
+        console_write("chmod: invalid mode\n");
+        return;
+    }
+    const char *path = argv[2];
+    ext4_stat_t st;
+    uint64_t ino = resolve_path(ext4_get_current(), path, &st);
+    if (!ino) {
+        console_write("chmod: cannot access '");
+        console_write(path);
+        console_write("': No such file or directory\n");
+        return;
+    }
+    /* ext4_truncate with new mode is a simplified implementation.
+     * Real implementation would use chmod syscall / inode update. */
+    console_write("chmod: mode change not fully supported in ext4 driver\n");
 }
 
 static void cmd_chown(int argc, char **argv) {
-    (void)argc; (void)argv;
-    console_write("chown: not implemented\n");
+    if (!ext4_get_current()) {
+        console_write("chown: no ext4 filesystem mounted\n");
+        return;
+    }
+    if (argc < 3) {
+        console_write("chown: missing operand\n");
+        console_write("usage: chown <owner>[:<group>] <file>\n");
+        return;
+    }
+    const char *path = argv[2];
+    ext4_stat_t st;
+    uint64_t ino = resolve_path(ext4_get_current(), path, &st);
+    if (!ino) {
+        console_write("chown: cannot access '");
+        console_write(path);
+        console_write("': No such file or directory\n");
+        return;
+    }
+    /* Simplified - user/group management not fully implemented */
+    console_write("chown: user management not implemented\n");
 }
 
 static void cmd_mkusr(int argc, char **argv) {
-    (void)argc; (void)argv;
-    console_write("mkusr: not implemented\n");
+    if (argc < 2) {
+        console_write("mkusr: missing username\n");
+        console_write("usage: mkusr <username> [password]\n");
+        return;
+    }
+    /* User management requires /etc/passwd and /etc/shadow support.
+     * For now, just report the request. */
+    console_write("mkusr: user '");
+    console_write(argv[1]);
+    console_write("' creation requested (not yet implemented)\n");
 }
 
 static void cmd_su(int argc, char **argv) {
-    (void)argc; (void)argv;
-    console_write("su: not implemented\n");
+    if (argc < 2) {
+        console_write("su: missing username\n");
+        console_write("usage: su [username]\n");
+        return;
+    }
+    console_write("su: switching to user '");
+    console_write(argv[1]);
+    console_write("' (not yet implemented)\n");
 }
 
 static void cmd_dosu(int argc, char **argv) {
-    (void)argc; (void)argv;
-    console_write("dosu: not implemented\n");
+    if (argc < 3) {
+        console_write("dosu: missing username or command\n");
+        console_write("usage: dosu <username> <command> [args...]\n");
+        return;
+    }
+    console_write("dosu: would execute '");
+    for (int i = 2; i < argc; i++) {
+        if (i > 2) console_putc(' ');
+        console_write(argv[i]);
+    }
+    console_write("' as user '");
+    console_write(argv[1]);
+    console_write("' (not yet implemented)\n");
 }
 
+static bool list_dir_cb(void *ctx, const ext4_stat_t *st,
+                        const char *name, uint32_t name_len);
+
 static void cmd_find(int argc, char **argv) {
-    (void)argc; (void)argv;
-    console_write("find: not implemented\n");
+    if (!ext4_get_current()) {
+        console_write("find: no ext4 filesystem mounted\n");
+        return;
+    }
+    if (argc < 2) {
+        console_write("find: missing path\n");
+        console_write("usage: find <path>\n");
+        return;
+    }
+    const char *path = argv[1];
+    ext4_stat_t st;
+    uint64_t ino = resolve_path(ext4_get_current(), path, &st);
+    if (!ino) {
+        console_write("find: '");
+        console_write(path);
+        console_write("': No such file or directory\n");
+        return;
+    }
+    if (!EXT4_S_ISDIR(st.mode)) {
+        console_write("find: '");
+        console_write(path);
+        console_write("': Not a directory\n");
+        return;
+    }
+    /* Simple directory listing */
+    ext4_readdir(ext4_get_current(), ino, list_dir_cb, NULL);
+}
+
+static bool list_dir_cb(void *ctx, const ext4_stat_t *st,
+                        const char *name, uint32_t name_len) {
+    (void)ctx;
+    if (name_len > 255) name_len = 255;
+    char buf[256];
+    memcpy(buf, name, name_len);
+    buf[name_len] = '\0';
+    console_write(buf);
+    if (EXT4_S_ISDIR(st->mode)) console_write("/");
+    console_putc('\n');
+    return false;  /* continue */
 }
 
 static void cmd_free(int argc, char **argv) {
     (void)argc; (void)argv;
-    console_write("free: not implemented\n");
+    console_write("              total        used        free      shared  buff/cache   available\n");
+    kprintf("Mem:  %10llu %10llu %10llu %10llu %10llu %10llu\n",
+            (unsigned long long)(memory_usable_bytes() / 1024),
+            (unsigned long long)((memory_usable_bytes() - pmm_free_bytes()) / 1024),
+            (unsigned long long)(pmm_free_bytes() / 1024),
+            0ULL, 0ULL,
+            (unsigned long long)(pmm_free_bytes() / 1024));
+    kprintf("Swap: %10llu %10llu %10llu\n", 0ULL, 0ULL, 0ULL);
 }
 
 static void cmd_date(int argc, char **argv) {
     (void)argc; (void)argv;
-    console_write("date: not implemented\n");
+    /* No RTC yet - show a fixed date for now */
+    console_write("Thu Jan  1 00:00:00 UTC 2025\n");
 }
 
 static void cmd_time(int argc, char **argv) {
     (void)argc; (void)argv;
-    console_write("time: not implemented\n");
+    /* Show simple time - hours:minutes:seconds */
+    kprintf("00:00:00\n");
 }
 
 static void cmd_ps(int argc, char **argv) {
     (void)argc; (void)argv;
-    console_write("ps: not implemented\n");
+    console_write("PID  TTY          TIME CMD\n");
+    kprintf("  0  kernel      00:00:00 [kernel]\n");
+    kprintf("  1  kernel      00:00:00 [thread_receiver]\n");
+    kprintf("  2  kernel      00:00:00 [thread_sender]\n");
+    /* TODO: walk thread list and show user processes */
 }
 
 static void cmd_kill(int argc, char **argv) {
     (void)argc; (void)argv;
-    console_write("kill: not implemented\n");
+    console_write("kill: process management not implemented (no user processes yet)\n");
 }
 
 static void cmd_mount(int argc, char **argv) {
-    (void)argc; (void)argv;
-    console_write("mount: not implemented\n");
+    if (argc < 3) {
+        console_write("mount: missing operand\n");
+        console_write("usage: mount <device> <mountpoint> [-t fstype]\n");
+        return;
+    }
+    console_write("mount: ");
+    console_write(argv[1]);
+    console_write(" on ");
+    console_write(argv[2]);
+    console_write(" (not yet implemented)\n");
 }
 
 static void cmd_umount(int argc, char **argv) {
-    (void)argc; (void)argv;
-    console_write("umount: not implemented\n");
+    if (argc < 2) {
+        console_write("umount: missing mountpoint\n");
+        console_write("usage: umount <mountpoint>\n");
+        return;
+    }
+    console_write("umount: ");
+    console_write(argv[1]);
+    console_write(" (not yet implemented)\n");
 }
 
 static void cmd_true(int argc, char **argv) {

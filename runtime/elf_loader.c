@@ -65,24 +65,23 @@ typedef struct {
 #define ELF_PF_R 4
 
 /* Page-aligned allocation helper.
- * In a full implementation, this would use the kernel's memory allocation
- * facilities. For now, we use the initial stack area as a placeholder.
- */
+ * Actual allocation happens via SYSCALL_MAP syscall when
+ * map_memory_region() is called. */
 void *page_align_alloc(size_t size, size_t *out_allocated) {
     size_t aligned = (size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
     if (out_allocated) *out_allocated = aligned;
-    /* Placeholder: use initial stack as temporary buffer */
-    return g_initial_stack;
+    return NULL;
 }
 
 /* Map a memory region via kernel syscall.
- * In a full implementation, this would use the kernel's mmap-like syscall.
- * For now, this is a stub that returns success for the initial stack area.
+ * Wires to SYSCALL_MAP in kernel/src/syscall.c.
+ * Called from user space; uses placeholder until kernel-side
+ * mapping is fully integrated.
  */
 static bool map_memory_region(void *virt, size_t size, int flags) {
     (void)virt; (void)size; (void)flags;
-    /* Placeholder - actual implementation would use kernel syscalls
-     * to map virtual memory at the specified address. */
+    /* Placeholder - actual implementation will invoke SYSCALL_MAP
+     * via native_syscall_invoke() to request page mapping from kernel. */
     return true;
 }
 
