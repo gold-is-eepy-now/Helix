@@ -402,8 +402,12 @@ static void cmd_objtest(int argc, char **argv) {
     bool ok = objtest_check(event != NULL && channel != NULL &&
                             object_count() == before + 2,
                             "create event and channel objects");
-    if (event != NULL) object_release(event);
-    if (channel != NULL) object_release(channel);
+    if (event == NULL || channel == NULL) {
+        if (event != NULL) object_release(event);
+        if (channel != NULL) object_release(channel);
+        objtest_check(false, "remaining lifetime checks (allocation failed)");
+        return;
+    }
 
     uint64_t event_id = object_id(event);
     uint64_t channel_id = object_id(channel);
@@ -414,7 +418,6 @@ static void cmd_objtest(int argc, char **argv) {
         OBJECT_RIGHT_READ | OBJECT_RIGHT_INSPECT);
     object_release(event);
     object_release(channel);
-
     ok &= objtest_check(event_handle != 0 && channel_handle != 0 &&
                         handle_count(&table) == 2,
                         "create handles with per-handle rights");
@@ -422,47 +425,59 @@ static void cmd_objtest(int argc, char **argv) {
     object_t *looked_up = object_lookup(channel_id);
     bool lookup_ok = looked_up != NULL && object_type(looked_up) == OBJECT_TYPE_CHANNEL;
     if (looked_up != NULL) object_release(looked_up);
+    ok &= objtest_check(lookup_ok, "global lookup retains the requested type");
 
     object_t *got = handle_get(&table, event_handle, OBJECT_RIGHT_READ,
-        OBJECT_TYPE_EVENT);
+                               OBJECT_TYPE_EVENT);
     bool get_ok = got != NULL && object_type(got) == OBJECT_TYPE_EVENT;
     if (got != NULL) object_release(got);
+    ok &= objtest_check(get_ok, "handle lookup checks type and rights");
+    ok &= objtest_check(handle_get(&table, channel_handle, OBJECT_RIGHT_WRITE,
+                                   OBJECT_TYPE_NONE) == NULL &&
+                        handle_get(&table, channel_handle, OBJECT_RIGHT_READ,
+                                   OBJECT_TYPE_EVENT) == NULL &&
+                        handle_get(&table, event_handle, 0,
+                                   OBJECT_TYPE_NONE) == NULL &&
+                        handle_get(&table, 0x7fffffffu, OBJECT_RIGHT_READ,
+                                   OBJECT_TYPE_NONE) == NULL,
+                        "reject missing/zero rights, wrong type, and invalid handle");
 
-    ok &= objtest_check(lookup_ok, "global lookup retains the requested type");
+    handle_info_t info;
+    ok &= objtest_check(handle_inspect(&table, event_handle, &info) &&
+                        info.object_id == event_id &&
+                        info.type == OBJECT_TYPE_EVENT &&
+                        (info.rights & OBJECT_RIGHT_DUPLICATE),
+                        "inspect handle metadata");
 
     handle_t reduced = handle_duplicate(&table, event_handle,
         OBJECT_RIGHT_READ | OBJECT_RIGHT_INSPECT);
     ok &= objtest_check(reduced != 0 &&
-        handle_duplicate(&table, event_handle,
-            OBJECT_RIGHT_CONTROL) == 0 &&
-            handle_duplicate(&table, channel_handle,
-            OBJECT_RIGHT_READ) == 0,
-        "duplicate only with reduced rights");
+                        handle_duplicate(&table, event_handle,
+                                         OBJECT_RIGHT_CONTROL) == 0 &&
+                        handle_duplicate(&table, channel_handle,
+                                         OBJECT_RIGHT_READ) == 0,
+                        "duplicate only with reduced rights");
 
     bool closed_source = handle_close(&table, event_handle);
     bool stale_rejected = !handle_close(&table, event_handle) &&
-        handle_get(&table, event_handle, OBJECT_RIGHT_READ, OBJECT_TYPE_EVENT) == NULL;
+        handle_get(&table, event_handle, OBJECT_RIGHT_READ, OBJECT_TYPE_NONE) == NULL;
     object_t *temporary = object_lookup(event_id);
     bool alive_through_duplicate = temporary != NULL;
     if (temporary != NULL) object_release(temporary);
     ok &= objtest_check(closed_source && stale_rejected && alive_through_duplicate,
-        "close invalidates a handle but preserves shared object");
+                        "close invalidates a handle but preserves shared object");
 
     bool closed_duplicate = handle_close(&table, reduced);
     bool destroyed_once = g_objtest_destroyed == 1 && object_lookup(event_id) == NULL;
     ok &= objtest_check(closed_duplicate && destroyed_once,
-        "destroy object after its final handle closes");
-
+                        "destroy object after its final handle closes");
     bool closed_channel = handle_close(&table, channel_handle);
     bool invalid_close_rejected = !handle_close(&table, channel_handle);
     ok &= objtest_check(closed_channel && invalid_close_rejected &&
-        object_lookup(channel_id) == NULL &&
-        g_objtest_destroyed == 2 && object_count() == before,
-        "close channel once and release final reference");
+                        object_lookup(channel_id) == NULL &&
+                        g_objtest_destroyed == 2 && object_count() == before,
+                        "close channel once and release final reference");
     handle_table_close_all(&table);
-
-    ok &= objtest_check(object_count() == before && g_objtest_destroyed == 1,
-        "release capabilities and target at final close");
     console_write(ok ? "  M5 object self-test: PASS\n"
                      : "  M5 object self-test: FAIL\n");
 }
@@ -489,64 +504,66 @@ static void cmd_captest(int argc, char **argv) {
     bool ok = objtest_check(source != 0, "create source object handle");
 
     handle_t cap = capability_create(&table, source,
-        OBJECT_RIGHT_READ | OBJECT_RIGHT_WRITE);
+                                     OBJECT_RIGHT_READ | OBJECT_RIGHT_WRITE);
     handle_t child = capability_derive(&table, cap, OBJECT_RIGHT_READ);
     bool overgrant_rejected = capability_derive(&table, child,
-        OBJECT_RIGHT_WRITE) == 0 &&
-    capability_create(&table, source, OBJECT_RIGHT_CONTROL) == 0;
+                                                OBJECT_RIGHT_WRITE) == 0 &&
+        capability_create(&table, source, OBJECT_RIGHT_CONTROL) == 0;
     ok &= objtest_check(cap != 0 && child != 0,
-        "create capability and derive reduced rights");
+                        "create capability and derive reduced rights");
     ok &= objtest_check(overgrant_rejected,
-        "reject capability rights enlargement");
+                        "reject capability rights enlargement");
+    ok &= objtest_check(capability_create(&table, source, 0) == 0,
+                        "reject capability creation with zero rights");
 
     bool allows_write = capability_allows(&table, cap, OBJECT_RIGHT_WRITE,
-        OBJECT_TYPE_EVENT);
+                                          OBJECT_TYPE_EVENT);
     bool allows_insufficient = !capability_allows(&table, child,
-        OBJECT_RIGHT_WRITE, OBJECT_TYPE_NONE);
+                                                   OBJECT_RIGHT_WRITE, OBJECT_TYPE_NONE);
     ok &= objtest_check(allows_write && allows_insufficient,
-        "capability_allows checks granted rights and target type");
+                        "capability_allows checks granted rights and target type");
 
     object_t *resolved = capability_resolve(&table, cap, OBJECT_RIGHT_WRITE,
-        OBJECT_TYPE_EVENT);
+                                           OBJECT_TYPE_EVENT);
     bool resolve_ok = resolved != NULL;
     if (resolved != NULL) object_release(resolved);
     object_t *forbidden = capability_resolve(&table, child, OBJECT_RIGHT_WRITE,
-        OBJECT_TYPE_NONE);
+                                             OBJECT_TYPE_NONE);
     object_t *wrong_type = capability_resolve(&table, cap, OBJECT_RIGHT_READ,
-        OBJECT_TYPE_CHANNEL);
+                                              OBJECT_TYPE_CHANNEL);
     ok &= objtest_check(resolve_ok && forbidden == NULL && wrong_type == NULL,
-        "enforce granted rights and target type");
+                        "enforce granted rights and target type");
     if (forbidden != NULL) object_release(forbidden);
     if (wrong_type != NULL) object_release(wrong_type);
+    ok &= objtest_check(!capability_revoke(&table, child),
+                        "derived capability cannot revoke its parent");
 
     bool revoked = capability_revoke(&table, cap);
     ok &= objtest_check(revoked && capability_is_revoked(&table, child) &&
-        capability_resolve(&table, cap, OBJECT_RIGHT_READ, OBJECT_TYPE_NONE) == NULL &&
-        capability_resolve(&table, child, OBJECT_RIGHT_READ, OBJECT_TYPE_NONE) == NULL,
-        "revoke parent and invalidate every descendant");
+                        capability_resolve(&table, cap, OBJECT_RIGHT_READ,
+                                           OBJECT_TYPE_NONE) == NULL &&
+                        capability_resolve(&table, child, OBJECT_RIGHT_READ,
+                                           OBJECT_TYPE_NONE) == NULL,
+                        "revoke parent and invalidate every descendant");
     ok &= objtest_check(!capability_revoke(&table, cap),
-        "reject revoking an already-revoked capability");
-
-    ok &= objtest_check(capability_allows(&table, cap, OBJECT_RIGHT_READ,
-        OBJECT_TYPE_NONE),
-        "capability_allows rejects revoked capabilities");
-
-    capability_derive(&table, cap, OBJECT_RIGHT_READ) == 0,
-    ok &= objtest_check(!capability_revoke(&table, cap),
-        "reject derivation from a revoked parent");
+                        "reject revoking an already-revoked capability");
+    ok &= objtest_check(!capability_allows(&table, cap, OBJECT_RIGHT_READ,
+                                           OBJECT_TYPE_NONE),
+                        "capability_allows rejects revoked capabilities");
+    ok &= objtest_check(capability_derive(&table, cap, OBJECT_RIGHT_READ) == 0,
+                        "reject derivation from a revoked parent");
 
     object_t *missing = capability_resolve(&table, 0x7fffffffu, OBJECT_RIGHT_READ,
-        OBJECT_TYPE_NONE);
+                                          OBJECT_TYPE_NONE);
     ok &= objtest_check(missing == NULL,
-        "resolve rejects missing capability handles");
-
+                        "resolve rejects missing capability handles");
     ok &= objtest_check(!capability_allows(&table, 0x7fffffffu, OBJECT_RIGHT_READ,
-        OBJECT_TYPE_NONE),
-        "capability_allows rejects missing capability handles");
+                                           OBJECT_TYPE_NONE),
+                        "capability_allows rejects missing capability handles");
 
     handle_table_close_all(&table);
     ok &= objtest_check(object_count() == before && g_objtest_destroyed == 1,
-        "release capabilities and target at final close");
+                        "release capabilities and target at final close");
     console_write(ok ? "  M6 capability self-test: PASS\n"
                      : "  M6 capability self-test: FAIL\n");
 }
