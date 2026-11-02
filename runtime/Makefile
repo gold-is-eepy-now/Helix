@@ -25,7 +25,13 @@ VIRTIO_LIB := $(VIRTIO_DIR)/build/virtio_driver.a
 VIRTIO_SRCS :=
 VIRTIO_OBJS := $(VIRTIO_SRCS:.c=.o)
 
-all: $(TARGET)
+# Native Helix userspace library
+LIBHELIX_DIR := ../userspace
+LIBHELIX_LIB := $(LIBHELIX_DIR)/libhelix.a
+LIBHELIX_SRCS := $(LIBHELIX_DIR)/libhelix.c
+LIBHELIX_OBJS := $(LIBHELIX_SRCS:.c=.o)
+
+all: $(TARGET) $(LIBHELIX_LIB)
 
 $(TARGET): linux_runtime_main.o linux_runtime.o linux_syscall.o bsd_syscall.o elf_loader.o
 	$(CC) $(CFLAGS) linux_runtime_main.o linux_runtime.o linux_syscall.o bsd_syscall.o elf_loader.o -o $(TARGET)
@@ -75,22 +81,35 @@ $(KVM_OBJS): $(KVM_DIR)/%.o: $(KVM_DIR)/%.c
 virtio:
 	@echo "[runtime] Virtio driver library: not yet implemented"
 
+# Native Helix userspace library build targets
+libhelix: $(LIBHELIX_LIB)
+
+$(LIBHELIX_DIR)/build:
+	mkdir -p $(LIBHELIX_DIR)/build
+
+$(LIBHELIX_LIB): $(LIBHELIX_OBJS) | $(LIBHELIX_DIR)/build
+	ar rcs $@ $(LIBHELIX_OBJS)
+	@echo "[runtime] Native Helix library built: $@"
+
+$(LIBHELIX_OBJS): $(LIBHELIX_DIR)/%.o: $(LIBHELIX_DIR)/%.c
+	$(CC) $(CFLAGS) -I$(LIBHELIX_DIR) -c $< -o $@
 
 # Userspace apps
 USERSpace_APPS_DIR := ../userspace/apps
-USERSpace_APPS := dhcp wifi wget wav volume terminal browser cc x11server start-gui boxwm
+USERSpace_APPS := dhcp wifi wget wav volume terminal browser cc x11server start-gui boxwm helix_test
 USERSpace_APP_BINS := $(addprefix $(USERSpace_APPS_DIR)/,$(USERSpace_APPS))
 
 userspace-apps: $(USERSpace_APP_BINS)
 
 $(USERSpace_APPS_DIR)/%: $(USERSpace_APPS_DIR)/%.c
-	$(CC) $(CFLAGS) -I.. -I../../runtime/optional_drivers/transport -I. $< -o $@
+	$(CC) $(CFLAGS) -I. -Ioptional_drivers/transport -I$(LIBHELIX_DIR) $< $(LIBHELIX_LIB) -o $@
 
 clean:
 	rm -f *.o $(TARGET) runtime_test
 	rm -rf $(OPTIONAL_DRIVERS_DIR)/build
 	rm -f $(OPTIONAL_DRIVERS_OBJS)
 	rm -f $(USERSpace_APP_BINS)
+	rm -f $(LIBHELIX_DIR)/libhelix.a $(LIBHELIX_OBJS)
 
 test: runtime_test
 	./runtime_test
@@ -102,4 +121,4 @@ runtime_test: runtime_test.o linux_runtime.o linux_syscall.o bsd_syscall.o elf_l
 runtime_test.o: runtime_test.c linux_runtime.h linux_syscall.h bsd_syscall.h
 	$(CC) $(CFLAGS) -c runtime_test.c -o runtime_test.o
 
-.PHONY: all clean test optional-drivers userspace-apps kvm virtio
+.PHONY: all clean test optional-drivers userspace-apps kvm virtio libhelix

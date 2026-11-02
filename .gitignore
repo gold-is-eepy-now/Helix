@@ -4,3 +4,7 @@ runtime/runtime
 runtime/runtime_test
 runtime/linux_runtime
 build/helix.img
+userspace/libhelix.a
+userspace/build/
+userspace/apps/helix_test
+tests/__pycache__/
