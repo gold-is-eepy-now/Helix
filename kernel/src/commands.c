@@ -41,6 +41,12 @@
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
 
+/* Forward declarations for recursive tree helpers (defined further down). */
+static bool cp_copy_dir(ext4_fs_t *fs, uint64_t src_ino, uint64_t dst_parent,
+                        const char *dst_name);
+static bool rm_remove_dir(ext4_fs_t *fs, uint64_t dir_ino, uint64_t parent_ino,
+                          const char *name);
+
 static bool str_eq(const char *a, const char *b) {
     while (*a && *b && *a == *b) {
         a++;
@@ -1123,7 +1129,7 @@ static void cmd_rm(int argc, char **argv) {
             console_write("rm: parent directory not found\n");
             continue;
         }
-        if (ext4_lookup(ext4_get_current(), parent_ino, name, &st)) {
+        if (!ext4_lookup(ext4_get_current(), parent_ino, name, &st)) {
             console_write("rm: cannot remove '");
             console_write(path);
             console_write("': No such file\n");
@@ -1135,7 +1141,16 @@ static void cmd_rm(int argc, char **argv) {
             console_write("': Is a directory (use -r)\n");
             continue;
         }
-        if (!ext4_unlink(ext4_get_current(), parent_ino, name, EXT4_S_ISDIR(st.mode))) {
+        if (EXT4_S_ISDIR(st.mode)) {
+            if (!rm_remove_dir(ext4_get_current(), st.ino, parent_ino, name)) {
+                console_write("rm: failed to remove '");
+                console_write(path);
+                console_write("'\n");
+                continue;
+            }
+            continue;
+        }
+        if (!ext4_unlink(ext4_get_current(), parent_ino, name, false)) {
             console_write("rm: failed to remove '");
             console_write(path);
             console_write("'\n");
@@ -1144,6 +1159,114 @@ static void cmd_rm(int argc, char **argv) {
     }
 }
 
+/* One directory entry captured before we start mutating the tree.
+ * ext4_readdir() walks the directory through the driver's single scratch
+ * buffer, so the entries must be snapshotted before any create/write/unlink
+ * call clobbers that buffer mid-walk. */
+typedef struct {
+    char name[EXT4_NAME_MAX + 1];
+    uint16_t mode;
+    uint64_t ino;
+    uint64_t size;
+} dir_entry_t;
+
+typedef struct {
+    dir_entry_t *entries;
+    size_t count;
+    size_t cap;
+} dir_list_t;
+
+static void dir_list_free(dir_list_t *l) {
+    if (l->entries) kfree(l->entries);
+    l->entries = NULL;
+    l->count = 0;
+    l->cap = 0;
+}
+
+/* Count entries; callback returns false to keep scanning (see ext4_dirent_cb contract: true stops). */
+static bool dir_list_count_cb(void *ctx, const ext4_stat_t *st,
+                              const char *name, uint32_t name_len) {
+    (void)ctx; (void)st; (void)name; (void)name_len;
+    return false;
+}
+
+/* Snapshot one entry; return false to keep scanning. */
+static bool dir_list_fill_cb(void *ctx, const ext4_stat_t *st,
+                             const char *name, uint32_t name_len) {
+    dir_list_t *l = ctx;
+    if (name_len > EXT4_NAME_MAX) return false;
+    if (l->entries == NULL || l->count >= l->cap) return true; /* stop when full */
+    dir_entry_t *e = &l->entries[l->count++];
+    memcpy(e->name, name, name_len);
+    e->name[name_len] = '\0';
+    e->mode = st->mode;
+    e->ino = st->ino;
+    e->size = st->size;
+    return false;
+}
+
+/* Two-pass snapshot into heap so we never put a large dir on the 32KB kernel stack. */
+static bool dir_snapshot(ext4_fs_t *fs, uint64_t dir_ino, dir_list_t *out) {
+    out->entries = NULL;
+    out->count = 0;
+    out->cap = 0;
+
+    uint64_t n = ext4_readdir(fs, dir_ino, dir_list_count_cb, NULL);
+    if (n == 0) return true;
+    out->entries = kmalloc((size_t)n * sizeof(dir_entry_t));
+    if (!out->entries) return false;
+    out->cap = (size_t)n;
+    ext4_readdir(fs, dir_ino, dir_list_fill_cb, out);
+    return true;
+}
+
+/* Copy a regular file's contents into a freshly created file. */
+static bool copy_file_contents(ext4_fs_t *fs, uint64_t src_ino, uint64_t dst_ino,
+                               uint64_t size) {
+    char *buf = kmalloc(size + 1);
+    if (!buf) return false;
+    if (ext4_read(fs, src_ino, 0, buf, size) != size) {
+        kfree(buf);
+        return false;
+    }
+    bool ok = (ext4_write(fs, dst_ino, 0, buf, size) == size);
+    kfree(buf);
+    return ok;
+}
+
+/* Recursively copy a directory tree. */
+static bool cp_copy_dir(ext4_fs_t *fs, uint64_t src_ino, uint64_t dst_parent,
+                        const char *dst_name) {
+    ext4_stat_t st;
+    if (!ext4_stat(fs, src_ino, &st)) return false;
+
+    uint64_t new_dir_ino;
+    if (!ext4_mkdir(fs, dst_parent, dst_name, st.mode, &new_dir_ino)) {
+        return false;
+    }
+
+    dir_list_t list;
+    if (!dir_snapshot(fs, src_ino, &list)) {
+        return false;
+    }
+
+    bool ok = true;
+    for (size_t i = 0; i < list.count; i++) {
+        dir_entry_t *e = &list.entries[i];
+        if (EXT4_S_ISDIR(e->mode)) {
+            if (!cp_copy_dir(fs, e->ino, new_dir_ino, e->name)) { ok = false; break; }
+        } else if (EXT4_S_ISREG(e->mode)) {
+            uint64_t file_ino;
+            if (!ext4_create(fs, new_dir_ino, e->name, e->mode, &file_ino) ||
+                !copy_file_contents(fs, e->ino, file_ino, e->size)) {
+                ok = false;
+                break;
+            }
+        }
+    }
+    dir_list_free(&list);
+    return ok;
+}
 static void cmd_cp(int argc, char **argv) {
     if (!ext4_get_current()) {
         console_write("cp: no ext4 filesystem mounted\n");
@@ -1153,8 +1276,16 @@ static void cmd_cp(int argc, char **argv) {
         console_write("cp: missing operand\n");
         return;
     }
-    const char *src = argv[1];
-    const char *dst = argv[2];
+
+    bool recursive = false;
+    int arg_start = 1;
+    if (argc > 3 && str_eq(argv[1], "-r")) {
+        recursive = true;
+        arg_start = 2;
+    }
+
+    const char *src = argv[arg_start];
+    const char *dst = argv[arg_start + 1];
     ext4_stat_t st;
     uint64_t src_ino = resolve_path(ext4_get_current(), src, &st);
     if (!src_ino) {
@@ -1163,21 +1294,66 @@ static void cmd_cp(int argc, char **argv) {
         console_write("'\n");
         return;
     }
+    uint64_t src_size = st.size; /* capture before st is clobbered by dst dir resolve */
+
     if (EXT4_S_ISDIR(st.mode)) {
-        console_write("cp: omitting directory '");
+        if (!recursive) {
+            console_write("cp: omitting directory '");
+            console_write(src);
+            console_write("' (use -r to copy recursively)\n");
+            return;
+        }
+        /* Recursive directory copy */
+        const char *slash = strrchr(dst, '/');
+        char dir_path[256] = "/";
+        char name[EXT4_NAME_MAX + 1];
+        uint64_t parent_ino;
+        if (slash) {
+            size_t dir_len = slash - dst;
+            if (dir_len > 0) {
+                memcpy(dir_path, dst, dir_len);
+                dir_path[dir_len] = '\0';
+            }
+            size_t name_len = strlen(slash + 1);
+            if (name_len > EXT4_NAME_MAX) {
+                console_write("cp: name too long\n");
+                return;
+            }
+            memcpy(name, slash + 1, name_len);
+            name[name_len] = '\0';
+        } else {
+            size_t name_len = strlen(dst);
+            if (name_len > EXT4_NAME_MAX) {
+                console_write("cp: name too long\n");
+                return;
+            }
+            memcpy(name, dst, name_len);
+            name[name_len] = '\0';
+        }
+        parent_ino = resolve_path(ext4_get_current(), dir_path, &st);
+        if (!parent_ino || !EXT4_S_ISDIR(st.mode)) {
+            console_write("cp: parent directory not found\n");
+            return;
+        }
+        if (!cp_copy_dir(ext4_get_current(), src_ino, parent_ino, name)) {
+            console_write("cp: failed to copy directory\n");
+            return;
+        }
+        console_write("cp: copied directory ");
         console_write(src);
-        console_write("'\n");
+        console_write(" -> ");
+        console_write(dst);
+        console_putc('\n');
         return;
     }
     /* Read source */
-    char *buf = kmalloc(st.size + 1);
+    char *buf = kmalloc(src_size + 1);
     if (!buf) {
         console_write("cp: out of memory\n");
         return;
     }
-    uint64_t read = ext4_read(ext4_get_current(), src_ino, 0, buf, st.size);
-    if (read != st.size) {
-        console_write("cp: read error\n");
+    uint64_t read = ext4_read(ext4_get_current(), src_ino, 0, buf, src_size);
+    if (read != src_size) {
         kfree(buf);
         return;
     }
@@ -1222,7 +1398,7 @@ static void cmd_cp(int argc, char **argv) {
         kfree(buf);
         return;
     }
-    if (ext4_write(ext4_get_current(), dst_ino, 0, buf, st.size) != st.size) {
+    if (ext4_write(ext4_get_current(), dst_ino, 0, buf, src_size) != src_size) {
         console_write("cp: write error\n");
         kfree(buf);
         return;
@@ -1233,6 +1409,31 @@ static void cmd_cp(int argc, char **argv) {
     console_write(dst);
     console_putc('\n');
     kfree(buf);
+}
+
+/* Recursively remove a directory tree (for mv cleanup). */
+static bool rm_remove_dir(ext4_fs_t *fs, uint64_t dir_ino, uint64_t parent_ino,
+                          const char *name) {
+    ext4_stat_t st;
+    if (!ext4_stat(fs, dir_ino, &st)) return false;
+
+    dir_list_t list;
+    if (!dir_snapshot(fs, dir_ino, &list)) {
+        return false;
+    }
+
+    bool ok = true;
+    for (size_t i = 0; i < list.count; i++) {
+        dir_entry_t *e = &list.entries[i];
+        if (EXT4_S_ISDIR(e->mode)) {
+            if (!rm_remove_dir(fs, e->ino, dir_ino, e->name)) { ok = false; break; }
+        } else if (EXT4_S_ISREG(e->mode)) {
+            if (!ext4_unlink(fs, dir_ino, e->name, false)) { ok = false; break; }
+        }
+    }
+    dir_list_free(&list);
+    if (!ok) return false;
+    return ext4_unlink(fs, parent_ino, name, true);
 }
 
 static void cmd_mv(int argc, char **argv) {
@@ -1254,6 +1455,8 @@ static void cmd_mv(int argc, char **argv) {
         console_write("'\n");
         return;
     }
+    uint64_t src_size = st.size; /* preserve before st is clobbered */
+
     const char *slash = strrchr(dst, '/');
     char dir_path[256] = "/";
     char name[EXT4_NAME_MAX + 1];
@@ -1287,7 +1490,8 @@ static void cmd_mv(int argc, char **argv) {
         return;
     }
     /* Check if destination exists and is directory */
-    if (ext4_lookup(ext4_get_current(), dst_parent, name, &st) && EXT4_S_ISDIR(dst_st.mode)) {
+    ext4_stat_t lookup_st;
+    if (ext4_lookup(ext4_get_current(), dst_parent, name, &lookup_st) && EXT4_S_ISDIR(lookup_st.mode)) {
         /* Move into directory: use source basename */
         const char *src_slash = strrchr(src, '/');
         const char *src_name = src_slash ? src_slash + 1 : src;
@@ -1299,19 +1503,51 @@ static void cmd_mv(int argc, char **argv) {
         memcpy(name, src_name, name_len);
         name[name_len] = '\0';
     }
-    /* For now, implement as copy + unlink (not true rename) */
+
     if (EXT4_S_ISDIR(st.mode)) {
-        console_write("mv: directory move not fully supported\n");
+        /* Recursive directory move: copy + remove */
+        if (!cp_copy_dir(ext4_get_current(), src_ino, dst_parent, name)) {
+            console_write("mv: failed to copy directory\n");
+            return;
+        }
+        /* Remove source directory recursively */
+        const char *src_slash = strrchr(src, '/');
+        char src_dir[256] = "/";
+        char src_name[EXT4_NAME_MAX + 1];
+        uint64_t src_parent;
+        if (src_slash) {
+            size_t dir_len = src_slash - src;
+            if (dir_len > 0) {
+                memcpy(src_dir, src, dir_len);
+                src_dir[dir_len] = '\0';
+            }
+            size_t name_len = strlen(src_slash + 1);
+            memcpy(src_name, src_slash + 1, name_len);
+            src_name[name_len] = '\0';
+        } else {
+            size_t name_len = strlen(src);
+            memcpy(src_name, src, name_len);
+            src_name[name_len] = '\0';
+        }
+        src_parent = resolve_path(ext4_get_current(), src_dir, &st);
+        if (src_parent && EXT4_S_ISDIR(st.mode)) {
+            rm_remove_dir(ext4_get_current(), src_ino, src_parent, src_name);
+        }
+        console_write("mv: moved ");
+        console_write(src);
+        console_write(" -> ");
+        console_write(dst);
+        console_putc('\n');
         return;
     }
     /* Read source */
-    char *buf = kmalloc(st.size + 1);
+    char *buf = kmalloc(src_size + 1);
     if (!buf) {
         console_write("mv: out of memory\n");
         return;
     }
-    uint64_t read = ext4_read(ext4_get_current(), src_ino, 0, buf, st.size);
-    if (read != st.size) {
+    uint64_t read = ext4_read(ext4_get_current(), src_ino, 0, buf, src_size);
+    if (read != src_size) {
         console_write("mv: read error\n");
         kfree(buf);
         return;
@@ -1322,7 +1558,7 @@ static void cmd_mv(int argc, char **argv) {
         kfree(buf);
         return;
     }
-    if (ext4_write(ext4_get_current(), dst_ino, 0, buf, st.size) != st.size) {
+    if (ext4_write(ext4_get_current(), dst_ino, 0, buf, src_size) != src_size) {
         console_write("mv: write error\n");
         kfree(buf);
         return;
@@ -1641,8 +1877,8 @@ const command_t helix_commands[] = {
     {"rmdir",   "remove a directory",                   cmd_rmdir},
     {"touch",   "create or update a file",              cmd_touch},
     {"rm",      "remove files",                         cmd_rm},
-    {"cp",      "copy a file",                          cmd_cp},
-    {"mv",      "move or rename a file",                cmd_mv},
+    {"cp",      "copy a file (-r for directories)",     cmd_cp},
+    {"mv",      "move or rename a file/directory",      cmd_mv},
     {"df",      "show disk free space",                 cmd_df},
     {"uname",   "show OS name",                         cmd_uname},
     {"whoami",  "show current user",                    cmd_whoami},
