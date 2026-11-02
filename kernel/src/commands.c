@@ -1778,16 +1778,58 @@ static void cmd_free(int argc, char **argv) {
     kprintf("Swap: %10llu %10llu %10llu\n", 0ULL, 0ULL, 0ULL);
 }
 
+static void print_padded2(uint64_t value) {
+    if (value < 10) console_putc('0');
+    console_write_dec(value);
+}
+
 static void cmd_date(int argc, char **argv) {
     (void)argc; (void)argv;
-    /* No RTC yet - show a fixed date for now */
-    console_write("Thu Jan  1 00:00:00 UTC 2025\n");
+    int year, month, day, hour, minute, second, weekday;
+    time_now_utc(&year, &month, &day, &hour, &minute, &second, &weekday);
+    static const char *const wd[7] = {
+        "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"
+    };
+    static const char *const mn[12] = {
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    };
+    if (year == 0) {
+        console_write("date: no wall clock available\n");
+        return;
+    }
+    console_write(wd[(weekday >= 0 && weekday < 7) ? weekday : 0]);
+    console_putc(' ');
+    console_write(mn[(month >= 1 && month <= 12) ? month - 1 : 0]);
+    console_putc(' ');
+    if (day < 10) console_putc(' ');
+    console_write_dec(day);
+    console_putc(' ');
+    print_padded2(hour);
+    console_putc(':');
+    print_padded2(minute);
+    console_putc(':');
+    print_padded2(second);
+    console_putc(' ');
+    console_write("UTC ");
+    console_write_dec(year);
+    console_putc('\n');
 }
 
 static void cmd_time(int argc, char **argv) {
     (void)argc; (void)argv;
-    /* Show simple time - hours:minutes:seconds */
-    kprintf("00:00:00\n");
+    int year, month, day, hour, minute, second, weekday;
+    time_now_utc(&year, &month, &day, &hour, &minute, &second, &weekday);
+    if (year == 0) {
+        console_write("time: no wall clock available\n");
+        return;
+    }
+    print_padded2(hour);
+    console_putc(':');
+    print_padded2(minute);
+    console_putc(':');
+    print_padded2(second);
+    console_putc('\n');
 }
 
 static void cmd_ps(int argc, char **argv) {

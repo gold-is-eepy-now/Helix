@@ -81,8 +81,8 @@ bool ext4_unlink(ext4_fs_t *fs, uint64_t dir_ino, const char *name,
                  bool as_dir);
 bool ext4_truncate(ext4_fs_t *fs, uint64_t ino, uint64_t size);
 
-/* Seconds used for inode timestamps: seconds since boot.
- * ponytail: no wall clock yet; swap for a real epoch when RTC/NTP lands. */
+/* Seconds used for inode timestamps: wall-clock seconds since the Unix epoch.
+ * ponytail: no timezone support yet; timestamps are UTC. */
 void ext4_set_time_source(uint32_t (*seconds)(void));
 
 /* Return the currently mounted ext4 filesystem, if any. */

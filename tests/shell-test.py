@@ -126,6 +126,25 @@ class Serial:
             self.raw += data
         return needle in self.text()
 
+    def read_regex(self, pattern, timeout=40):
+        """Wait until `pattern` matches the transcript. Returns the match."""
+        rx = re.compile(pattern, re.MULTILINE)
+        deadline = time.time() + timeout
+        while True:
+            m = rx.search(self.text())
+            if m:
+                return m
+            if time.time() >= deadline:
+                return None
+            self.sock.settimeout(0.3)
+            try:
+                data = self.sock.recv(65536)
+            except socket.timeout:
+                continue
+            if not data:
+                return None
+            self.raw += data
+
     def send(self, text):
         self.sock.sendall(text.encode())
 
@@ -270,6 +289,18 @@ def main():
 
         ser.send("uptime\n")
         check("uptime reports seconds", "seconds")
+
+        ser.send("date\n")
+        m = ser.read_regex(r"\b(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+"
+                           r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+"
+                           r"\d{1,2} \d{2}:\d{2}:\d{2} UTC \d{4}")
+        check_true("date output is a full calendar timestamp", m is not None)
+        check_true("date is not the old fixed 2025 constant",
+                   "Thu Jan  1 00:00:00 UTC 2025" not in ser.text())
+
+        ser.send("time\n")
+        m = ser.read_regex(r"^\d{2}:\d{2}:\d{2}$")
+        check_true("time output is HH:MM:SS", m is not None)
 
         ser.send("sysinfo\n")
         check("sysinfo header", "founder@helix")

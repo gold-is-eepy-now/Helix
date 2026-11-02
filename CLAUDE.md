@@ -68,7 +68,9 @@ make BUILD_DIR=/tmp/hb test   # build + boot headlessly and verify the banner
 - **Implemented:** UEFI boot via Limine, x86_64 long-mode kernel entry, serial
   console (with ANSI colour and input), framebuffer text console (with cursor
   and colour), PS/2 keyboard input, the `helixsh` interactive shell, a command
-  table of kernel-resident programs, TSC-calibrated uptime, Limine-backed
+  table of kernel-resident programs, TSC-calibrated uptime, a wall clock
+  (Limine boot timestamp with a CMOS RTC fallback) for the `date` and `time`
+  commands, Limine-backed
   memory map, CPU identification via CPUID, a bitmap physical frame allocator,
   a kernel heap (`kmalloc`/`kfree`), `panic()`/`kprintf()`, a freestanding
   string library, **our own four-level page tables (`vmm_map`/`vmm_unmap`/

@@ -175,6 +175,8 @@ shows it; typing `myprog arg1 arg2` runs it.
 | `captest` | self-test for capability derivation, rights checks and revocation, including denial cases |
 | `ticks` / `uptime` | PIT timer progress and time since boot |
 | `uptime` | seconds and milliseconds since boot |
+| `date` | current calendar date and time in UTC (`Mon Nov  2 21:34:26 UTC 2026`) |
+| `time` | current wall-clock time in UTC (`21:34:26`) |
 | `version` | name, version, codename |
 | `echo` | prints its arguments |
 | `calc` | `calc <a> <op> <b>` for `+ - * / %` (integers only) |
@@ -224,6 +226,24 @@ TSC ticks per ms = delta / 50
 
 If calibration ever fails (no PIT response), uptime returns `unavailable`.
 
+### Wall clock (Limine boot timestamp + CMOS RTC)
+
+The TSC only counts from boot, so it cannot say what day it is. The calendar
+comes from two sources:
+
+1. **Limine `date_at_boot` request** — the bootloader hands the kernel a Unix
+   timestamp (seconds since 1970-01-01 UTC). The kernel stores it as the boot
+   epoch and adds elapsed uptime to get "now".
+2. **CMOS RTC** (`kernel/src/time.c`, ports `0x70`/`0x71`) — the fallback when
+   the bootloader has no timestamp. The MC146818 registers are read in BCD or
+   binary mode, 12- or 24-hour, with the century register used when the
+   chipset provides it. Nonsense readings are rejected instead of being
+   printed.
+
+Both paths end in `time_epoch()` (seconds since the Unix epoch) and
+`time_now_utc()` (calendar fields). `date` and `time` print those fields, and
+the ext4 inode timestamps use the same source instead of "seconds since boot".
+
 ### Memory map (Limine)
 
 `kernel/src/memory.c` walks the `limine_memmap_request` response and reports
@@ -246,6 +266,7 @@ brand string.
 | CPUID | `cpu.c` | Asking the CPU about itself; each "leaf" is a category of answers. |
 | RDTSC | `time.c` | The CPU's high-resolution cycle counter. |
 | The PIT (8253/8254) | `time.c` | A simple fixed-frequency counter the OS uses to get a wall-clock reference. |
+| CMOS RTC (MC146818) | `time.c` | The PC's battery-backed clock; read through ports `0x70`/`0x71`. |
 | ANSI SGR escapes | `console.c` | The byte sequences terminals interpret as colour. |
 | `pause` | `shell.c` | An x86 hint instruction that lowers power in a polling spin loop. |
 | Forward type idempotence | `memory.h` | Forward declarations plus a pointer-only API to avoid dragging `<limine.h>` into every caller. |

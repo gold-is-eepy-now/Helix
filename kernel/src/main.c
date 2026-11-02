@@ -42,9 +42,9 @@
 #include "usb_hid.h"
 #include "ext4.h"
 
-/* M11: ext4 root time source (seconds since boot). */
-static uint32_t uptime_secs(void) {
-    return time_available() ? (uint32_t)(time_uptime_ms() / 1000u) : 0u;
+/* M11: ext4 root time source (wall-clock seconds since the Unix epoch). */
+static uint32_t wallclock_secs(void) {
+    return (uint32_t)time_epoch();
 }
 
 /* -------------------------------------------------------------------------
@@ -77,6 +77,13 @@ static volatile struct limine_memmap_request memmap_request = {
 __attribute__((used, section(".limine_requests")))
 static volatile struct limine_firmware_type_request firmware_type_request = {
     .id = LIMINE_FIRMWARE_TYPE_REQUEST_ID,
+    .revision = 0,
+};
+
+/* Ask for the wall-clock timestamp at boot. */
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_date_at_boot_request date_at_boot_request = {
+    .id = LIMINE_DATE_AT_BOOT_REQUEST_ID,
     .revision = 0,
 };
 
@@ -156,6 +163,8 @@ static void kernel_main_continue(void) {
     kprintf("[helix] timer:   PIT %u Hz, interrupts on\n", pit_hz());
     console_write("[helix] clock:   ");
     console_write(time_available() ? "TSC calibrated\n" : "unavailable\n");
+    console_write("[helix] date:    ");
+    console_write(time_epoch() ? "wall clock\n" : "unavailable\n");
     bool doom_wad_found = false;
     if (module_request.response != NULL) {
         for (uint64_t i = 0; i < module_request.response->module_count; ++i) {
@@ -223,6 +232,14 @@ void kmain(void) {
         sysinfo_set_firmware(firmware_type_request.response->firmware_type);
     }
     time_init();
+    uint64_t boot_epoch = 0;
+    if (date_at_boot_request.response != NULL) {
+        boot_epoch = (uint64_t)date_at_boot_request.response->timestamp;
+    }
+    if (boot_epoch == 0) {
+        boot_epoch = time_rtc_epoch();
+    }
+    time_set_boot_epoch(boot_epoch);
 
     /* Physical memory, then the heap built on top of it. */
     uint64_t hhdm_offset = (hhdm_request.response != NULL)
@@ -239,7 +256,7 @@ void kmain(void) {
     block_device_init_all();
 
     /* M11: mount ext4 root from ramdisk block device as root filesystem. */
-    ext4_set_time_source(uptime_secs);
+    ext4_set_time_source(wallclock_secs);
     block_device_t *rbd = block_device_ramdisk();
     if (rbd == NULL) {
         console_write("[main] ramdisk device is NULL\n");

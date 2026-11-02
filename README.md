@@ -255,11 +255,12 @@ Type 'help' for a list of commands, 'sysinfo' for system info.
 helix> 
 ```
 
-`make test` boots the image, drives the shell over a serial socket, checks 34
+`make test` boots the image, drives the shell over a serial socket, checks 53
 behaviours (banner, prompt, `help`, `echo`, `calc`, `cpu`, `mem`, `pmm`,
-`heap`, `memtest`, `vmtest`, `ticks`, `uptime`, `sysinfo`, error handling,
-`color`, and a caught CPU exception), and audits the framebuffer screenshot for
-readability. It also saves that screenshot to `build/test/shell-screen.png`.
+`heap`, `memtest`, `vmtest`, `ticks`, `uptime`, `date`, `time`, `sysinfo`,
+error handling, `color`, and a caught CPU exception), and audits the
+framebuffer screenshot for readability. It also saves that screenshot to
+`build/test/shell-screen.png`.
 
 ---
 
