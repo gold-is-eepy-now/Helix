@@ -1660,10 +1660,14 @@ typedef struct {
 
 static bool readdir_cb(ext4_fs_t *fs, ext4_dent_t *d, void *vctx) {
     readdir_ctx_t *c = vctx;
+    /* Standard ls/find output never shows dot entries. */
+    if (d->name_len == 1 && d->name[0] == '.') return true;
+    if (d->name_len == 2 && d->name[0] == '.' && d->name[1] == '.') return true;
     ext4_stat_t st;
     if (!ext4_stat(fs, d->inode, &st)) return true;
     c->count++;
-    if (c->user_cb && !c->user_cb(c->user_ctx, &st, d->name, d->name_len)) {
+    /* ext4.h: user cb returns true to stop the scan early. */
+    if (c->user_cb && c->user_cb(c->user_ctx, &st, d->name, d->name_len)) {
         c->stop = true;
         return false;
     }
@@ -2054,8 +2058,9 @@ bool ext4_format(block_device_t *dev) {
         memset(buf, 0, block_size);
 
         if (g == 0) {
-            /* Mark superblock, GDT, bitmaps, and inode table as used */
-            for (uint32_t b = 0; b < (1 + gd_blocks + 2 + inode_table_blocks); b++) {
+            /* Mark superblock, GDT, bitmaps, inode table AND the root
+             * directory's data block as used (root_data_block included). */
+            for (uint32_t b = 0; b < (1 + gd_blocks + 2 + inode_table_blocks + 1); b++) {
                 bit_set((uint8_t *)buf, b, true);
             }
         } else {

@@ -748,9 +748,46 @@ static void cmd_fsinfo(int argc, char **argv) {
     }
 }
 
+static uint64_t resolve_path(ext4_fs_t *fs, const char *path, ext4_stat_t *out);
+
+static bool ls_ext4_cb(void *ctx, const ext4_stat_t *st,
+                       const char *name, uint32_t name_len) {
+    (void)ctx;
+    if (name_len > 255) name_len = 255;
+    char buf[256];
+    memcpy(buf, name, name_len);
+    buf[name_len] = '\0';
+    if (EXT4_S_ISDIR(st->mode)) {
+        console_set_fg(CONSOLE_BRIGHT_CYAN);
+        console_write("[DIR]  ");
+    } else {
+        console_write("[FILE] ");
+    }
+    console_write(buf);
+    console_putc('\n');
+    console_reset_color();
+    return false;
+}
+
 static void cmd_ls(int argc, char **argv) {
-    (void)argc;
     const char *path = argc > 1 ? argv[1] : "/";
+
+    /* ext4 root takes priority (normal boot path) */
+    ext4_fs_t *e4 = ext4_get_current();
+    if (e4) {
+        ext4_stat_t st;
+        uint64_t ino = resolve_path(e4, path, &st);
+        if (ino && EXT4_S_ISDIR(st.mode)) {
+            ext4_readdir(e4, ino, ls_ext4_cb, NULL);
+        } else {
+            console_write("ls: not a directory: ");
+            console_write(path);
+            console_putc('\n');
+        }
+        return;
+    }
+
+    /* Fallback: helixfs boot filesystem */
     file_entry_t *dir = fs_open(path);
     if (dir == NULL || !fs_file_is_dir(dir)) {
         console_write("ls: not a directory: ");
