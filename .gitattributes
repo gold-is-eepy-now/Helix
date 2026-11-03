@@ -1,0 +1,7 @@
+# Keep text files LF everywhere. The build runs shell scripts (sh/dash) and
+# GNU make under Linux/WSL; a CRLF checkout makes `set -eu` fail with
+# "Illegal option -" and corrupts Makefile recipes.
+* text=auto eol=lf
+
+# Serial capture logs: the \r bytes are part of the recorded output.
+*.log -text

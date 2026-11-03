@@ -13,6 +13,15 @@ CC        ?= gcc
 LD        ?= ld
 .DEFAULT_GOAL := all
 
+# GNU Make splits target names on whitespace, so a BUILD_DIR containing a
+# space silently breaks every pattern rule below. The top-level Makefile
+# passes a relative path (../build) for exactly this reason.
+empty :=
+space := $(empty) $(empty)
+ifneq (,$(findstring $(space),$(BUILD_DIR)))
+$(error BUILD_DIR must not contain spaces: $(BUILD_DIR))
+endif
+
 SRC_DIR := src
 INC_DIR := include
 KERNEL  := $(BUILD_DIR)/kernel
@@ -20,6 +29,9 @@ KERNEL  := $(BUILD_DIR)/kernel
 # Freestanding C for bare metal. The flags matter:
 #   -ffreestanding        no assumptions about a hosted C library
 #   -fno-stack-protector  no guard checks (there is no runtime to call)
+#   -U_FORTIFY_SOURCE     no __memcpy_chk/__memmove_chk (Ubuntu gcc enables
+#                         _FORTIFY_SOURCE=2 by default at -O2; those wrappers
+#                         live in libc, which a freestanding kernel has none of)
 #   -fno-pic/-fno-pie     kernel is linked at a fixed high address
 #   -mno-red-zone         the red zone is unsafe on interrupt stacks
 #   -mno-sse/-mno-mmx/-mno-80387 / -mgeneral-regs-only
@@ -29,7 +41,7 @@ CFLAGS := -std=gnu11 -O2 -g \
           -MMD -MP \
           -Wall -Wextra \
           -ffreestanding -fno-builtin -fno-stack-protector -fno-stack-check \
-          -fno-common -fno-PIC -fno-PIE \
+          -U_FORTIFY_SOURCE -fno-common -fno-PIC -fno-PIE \
           -fno-asynchronous-unwind-tables -fno-unwind-tables \
           -mno-red-zone -mno-mmx -mno-sse -mno-80387 -mgeneral-regs-only \
           -m64 -march=x86-64 -mcmodel=kernel \
@@ -88,4 +100,4 @@ $(BUILD_DIR)/obj/%.o: $(SRC_DIR)/%.S
 	$(CC) -c $< -o $@
 
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -rf "$(BUILD_DIR)/obj" "$(BUILD_DIR)/kernel"

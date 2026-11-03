@@ -1,6 +1,7 @@
 CC := gcc
 CFLAGS := -ffreestanding -nostdlib -fno-pic -fno-pie -fno-stack-protector \
           -fno-stack-check -fno-common -fno-builtin -std=gnu11 -O2 -g
+LDFLAGS := -no-pie
 TARGET := runtime
 
 # Optional drivers library (requires third-party/linux submodule)
@@ -34,7 +35,7 @@ LIBHELIX_OBJS := $(LIBHELIX_SRCS:.c=.o)
 all: $(TARGET) $(LIBHELIX_LIB)
 
 $(TARGET): linux_runtime_main.o linux_runtime.o linux_syscall.o bsd_syscall.o elf_loader.o
-	$(CC) $(CFLAGS) linux_runtime_main.o linux_runtime.o linux_syscall.o bsd_syscall.o elf_loader.o -o $(TARGET)
+	$(CC) $(CFLAGS) $(LDFLAGS) linux_runtime_main.o linux_runtime.o linux_syscall.o bsd_syscall.o elf_loader.o -o $(TARGET)
 
 linux_runtime_main.o: linux_runtime_main.c linux_runtime.h linux_syscall.h bsd_syscall.h
 	$(CC) $(CFLAGS) -c linux_runtime_main.c -o linux_runtime_main.o
@@ -116,7 +117,7 @@ test: runtime_test
 	@echo "[runtime] PASS: all checks"
 
 runtime_test: runtime_test.o linux_runtime.o linux_syscall.o bsd_syscall.o elf_loader.o
-	$(CC) $(CFLAGS) runtime_test.o linux_runtime.o linux_syscall.o bsd_syscall.o elf_loader.o -o runtime_test
+	$(CC) $(CFLAGS) $(LDFLAGS) runtime_test.o linux_runtime.o linux_syscall.o bsd_syscall.o elf_loader.o -o runtime_test
 
 runtime_test.o: runtime_test.c linux_runtime.h linux_syscall.h bsd_syscall.h
 	$(CC) $(CFLAGS) -c runtime_test.c -o runtime_test.o

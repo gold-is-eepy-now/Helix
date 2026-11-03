@@ -14,13 +14,17 @@ import re
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 
 BUILD_DIR = os.environ.get("BUILD_DIR", "build")
 IMAGE = sys.argv[1] if len(sys.argv) > 1 else os.path.join(BUILD_DIR, "helix.img")
 OUTDIR = os.path.join(BUILD_DIR, "test")
-SERIAL_SOCK = os.path.join(OUTDIR, "serial.sock")
-MONITOR_SOCK = os.path.join(OUTDIR, "monitor.sock")
+# Unix sockets cannot bind on every filesystem (Windows/DrvFs mounts reject
+# AF_UNIX bind), so the control sockets live in the system temp dir.
+SOCK_DIR = os.path.join(tempfile.gettempdir(), f"helix-shell-test-{os.getpid()}")
+SERIAL_SOCK = os.path.join(SOCK_DIR, "serial.sock")
+MONITOR_SOCK = os.path.join(SOCK_DIR, "monitor.sock")
 PPM = os.path.join(OUTDIR, "shell-screen.ppm")
 PNG = os.path.join(OUTDIR, "shell-screen.png")
 
@@ -32,6 +36,7 @@ def _find_ovmf():
         return code, vars_src
     candidates = [
         ("/usr/share/OVMF/OVMF_CODE.fd", "/usr/share/OVMF/OVMF_VARS.fd"),
+        ("/usr/share/OVMF/OVMF_CODE_4M.fd", "/usr/share/OVMF/OVMF_VARS_4M.fd"),
         ("/opt/homebrew/share/qemu/edk2-x86_64-code.fd",
          "/opt/homebrew/share/qemu/edk2-i386-vars.fd"),
         ("/usr/local/share/qemu/edk2-x86_64-code.fd",
@@ -98,6 +103,7 @@ def light_background_blocks(path):
     return count
 
 os.makedirs(OUTDIR, exist_ok=True)
+os.makedirs(SOCK_DIR, exist_ok=True)
 for path in (SERIAL_SOCK, MONITOR_SOCK):
     if os.path.exists(path):
         os.unlink(path)
@@ -339,6 +345,7 @@ def main():
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
+        shutil.rmtree(SOCK_DIR, ignore_errors=True)
 
     print("[shell-test] --- captured serial transcript (tail) ---")
     try:

@@ -21,6 +21,18 @@ BUILD_DIR ?= $(CURDIR)/build
 
 export BUILD_DIR
 
+# Path to BUILD_DIR as seen from the kernel/ subdirectory (make -C kernel).
+# Kept relative when BUILD_DIR lives under this tree: GNU Make splits target
+# names on whitespace, so an absolute path containing spaces (repo checked out
+# under ".../Skibide Ohio Rizleer/...") breaks every pattern rule in
+# kernel/Makefile. findstring/subst are used instead of filter/patsubst
+# because those split their arguments on spaces.
+ifeq ($(findstring $(CURDIR)/,$(BUILD_DIR)),$(CURDIR)/)
+KERNEL_BUILD_DIR := ../$(subst $(CURDIR)/,,$(BUILD_DIR))
+else
+KERNEL_BUILD_DIR := $(if $(filter /%,$(BUILD_DIR)),$(BUILD_DIR),../$(BUILD_DIR))
+endif
+
 LIMINE_VERSION := v12.9.3
 LIMINE_URL     := https://github.com/Limine-Bootloader/Limine/releases/download/$(LIMINE_VERSION)/limine-binary.tar.gz
 DEPS_DIR       := $(BUILD_DIR)/deps
@@ -42,15 +54,17 @@ install: kernel deps
 	@BUILD_DIR="$(BUILD_DIR)" sh tools/install.sh
 
 kernel:
-	@$(MAKE) -C kernel BUILD_DIR="$(BUILD_DIR)"
+	@$(MAKE) -C kernel BUILD_DIR="$(KERNEL_BUILD_DIR)"
 
-deps: $(LIMINE_DIR)/BOOTX64.EFI
-
-$(LIMINE_DIR)/BOOTX64.EFI:
-	@mkdir -p "$(DEPS_DIR)"
-	@echo "[deps] downloading Limine $(LIMINE_VERSION)"
-	@curl -fL --silent --show-error -o "$(DEPS_DIR)/limine-binary.tar.gz" "$(LIMINE_URL)"
-	@tar xzf "$(DEPS_DIR)/limine-binary.tar.gz" -C "$(DEPS_DIR)"
+# Not a file target: BUILD_DIR may contain spaces, and Make cannot use such a
+# path as a target name. Existence is checked in the shell instead.
+deps:
+	@if [ ! -f "$(LIMINE_DIR)/BOOTX64.EFI" ]; then \
+		mkdir -p "$(DEPS_DIR)"; \
+		echo "[deps] downloading Limine $(LIMINE_VERSION)"; \
+		curl -fL --silent --show-error -o "$(DEPS_DIR)/limine-binary.tar.gz" "$(LIMINE_URL)"; \
+		tar xzf "$(DEPS_DIR)/limine-binary.tar.gz" -C "$(DEPS_DIR)"; \
+	fi
 	@echo "[deps] Limine ready in $(LIMINE_DIR)"
 
 # Initialize the optional Linux kernel submodule (git submodule update --init).
@@ -137,6 +151,6 @@ test-with-linux-drivers: linux-submodule linux-drivers
 	@$(MAKE) -C runtime test
 
 clean:
-	@$(MAKE) -C kernel BUILD_DIR="$(BUILD_DIR)" clean
+	@$(MAKE) -C kernel BUILD_DIR="$(KERNEL_BUILD_DIR)" clean
 	@$(MAKE) -C runtime clean
 	@rm -rf "$(BUILD_DIR)"
