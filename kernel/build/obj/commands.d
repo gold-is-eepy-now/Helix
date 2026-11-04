@@ -3,7 +3,7 @@ build/obj/commands.o: src/commands.c src/commands.h include/limine.h \
  src/io.h src/kernel_stack.h src/kstring.h src/memory.h src/panic.h \
  src/pit.h src/pmm.h src/sysinfo.h src/time.h src/version.h src/vmm.h \
  src/filesystem.h src/display_surface.h src/input_device.h \
- src/net_interface.h src/ext4.h
+ src/net_interface.h src/ext4.h src/shell.h src/usb_host.h src/usermode.h
 src/commands.h:
 include/limine.h:
 src/capability.h:
@@ -27,3 +27,6 @@ src/display_surface.h:
 src/input_device.h:
 src/net_interface.h:
 src/ext4.h:
+src/shell.h:
+src/usb_host.h:
+src/usermode.h:
