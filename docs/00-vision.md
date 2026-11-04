@@ -29,7 +29,8 @@ reference to the object.
 
 ### Capabilities, not root
 
-Authority is explicit and grantable at a fine grain:
+Authority is explicit and grantable at a fine grain. (Target design: the capability
+mechanism exists; these named kinds are not yet defined in the code.)
 
 - `Display.Draw`
 - `Network.Connect`

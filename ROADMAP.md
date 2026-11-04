@@ -197,37 +197,39 @@ first arrival delivers, both resume correctly).
 but `init` is not running, the runtime is minimal, and user-space memory and
 process cleanup are not complete (see the known limitations in docs/02-shell.md).
 
-## M10 — Driver framework and isolated drivers ✅
+## M10 — Driver framework and isolated drivers 🚧
 
-- ✅ Native driver interface and driver registration.
-- ✅ User-space driver services.
-- ✅ A working driver for at least one real device (e.g. a storage device via
-  virtio), proving isolation.
-- ✅ Device objects and `Driver.Control` capabilities.
+- ✅ Native driver interface and driver registration (`driver_t`, `driver_register`).
+- ✅ Block-device objects, with the ramdisk as the only block driver.
+- ⛔ User-space driver services: not implemented.
+- ⛔ A real device driver: no virtio code exists. The `runtime/optional_drivers`
+  adapters are outlines, not working drivers.
+- ⛔ Device capabilities such as `Driver.Control`: not defined as capability kinds.
 
-**M10 exit gate:** passed. Driver framework, storage driver, and block-device
-objects implemented and boot-tested.
+**M10 exit gate:** not passed. The framework and the ramdisk are boot-tested.
+Isolation and a real device driver are still to do.
 
-## M11 — Storage and filesystems ✅
+## M11 — Storage and filesystems 🚧
 
 - ✅ Block-device objects.
-- ✅ A native Helix filesystem designed around objects, not inodes-as-fds.
+- 🚧 A native object filesystem: a small in-memory boot filesystem, not a full design.
 - ✅ ext4 read/write driver with extents, 64-bit group descriptors, filetype, flex_bg, extra_isize.
 - ✅ ext4 mount from ramdisk block device as root filesystem.
 - ✅ UNIX-like shell commands: cd, pwd, ls, cat, mkdir, rmdir, touch, rm, cp, mv, df, uname, whoami, chmod, chown, find.
-- ✅ Installer script populates /etc, /var, /home directories in ext4 image.
+- ⛔ FAT32: not implemented (no FAT code in the kernel).
+- 🚧 Installer script: `tools/install.sh` exists; its population of /etc, /var and /home was not re-verified in this audit.
 
-**M11 exit gate:** passed. Filesystem objects and block-device drivers work;
-FAT32 file support added; storage stack functional.
+**M11 exit gate:** partly passed. ext4 read/write and root mount work. FAT32 is
+not implemented.
 
-## M12 — Networking and graphics ✅
+## M12 — Networking and graphics 🚧
 
-- ✅ Network-interface objects, a native network stack.
-- ✅ Display-surface objects and a compositor.
+- 🚧 Network-interface objects (`net_interface.c`). There is no network stack yet: no ARP, IPv4, UDP or TCP.
+- 🚧 Display-surface objects (`display_surface.c`). There is no compositor yet.
 - ✅ Input-device objects.
 
-**M12 exit gate:** passed. Network, display, and input object frameworks
-implemented and integrated with the object manager.
+**M12 exit gate:** not passed. The object frameworks exist. The network stack and
+the compositor do not.
 
 ---
 

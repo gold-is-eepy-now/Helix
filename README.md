@@ -51,7 +51,7 @@ native object model. They are not the foundation.
 | Shell command history (Up/Down, `history`) | ✅ working in the kernel shell; a userland shell still to come |
 | Driver framework | ✅ complete (M10) |
 | Storage and filesystems | ✅ complete (M11) |
-| Networking, display, and input objects | ✅ complete (M12) |
+| Networking, display, and input objects | 🚧 objects exist (M12); no network stack or compositor yet |
 | Linux / BSD / POSIX compatibility | 🚧 in progress (runtime subsystem) |
 | USB HID support | 🚧 UHCI host, root ports, hubs and HID keyboard/mouse in QEMU; not yet verified on real iMac hardware (see docs/07-usb.md) |
 
@@ -152,9 +152,12 @@ Firmware paths differ on macOS; `tools/ovmf.sh` finds them automatically.
 
 ### Optional Linux driver support
 
-Helix can optionally include Linux kernel drivers for Ethernet, WiFi, Graphics,
-and Sound. These are built from the `third-party/linux` git submodule and are
-NOT built by default.
+**Status: planned, not working.** The goal is to build Linux kernel drivers for
+Ethernet, WiFi, Graphics and Sound into Helix. Today the `linux-drivers:*` targets
+build only adapter outlines in `runtime/optional_drivers/`; they do not run real
+hardware. The Linux source they are meant to use lives in the `third-party/linux`
+submodule, which is not present in this checkout. The compatibility-layer plan is in
+[docs/08-linux-compat.md](docs/08-linux-compat.md).
 
 ```sh
 # Initialize the Linux kernel submodule
@@ -182,16 +185,15 @@ make linux-drivers
 make userspace-apps
 ```
 
-### KVM/virtio subsystem
+### KVM/virtio subsystem (stub)
 
 ```sh
 make linux-drivers-kvm  # Build KVM driver skeleton
 make linux-drivers-virtio  # Build Virtio driver stub
 ```
 
-These targets compile optional KVM and Virtio drivers that allow Helix to
-run as a guest under QEMU/KVM. This is an optional subsystem - Helix boots
-and runs cleanly without it.
+These targets build skeletons only. No virtio device driver exists yet, so Helix
+does not use virtio hardware. Helix boots and runs without them.
 
 For more information, see `runtime/optional_drivers/kvm/`.
 ```
@@ -289,9 +291,11 @@ say so.
   objects.
 - **Handles, not file descriptors.** Applications receive opaque handles to
   objects, not Unix fds.
-- **Capabilities, not root.** Authority is explicit: `Display.Draw`,
-  `Network.Connect`, `Storage.Read`, `Storage.Write`, `Driver.Control`.
-  Least privilege is the default.
+- **Capabilities, not root.** Authority is explicit. The capability mechanism
+  (derivation, rights, revocation) is implemented. The named kinds planned for
+  it, such as `Display.Draw`, `Network.Connect`, `Storage.Read`, `Storage.Write`
+  and `Driver.Control`, are not yet defined in the code. Least privilege is the
+  default.
 - **Message passing.** Objects communicate by sending messages through
   channels.
 - **Isolated drivers.** Drivers are user-space services wherever practical.

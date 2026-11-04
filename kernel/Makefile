@@ -89,9 +89,15 @@ USER_LDFLAGS := -nostdlib -static -no-pie \
                 -Wl,-Ttext-segment=0x400000 -Wl,-z,max-page-size=0x1000 \
                 -Wl,-z,separate-code -Wl,-z,noexecstack -Wl,--build-id=none
 
+# The Linux compatibility layer (docs/08-linux-compat.md): glue and drivers that
+# are compiled with the kernel and use the compat headers in compat/include.
+COMPAT_DIR     := ../compat
+COMPAT_SOURCES := $(wildcard $(COMPAT_DIR)/src/*.c)
+COMPAT_OBJECTS := $(patsubst $(COMPAT_DIR)/src/%.c,$(BUILD_DIR)/obj/compat_%.o,$(COMPAT_SOURCES))
+
 OBJECTS := $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/obj/%.o,$(C_SOURCES)) \
            $(patsubst $(SRC_DIR)/%.S,$(BUILD_DIR)/obj/%.o,$(S_SOURCES)) \
-           $(USER_BLOB_O)
+           $(USER_BLOB_O) $(COMPAT_OBJECTS)
 DEPFILES := $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/obj/%.d,$(C_SOURCES))
 
 -include $(DEPFILES)
@@ -113,6 +119,10 @@ $(KERNEL): $(OBJECTS) linker.ld
 $(BUILD_DIR)/obj/%.o: $(SRC_DIR)/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/obj/compat_%.o: $(COMPAT_DIR)/src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -I$(COMPAT_DIR)/include -I$(SRC_DIR) -c $< -o $@
 
 $(BUILD_DIR)/obj/%.o: $(SRC_DIR)/%.S
 	@mkdir -p $(dir $@)

@@ -201,6 +201,7 @@ def main():
         # --- boot banner ---
         check("boot banner: HELIX OS", "HELIX OS")
         check("boot banner: Boot successful.", "Boot successful.")
+        check("linux compat self-test passed at boot", "[compat] self-test passed")
         check("shell prompt", "helix> ")
 
         # --- commands ---

@@ -69,7 +69,8 @@ or used by another process except by explicit transfer.
 
 ## Capabilities
 
-Authority is explicit and least-privilege by default:
+Authority is explicit and least-privilege by default. (Target design: the capability
+mechanism exists; these named kinds are not yet defined in the code.)
 
 - `Display.Draw`
 - `Network.Connect`

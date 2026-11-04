@@ -14,6 +14,7 @@
 #include <limine.h>
 
 #include "console.h"
+#include "linux_compat.h"
 #include "doom_wad.h"
 #include "filesystem.h"
 #include "apic.h"
@@ -266,6 +267,9 @@ void kmain(void) {
     ramdisk_driver_init();
     driver_init_all();
     block_device_init_all();
+
+    /* LC-1: Linux compatibility layer self-test and any compat initcalls. */
+    compat_run_initcalls();
 
     /* M11: mount ext4 root from ramdisk block device as root filesystem. */
     ext4_set_time_source(wallclock_secs);

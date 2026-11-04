@@ -147,6 +147,7 @@ Also, in the same change:
   a console input syscall, and an ELF64 loader for static `ET_EXEC` images. The
   userland shell (`usershell`) runs in ring 3, machine-tested. `init` and a real
   runtime are not done.
+- **Implemented (LC-1, Linux compat):** `compat/include/linux/*` headers (types, slab, spinlock, atomic, mutex, module_init, printk) and a self-test driver run at boot. See docs/08-linux-compat.md.
 - **Not implemented:** `init`, a libc-style runtime, process cleanup, isolated driver
   services, networking, graphics, compatibility layers.
 
