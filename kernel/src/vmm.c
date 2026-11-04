@@ -20,6 +20,7 @@
 
 #include <stddef.h>
 
+#include "heap.h"
 #include "io.h"
 #include "kstring.h"
 #include "pmm.h"
@@ -56,7 +57,7 @@ static uint64_t *next_table(uint64_t *entry, bool create) {
         return NULL;
     }
     memset(table_at(frame), 0, PAGE_SIZE);
-    *entry = frame | VMM_PRESENT | VMM_WRITE;
+    *entry = frame | VMM_PRESENT | VMM_WRITE | VMM_USER;
     return table_at(frame);
 }
 
@@ -91,7 +92,7 @@ static uint64_t *page_table(uint64_t *pd_entry, bool create) {
         return NULL;
     }
     memset(table_at(frame), 0, PAGE_SIZE);
-    *pd_entry = frame | VMM_PRESENT | VMM_WRITE;
+    *pd_entry = frame | VMM_PRESENT | VMM_WRITE | VMM_USER;
     return table_at(frame);
 }
 
@@ -173,21 +174,31 @@ static uint64_t *copy_kernel_pml4(void) {
     uint64_t *dst = table_at(frame);
     memcpy(dst, src, PAGE_SIZE);
 
-    /* Clear the user entries in the upper half (kernel AS space). */
-    /* The upper half is virt >= 0xFFFF800000000000 (i.e., PML4 index >= 0x100).
-     * For simplicity, we clear all entries for indices >= 0x100 in the PML4 itself. */
-    for (int i = 0x100; i < 0x200; i++) {
+    /* Keep the kernel half (PML4 indices 0x100..0x1FF, shared subtrees) and
+     * clear the user half, so the new address space starts with no user
+     * mappings. */
+    for (int i = 0; i < 0x100; i++) {
         dst[i] = 0;
     }
 
     return dst;
 }
 
+void *vmm_phys_to_virt(uint64_t phys) {
+    return (void *)(uintptr_t)(phys + g_hhdm);
+}
+
+vmm_as_t *vmm_current_as(void) {
+    static vmm_as_t current;
+    current.pml4 = g_pml4;
+    return &current;
+}
+
 vmm_as_t *vmm_create_as(void) {
     uint64_t *pml4 = copy_kernel_pml4();
     if (pml4 == NULL) return NULL;
 
-    vmm_as_t *as = (vmm_as_t *)pmm_alloc_frame();
+    vmm_as_t *as = kzalloc(sizeof(*as));
     if (as == NULL) {
         pmm_free_frame((uintptr_t)pml4 - g_hhdm);
         return NULL;

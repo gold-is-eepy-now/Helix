@@ -180,14 +180,18 @@ frame and hands the run queue to the next thread.
 including the kernel-thread rendezvous self-test (sender parks, receiver parks,
 first arrival delivers, both resume correctly).
 
-## M9 — User space ✅
+## M9 — User space 🚧
 
-- ✅ ELF loader for native Helix executables.
-- ✅ System-call entry (`syscall`/`sysret`), the native ABI.
-- ✅ A minimal native libc-style runtime.
-- ✅ `init` as the first user-space process.
+- ✅ System-call entry via `int $0x80` (DPL 3 gate), the native ABI.
+- ✅ Ring-3 entry and exit: a TSS for ring-3 traps, a per-process address space,
+  and a test program (`usermode`) that writes a line and exits with status 7.
+- 🚧 ELF loader that maps a binary's segments into a process (the in-kernel
+  loader stub does not load anything yet).
+- 🚧 A minimal native libc-style runtime.
+- ⛔ `init` as the first user-space process.
 
-**M9 exit gate:** passed. Native system calls work from kernel threads; ELF loading and user-space entry implemented; basic user-space runtime functional.
+**M9 exit gate:** not yet passed. Ring-3 processes run; loading real ELF binaries
+into them and the user-space runtime are still to do.
 
 ## M10 — Driver framework and isolated drivers ✅
 
@@ -220,6 +224,17 @@ FAT32 file support added; storage stack functional.
 
 **M12 exit gate:** passed. Network, display, and input object frameworks
 implemented and integrated with the object manager.
+
+---
+
+## M13 — USB host and HID input 🚧
+
+- ✅ PCI bus scan for USB host controllers (UHCI, with EHCI companion routing).
+- ✅ Root ports, with hubs on root ports and devices behind hubs.
+- ✅ HID boot-protocol keyboard and mouse, decoded to the same events as PS/2.
+- ✅ `usb` shell command and a QEMU test that proves input from a hub-attached keyboard.
+- 🚧 Verification on real hardware (2010 iMac 11,2).
+- ⛔ Hot-plug, hub status-change interrupts, mouse consumer, USB storage.
 
 ---
 

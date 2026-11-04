@@ -35,7 +35,8 @@
 #include "input_device.h"
 #include "net_interface.h"
 #include "ext4.h"
-#include <string.h>
+#include "usb_host.h"
+#include "usermode.h"
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -685,6 +686,25 @@ static void cmd_calc(int argc, char **argv) {
     console_putc('\n');
 }
 
+static void cmd_usermode(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    int64_t status = usermode_run_test();
+    if (status < 0) {
+        console_write("usermode: could not set up a user process\n");
+        return;
+    }
+    console_write("usermode: ring 3 exited with status ");
+    console_write_dec((uint64_t)status);
+    console_putc('\n');
+}
+
+static void cmd_usb(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    usb_host_print_status();
+}
+
 static void cmd_version(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -693,7 +713,9 @@ static void cmd_version(int argc, char **argv) {
     console_write(HELIX_VERSION);
     console_write(" \"");
     console_write(HELIX_CODENAME);
-    console_write("\"\n");
+    console_write("\"  built ");
+    console_write(HELIX_BUILD_DATE);
+    console_write("\n");
     console_write("Native Object Kernel, x86_64\n");
 }
 
@@ -1908,6 +1930,8 @@ const command_t helix_commands[] = {
     {"clear",   "clear the screen",                     cmd_clear},
     {"color",   "turn ANSI colour on/off: color on|off", cmd_color},
     {"version", "show the OS version",                  cmd_version},
+    {"usb",     "USB controllers, hubs and HID devices", cmd_usb},
+    {"usermode", "run a test program in ring 3", cmd_usermode},
     {"halt",    "halt the machine",                     cmd_halt},
     {"reboot",  "restart the machine",                  cmd_reboot},
     {"fsinfo",  "show filesystem information",          cmd_fsinfo},

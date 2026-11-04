@@ -49,6 +49,7 @@ enum {
     SYSCALL_EXIT,
     SYSCALL_BRK,
     SYSCALL_EXECVE,
+    SYSCALL_DEBUG_WRITE,   /* temporary: write a user buffer to the console */
 };
 
 /* System call handler signature. All syscalls use a uniform 7-argument

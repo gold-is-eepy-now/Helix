@@ -19,6 +19,9 @@
 
 BUILD_DIR ?= $(CURDIR)/build
 
+# Host compiler for the unit tests that run on the build machine (not the kernel).
+HOST_CC ?= cc
+
 export BUILD_DIR
 
 # Path to BUILD_DIR as seen from the kernel/ subdirectory (make -C kernel).
@@ -144,6 +147,8 @@ run-with-linux-drivers: img-with-linux-drivers
 
 test: image
 	@BUILD_DIR="$(BUILD_DIR)" python3 tests/shell-test.py "$(IMAGE)"
+	@BUILD_DIR="$(BUILD_DIR)" python3 tests/usb-test.py "$(IMAGE)"
+	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/usb-hid-unit" tests/usb-hid-unit.c kernel/src/usb_hid.c && "$(BUILD_DIR)/test/usb-hid-unit"
 	@$(MAKE) -C runtime test
 
 test-with-linux-drivers: linux-submodule linux-drivers

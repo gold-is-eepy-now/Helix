@@ -193,7 +193,7 @@ and prints it beside a small ASCII logo:
 ```
    ##      ##   founder@helix
    ##      ##   -------------
-   ##      ##   OS:       Helix OS 0.5.0-dev.20261018
+   ##      ##   OS:       Helix OS 0.5.1-dev.20261102
    ###########  Kernel:   x86_64, long mode
    ###########  Uptime:   <...>
    ##      ##   Shell:    helixsh

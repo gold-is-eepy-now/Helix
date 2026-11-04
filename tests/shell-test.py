@@ -214,6 +214,10 @@ def main():
         ser.send("calc 6 * 7\n")
         check("calc 6 * 7 = 42", "= 42")
 
+        ser.send("usermode\n")
+        check("ring 3 program writes through the syscall gate", "hello from ring 3")
+        check("ring 3 program exits with its status", "exited with status 7")
+
         ser.send("cpu\n")
         check("cpu reports vendor", "Vendor:")
 

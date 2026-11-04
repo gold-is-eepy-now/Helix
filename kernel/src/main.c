@@ -40,6 +40,8 @@
 #include "version.h"
 #include "vmm.h"
 #include "usb_hid.h"
+#include "syscall.h"
+#include "usb_host.h"
 #include "ext4.h"
 
 /* M11: ext4 root time source (wall-clock seconds since the Unix epoch). */
@@ -137,7 +139,9 @@ static void kernel_main_continue(void) {
     console_write(HELIX_VERSION);
     console_write(" \"");
     console_write(HELIX_CODENAME);
-    console_write("\"\n\n");
+    console_write("\"  built ");
+    console_write(HELIX_BUILD_DATE);
+    console_write("\n\n");
 
     console_set_fg(CONSOLE_GRAY);
     console_write("[helix] console: serial");
@@ -199,6 +203,15 @@ static void kernel_main_continue(void) {
     console_reset_color();
     console_putc('\n');
 
+    /* The syscall table is filled here; int $0x80 (user code and tests) uses it. */
+    syscall_init();
+
+    /* USB needs our page tables (vmm_init ran in kmain) to map the EHCI registers,
+     * so it starts here, before the shell takes the keyboard. See docs/07-usb.md. */
+    if (!usb_host_init(hhdm_request.response->offset)) {
+        console_write("no UHCI controller found or started\n");
+    }
+
     console_write("Type 'help' for a list of commands, 'sysinfo' for system info.\n\n");
 
     /* M8: boot the scheduler. The boot thread runs the kernel; thread_init
@@ -251,7 +264,6 @@ void kmain(void) {
 
     /* M10: initialize driver framework and drivers. */
     ramdisk_driver_init();
-    usb_hid_init();
     driver_init_all();
     block_device_init_all();
 

@@ -15,6 +15,8 @@
 #include <stddef.h>
 
 #include "io.h"
+#include "usb_host.h"
+#include "usb_hid.h"
 
 #define KBD_STATUS 0x64u
 #define KBD_DATA   0x60u
@@ -90,6 +92,10 @@ static int extended_key(uint8_t code) {
 
 bool keyboard_read_event(keyboard_event_t *event) {
     if (event == NULL) return false;
+    /* USB keyboards first: poll the host controller, then take decoded events.
+     * Machines without USB simply return false here and fall through to PS/2. */
+    usb_host_poll();
+    if (usb_hid_get_keyboard_event(event)) return true;
     uint8_t status = inb(KBD_STATUS);
     if ((status & 0x01) == 0) {
         return false;

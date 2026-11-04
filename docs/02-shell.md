@@ -178,6 +178,7 @@ shows it; typing `myprog arg1 arg2` runs it.
 | `date` | current calendar date and time in UTC (`Mon Nov  2 21:34:26 UTC 2026`) |
 | `time` | current wall-clock time in UTC (`21:34:26`) |
 | `version` | name, version, codename |
+| `usb` | USB controllers, hubs, and HID devices with their reports |
 | `echo` | prints its arguments |
 | `calc` | `calc <a> <op> <b>` for `+ - * / %` (integers only) |
 | `clear` | clear the screen |
@@ -193,7 +194,7 @@ and prints it beside a small ASCII logo:
 ```
    ##      ##   founder@helix
    ##      ##   -------------
-   ##      ##   OS:       Helix OS 0.5.0-dev.20261018
+   ##      ##   OS:       Helix OS 0.5.1-dev.20261102
    ###########  Kernel:   x86_64, long mode
    ###########  Uptime:   <...>
    ##      ##   Shell:    helixsh

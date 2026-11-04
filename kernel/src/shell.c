@@ -13,7 +13,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
+#include "kstring.h"
 
 #include "commands.h"
 #include "console.h"

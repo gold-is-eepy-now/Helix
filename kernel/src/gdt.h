@@ -33,7 +33,15 @@
  */
 void gdt_init(void);
 
-/* Not used when TSS is not installed. */
+/* Ring-3 selectors (RPL 3). Their index depends on the GDT the bootloader left,
+ * so they are read after gdt_init rather than fixed at compile time. */
+uint16_t gdt_user_code_selector(void);
+uint16_t gdt_user_data_selector(void);
+
+/* Kernel stack used when a ring-3 interrupt or int $0x80 enters the kernel. */
+void gdt_set_rsp0(uint64_t rsp0);
+
+/* Not used: the TSS is installed by gdt_init. */
 void gdt_load_tss(uint64_t tss_phys, uint64_t hhdm_offset);
 
 #endif /* HELIX_GDT_H */

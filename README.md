@@ -240,7 +240,7 @@ HELIX OS
 Native Object Kernel
 Boot successful.
 
-Helix OS 0.5.0-dev.20261018 "Paging"
+Helix OS 0.5.1-dev.20261102 "Recursive"
 
 [helix] console: serial + framebuffer
 [helix] memory:  462 MiB usable

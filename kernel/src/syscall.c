@@ -26,6 +26,7 @@
 #include "syscall.h"
 #include "thread.h"
 #include "channel.h"
+#include "usermode.h"
 #include "vmm.h"
 #include "ext4.h"
 
@@ -61,6 +62,7 @@ static uint64_t handle_read_input(uint64_t a1, uint64_t a2, uint64_t a3, uint64_
 static uint64_t handle_exit(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
 static uint64_t handle_brk(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
 static uint64_t handle_execve(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
+static uint64_t handle_debug_write(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
 
 void syscall_init(void) {
     for (size_t i = 0; i < 64u; i++) {
@@ -92,6 +94,7 @@ void syscall_init(void) {
     syscall_table[SYSCALL_EXIT]          = handle_exit;
     syscall_table[SYSCALL_BRK]           = handle_brk;
     syscall_table[SYSCALL_EXECVE]        = handle_execve;
+    syscall_table[SYSCALL_DEBUG_WRITE]   = handle_debug_write;
 }
 
 /* -- Handler implementations ------------------------------------------ */
@@ -278,8 +281,24 @@ static uint64_t handle_read_input(uint64_t a1, uint64_t a2, uint64_t a3, uint64_
     return 0;
 }
 
+/* Lowest address above the user half: user pointers must stay below it. */
+#define USER_VA_LIMIT 0x0000800000000000ULL
+
+static uint64_t handle_debug_write(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
+    (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
+    /* a1 = user buffer, a2 = length. Writes straight to the console; user
+     * processes will get a console handle once handles reach them. */
+    if (a2 > 256u || a1 >= USER_VA_LIMIT || a2 > USER_VA_LIMIT - a1) return UINT64_MAX;
+    const char *p = (const char *)(uintptr_t)a1;
+    for (uint64_t i = 0; i < a2; i++) console_putc(p[i]);
+    return a2;
+}
+
 static uint64_t handle_exit(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
+    if (usermode_is_active()) {
+        usermode_exit(a1);   /* unwinds to usermode_run_test; does not return */
+    }
     kprintf("[syscall] exit: status=%llu\n", a1);
     thread_exit_current();
     return 0;

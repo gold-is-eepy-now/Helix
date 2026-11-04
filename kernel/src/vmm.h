@@ -26,6 +26,12 @@ vmm_as_t *vmm_create_as(void);
 /* Switch to a different address space. */
 void vmm_switch_as(vmm_as_t *as);
 
+/* The address space that is active right now (a copy is safe to keep). */
+vmm_as_t *vmm_current_as(void);
+
+/* Kernel-visible pointer to a physical frame (through the direct map). */
+void *vmm_phys_to_virt(uint64_t phys);
+
 /* Map one 4 KiB page. Returns false if a page table could not be allocated. */
 bool vmm_map(uint64_t virt, uint64_t phys, uint64_t flags);
 
