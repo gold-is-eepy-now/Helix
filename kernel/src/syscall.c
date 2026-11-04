@@ -21,6 +21,7 @@
 
 #include "console.h"
 #include "heap.h"
+#include "input.h"
 #include "object.h"
 #include "panic.h"
 #include "syscall.h"
@@ -273,12 +274,16 @@ static uint64_t handle_write(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
     return nwritten;
 }
 
+/* read_input(fd): return the next console character, or (uint64_t)-1 if none.
+ * It never blocks: a ring-3 program polls it. Interrupts are off in ring 3, so
+ * the kernel reads serial and the keyboard directly here. Arrow keys come back
+ * as SHELL_KEY_UP / SHELL_KEY_DOWN. Only fd 0 (the console) is supported. */
 static uint64_t handle_read_input(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
-    (void)a1; (void)a2;
-    /* kbd input via PS/2 - read from the keyboard buffer */
-    (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
-    kprintf("[syscall] read_input: not yet implemented\n");
-    return 0;
+    (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
+    if (a1 != 0) {
+        return (uint64_t)-1;
+    }
+    return (uint64_t)(int64_t)input_getchar();
 }
 
 /* Lowest address above the user half: user pointers must stay below it. */

@@ -700,6 +700,25 @@ static void cmd_usermode(int argc, char **argv) {
     console_putc('\n');
 }
 
+/* Start the userland shell (a ring-3 ELF) in its own process. Type `exit` in it
+ * to return to the kernel shell. */
+static void cmd_usershell(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    int64_t status = usermode_run_user_shell();
+    if (status == -2) {
+        console_write("usershell: the embedded image is not a loadable ELF\n");
+        return;
+    }
+    if (status < 0) {
+        console_write("usershell: could not set up a user process\n");
+        return;
+    }
+    console_write("usershell: ring 3 exited with status ");
+    console_write_dec((uint64_t)status);
+    console_putc('\n');
+}
+
 static void cmd_history(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -1940,6 +1959,7 @@ const command_t helix_commands[] = {
     {"version", "show the OS version",                  cmd_version},
     {"usb",     "USB controllers, hubs and HID devices", cmd_usb},
     {"usermode", "run a test program in ring 3", cmd_usermode},
+    {"usershell", "run the userland shell in ring 3 (type exit to return)", cmd_usershell},
     {"halt",    "halt the machine",                     cmd_halt},
     {"reboot",  "restart the machine",                  cmd_reboot},
     {"fsinfo",  "show filesystem information",          cmd_fsinfo},

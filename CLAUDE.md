@@ -143,8 +143,12 @@ Also, in the same change:
 - **Implemented:** kernel threads with a round-robin scheduler and timer
   preemption via saved context switches — M7, machine-tested via the boot and
   shell suites.
-- **Not implemented:** IPC, user space, ELF loading, syscalls, isolated driver
-  services, filesystems, networking, graphics, compatibility layers.
+- **Implemented (M9, partial):** `int $0x80` syscalls, ring-3 entry and exit,
+  a console input syscall, and an ELF64 loader for static `ET_EXEC` images. The
+  userland shell (`usershell`) runs in ring 3, machine-tested. `init` and a real
+  runtime are not done.
+- **Not implemented:** `init`, a libc-style runtime, process cleanup, isolated driver
+  services, networking, graphics, compatibility layers.
 
 Do not write documentation or commit messages that imply unimplemented systems
 exist.

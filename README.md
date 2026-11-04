@@ -46,7 +46,8 @@ native object model. They are not the foundation.
 | Object manager and rights-bearing kernel handles | ✅ working, machine-tested (M5) |
 | Capability objects, rights reduction and revocation | ✅ working, machine-tested (M6) |
 | Scheduler, threads, IPC | ✅ threads/scheduler working, machine-tested (M7); ✅ IPC rendezvous channels working, machine-tested (M8) |
-| User space / ELF / syscalls | 🚧 ring-3 entry, exit and a syscall gate working, machine-tested (M9); ELF loading and a userland shell not yet |
+| User space / ELF / syscalls | 🚧 ring-3 entry, syscall gate, console input and an ELF64 loader working, machine-tested (M9); `init` not yet |
+| Userland shell (`usershell`) | 🚧 ring-3 program with its own line editor and history, machine-tested; runtime is minimal |
 | Shell command history (Up/Down, `history`) | ✅ working in the kernel shell; a userland shell still to come |
 | Driver framework | ✅ complete (M10) |
 | Storage and filesystems | ✅ complete (M11) |

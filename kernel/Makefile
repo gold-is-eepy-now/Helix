@@ -71,8 +71,27 @@ endif
 
 C_SOURCES := $(wildcard $(SRC_DIR)/*.c)
 S_SOURCES := $(wildcard $(SRC_DIR)/*.S)
+
+# The userland shell: a static ring-3 ELF built from userspace/, then embedded
+# in the kernel as a blob (user_shell_elf_start .. user_shell_elf_end). The
+# embedding is a generated .S file so the path is always the one make used.
+USER_DIR    := ../userspace
+USER_ELF    := $(BUILD_DIR)/user/shell.elf
+USER_BLOB_S := $(BUILD_DIR)/user/user_blob.S
+USER_BLOB_O := $(BUILD_DIR)/obj/user_blob.o
+USER_SRCS   := $(USER_DIR)/libhelix.c $(USER_DIR)/shell/shell.c
+USER_CFLAGS := -std=gnu11 -O2 -m64 -march=x86-64 -mcmodel=small \
+               -ffreestanding -fno-builtin -fno-stack-protector -U_FORTIFY_SOURCE \
+               -fno-pic -fno-pie -fno-common -fno-asynchronous-unwind-tables \
+               -fno-unwind-tables -mno-red-zone -mgeneral-regs-only -mno-sse -mno-mmx -mno-80387 \
+               -Wall -Wextra -I$(USER_DIR)
+USER_LDFLAGS := -nostdlib -static -no-pie \
+                -Wl,-Ttext-segment=0x400000 -Wl,-z,max-page-size=0x1000 \
+                -Wl,-z,separate-code -Wl,-z,noexecstack -Wl,--build-id=none
+
 OBJECTS := $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/obj/%.o,$(C_SOURCES)) \
-           $(patsubst $(SRC_DIR)/%.S,$(BUILD_DIR)/obj/%.o,$(S_SOURCES))
+           $(patsubst $(SRC_DIR)/%.S,$(BUILD_DIR)/obj/%.o,$(S_SOURCES)) \
+           $(USER_BLOB_O)
 DEPFILES := $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/obj/%.d,$(C_SOURCES))
 
 -include $(DEPFILES)
@@ -99,5 +118,26 @@ $(BUILD_DIR)/obj/%.o: $(SRC_DIR)/%.S
 	@mkdir -p $(dir $@)
 	$(CC) -c $< -o $@
 
+$(USER_ELF): $(USER_SRCS) $(USER_DIR)/libhelix.h $(USER_DIR)/shell/shell.c
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $(USER_SRCS)
+	@echo "[user] built $@"
+
+$(USER_BLOB_S): $(USER_ELF)
+	@mkdir -p $(dir $@)
+	@printf '%s\n' \
+	  '.section .rodata' \
+	  '.balign 4096' \
+	  '.global user_shell_elf_start' \
+	  'user_shell_elf_start:' \
+	  '.incbin "$(abspath $(USER_ELF))"' \
+	  '.global user_shell_elf_end' \
+	  'user_shell_elf_end:' \
+	  '.section .note.GNU-stack,"",@progbits' > $@
+
+$(USER_BLOB_O): $(USER_BLOB_S)
+	@mkdir -p $(dir $@)
+	$(CC) -c $< -o $@
+
 clean:
-	rm -rf "$(BUILD_DIR)/obj" "$(BUILD_DIR)/kernel"
+	rm -rf "$(BUILD_DIR)/obj" "$(BUILD_DIR)/kernel" "$(BUILD_DIR)/user"

@@ -185,13 +185,17 @@ first arrival delivers, both resume correctly).
 - ✅ System-call entry via `int $0x80` (DPL 3 gate), the native ABI.
 - ✅ Ring-3 entry and exit: a TSS for ring-3 traps, a per-process address space,
   and a test program (`usermode`) that writes a line and exits with status 7.
-- 🚧 ELF loader that maps a binary's segments into a process (the in-kernel
-  loader stub does not load anything yet).
-- 🚧 A minimal native libc-style runtime.
+- ✅ Console input syscall (`SYS_READ_INPUT`, fd 0): a ring-3 program polls the
+  serial port and keyboard, with arrow keys decoded on both paths.
+- ✅ ELF64 loader for static `ET_EXEC` x86_64 images: each `PT_LOAD` segment is
+  mapped into a new address space with its own permissions (W, NX), bss zeroed.
+- 🚧 A minimal native runtime: `libhelix` plus the userland shell (`usershell`),
+  which has its own line editor and 16-entry history. It is not a libc.
 - ⛔ `init` as the first user-space process.
 
-**M9 exit gate:** not yet passed. Ring-3 processes run; loading real ELF binaries
-into them and the user-space runtime are still to do.
+**M9 exit gate:** not yet passed. Ring-3 processes run and the ELF loader works,
+but `init` is not running, the runtime is minimal, and user-space memory and
+process cleanup are not complete (see the known limitations in docs/02-shell.md).
 
 ## M10 — Driver framework and isolated drivers ✅
 

@@ -218,6 +218,14 @@ def main():
         check("ring 3 program writes through the syscall gate", "hello from ring 3")
         check("ring 3 program exits with its status", "exited with status 7")
 
+        # The userland shell (M9): an ELF loaded into its own process, typing via SYS_READ_INPUT.
+        ser.send("usershell\n")
+        check("userland shell starts in ring 3", "userland shell (ring 3)")
+        ser.send("echo ring3-ok\n")
+        check("userland shell echo command", "\nring3-ok\n")
+        ser.send("exit\n")
+        check("userland shell exits with status 0", "usershell: ring 3 exited with status 0")
+
         ser.send("cpu\n")
         check("cpu reports vendor", "Vendor:")
 

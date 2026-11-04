@@ -36,6 +36,30 @@ power → UEFI → Limine → kmain()
 
 ---
 
+## The userland shell (ring 3)
+
+`usershell` loads a separate program into a process of its own and runs it in
+ring 3. The program is built from `userspace/shell/shell.c` and `userspace/libhelix.c`,
+linked as a static ELF at `0x400000`, and embedded in the kernel as a blob
+(`kernel/Makefile` generates the `.incbin`). The kernel's ELF64 loader maps its
+`PT_LOAD` segments into a new address space, respecting the write and execute
+flags, and zeroes bss.
+
+The shell talks to the kernel only through two native syscalls:
+
+- `SYS_READ_INPUT` (22) with fd 0 returns one console character, or `-1` if none
+  is waiting. Ring 3 runs with interrupts off, so the program polls it.
+- `SYS_DEBUG_WRITE` (26) writes a user buffer to the console. This is temporary;
+  the real write path needs console handles.
+
+Built-ins: `echo`, `history`, `help`, `exit`. Up and Down recall the last 16
+lines. Typing `exit` returns to the kernel shell with status 0.
+
+> **Known limitations.** The loader does not yet free the frames of a process
+> when it exits, nor the page tables of its address space, so each run leaks
+> memory. There is no `init` yet, and `libhelix`'s `helix_write_fd` still calls
+> the ext4-backed `SYS_WRITE`, so the shell does not use it.
+
 ## The input layer — two devices, one stream
 
 `kernel/src/input.c` polls the two sources of characters and returns the first
@@ -207,6 +231,7 @@ shows it; typing `myprog arg1 arg2` runs it.
 | `echo` | prints its arguments |
 | `history` | lists the lines typed so far, numbered (Up/Down recall them) |
 | `usermode` | runs a built-in test program in ring 3; it writes a line through the syscall gate and exits with status 7 |
+| `usershell` | runs the userland shell in ring 3 (an ELF loaded into its own process); type `exit` to return |
 | `calc` | `calc <a> <op> <b>` for `+ - * / %` (integers only) |
 | `clear` | clear the screen |
 | `color` | turn ANSI colour on/off: `color on`, `color off` |
