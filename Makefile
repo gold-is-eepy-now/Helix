@@ -46,7 +46,7 @@ IMAGE          := $(BUILD_DIR)/helix.img
 LINUX_SUBMODULE_DIR ?= third-party/linux
 LINUX_SUBMODULE_INITIALIZED ?= $(shell test -d "$(LINUX_SUBMODULE_DIR)" && echo yes || echo no)
 
-.PHONY: all kernel deps linux-submodule linux-drivers linux-drivers-ethernet linux-drivers-wifi linux-drivers-graphics linux-drivers-sound linux-drivers-kvm linux-drivers-virtio image iso disks run run-with-linux-drivers test test-with-linux-drivers clean install userspace-apps img-with-linux-drivers
+.PHONY: all kernel deps linux-submodule linux-drivers linux-drivers-ethernet linux-drivers-wifi linux-drivers-graphics linux-drivers-sound linux-drivers-kvm linux-drivers-virtio image iso disks run run-with-linux-drivers test test-with-linux-drivers clean install userspace-apps img-with-linux-drivers mac-darwin-compat mac-test
 
 all: image
 
@@ -150,12 +150,21 @@ test: image
 	@BUILD_DIR="$(BUILD_DIR)" python3 tests/usb-test.py "$(IMAGE)"
 	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/usb-hid-unit" tests/usb-hid-unit.c kernel/src/usb_hid.c && "$(BUILD_DIR)/test/usb-hid-unit"
 	@$(MAKE) -C runtime test
+	@$(MAKE) -C mac-darwin-compat test
+
+mac-darwin-compat:
+	@$(MAKE) -C mac-darwin-compat all
+
+mac-test:
+	@$(MAKE) -C mac-darwin-compat test
 
 test-with-linux-drivers: linux-submodule linux-drivers
 	@BUILD_DIR="$(BUILD_DIR)" python3 tests/shell-test.py "$(IMAGE)"
 	@$(MAKE) -C runtime test
+	@$(MAKE) -C mac-darwin-compat test
 
 clean:
 	@$(MAKE) -C kernel BUILD_DIR="$(KERNEL_BUILD_DIR)" clean
 	@$(MAKE) -C runtime clean
+	@$(MAKE) -C mac-darwin-compat clean
 	@rm -rf "$(BUILD_DIR)"

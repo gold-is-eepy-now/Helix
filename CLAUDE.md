@@ -148,6 +148,7 @@ Also, in the same change:
   userland shell (`usershell`) runs in ring 3, machine-tested. `init` and a real
   runtime are not done.
 - **Implemented (LC-1, Linux compat):** `compat/include/linux/*` headers (types, slab, spinlock, atomic, mutex, module_init, printk) and a self-test driver run at boot. See docs/08-linux-compat.md.
+- **Implemented (Mac/Darwin compat):** `mac-darwin-compat/` subsystem with 64-bit Mach-O loader, Darwin BSD & Mach trap translation, Mac-like case-insensitive filesystem, extended attributes (xattr), property list (.plist) engine, .app bundle resolution, CLI tools (`sw_vers`, `defaults`, `plutil`, `uname`, `otool`, `open`), and AppKit/Cocoa GUI translation to Helix X11 server (`Calculator.app`, `TextEdit.app`), machine-tested (120 checks).
 - **Not implemented:** `init`, a libc-style runtime, process cleanup, isolated driver
   services, networking, graphics, compatibility layers.
 

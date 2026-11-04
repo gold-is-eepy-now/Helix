@@ -1,4 +1,3 @@
-/var/home/rocketbob/Code/Helix/build/obj/serial.o: src/serial.c \
- src/serial.h src/io.h
+../build/obj/serial.o: src/serial.c src/serial.h src/io.h
 src/serial.h:
 src/io.h:

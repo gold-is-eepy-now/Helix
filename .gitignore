@@ -8,3 +8,6 @@ userspace/libhelix.a
 userspace/build/
 userspace/apps/helix_test
 tests/__pycache__/
+mac-darwin-compat/darwin-exec
+mac-darwin-compat/mac_test
+mac-darwin-compat/**/*.o

@@ -254,6 +254,7 @@ object system. They are not allowed to distort the native design.
   handles, objects and channels.
 - **Linux runtime**: a Linux syscall translation layer.
 - **BSD runtime**: a BSD syscall translation layer.
+- **Mac/Darwin compatibility subsystem** (`mac-darwin-compat`): Mach-O 64-bit loader, Darwin BSD & Mach trap translator, Mac-like case-insensitive filesystem, extended attributes, plist engine, bundle runner, CLI tools (sw_vers, defaults, plutil, uname, otool, open), and Cocoa/AppKit-to-X11 GUI application bridge.
 
 ---
 

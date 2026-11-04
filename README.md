@@ -53,6 +53,7 @@ native object model. They are not the foundation.
 | Storage and filesystems | ✅ complete (M11) |
 | Networking, display, and input objects | 🚧 objects exist (M12); no network stack or compositor yet |
 | Linux / BSD / POSIX compatibility | 🚧 in progress (runtime subsystem) |
+| Mac / Darwin compatibility | ✅ working, machine-tested (Mach-O loader, Darwin syscalls, Mac-like FS, xattrs, plist/bundle, CLI/GUI via X11) |
 | USB HID support | 🚧 UHCI host, root ports, hubs and HID keyboard/mouse in QEMU; not yet verified on real iMac hardware (see docs/07-usb.md) |
 
 See [ROADMAP.md](ROADMAP.md) for the full plan, [docs/02-shell.md](docs/02-shell.md)
@@ -75,6 +76,7 @@ helix/
 │   ├── linker.ld  link layout: where code/data land in memory
 │   └── Makefile
 ├── drivers/       native driver services (M10)
+├── mac-darwin-compat/ Mac/Darwin compatibility subsystem (Mach-O, Darwin syscalls, Mac-like FS, X11 AppKit GUI)
 ├── runtime/       user-space runtimes, incl. future Linux/BSD layers (planned)
 │   ├── optional_drivers/   optional Linux driver adapters (Ethernet, WiFi, Graphics, Sound)
 │   │   ├── transport/      transport adapter headers
