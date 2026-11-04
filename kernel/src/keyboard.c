@@ -155,5 +155,7 @@ int keyboard_read(void) {
     if (event.key >= 0x20 && event.key <= 0x7e) return event.key;
     if (event.key == 0x7f) return 0x7f;
     if (event.key == '\t') return '\t';
+    if (event.key == KBD_KEY_UP) return SHELL_KEY_UP;
+    if (event.key == KBD_KEY_DOWN) return SHELL_KEY_DOWN;
     return -1;
 }

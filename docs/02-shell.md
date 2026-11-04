@@ -72,6 +72,31 @@ HEADLESS=0 make run
 - **Enter** (`\r` or `\n`) submits the line;
 - **Ctrl-C** cancels the current line and prints `^C`;
 - **Ctrl-L** redraws the screen (useful after garbled terminal output).
+- **Up / Down** recall earlier lines from the command history (see below).
+
+### Command history
+
+The shell remembers the last 16 non-empty lines it ran (`HISTORY_MAX` in
+`shell.c`), oldest first. Consecutive duplicates are stored once.
+
+- **Up** replaces the line being edited with the previous entry; **Down** moves
+  forward again and finally restores an empty line.
+- `history` lists the stored lines, numbered from 1.
+- The history lives in kernel memory only. It is lost at reboot and is not
+  saved to disk.
+
+Arrow keys arrive as `KBD_KEY_UP` / `KBD_KEY_DOWN` from the PS/2 driver and as
+`SHELL_KEY_UP` / `SHELL_KEY_DOWN` (0x101 / 0x102, outside the byte range) from
+`keyboard_read()`, so they never collide with a typed character.
+
+> **Known limitation.** Recalling a line redraws it with backspaces and new
+> text. On a serial terminal with no screen model, a longer line can leave the
+> tail of the old text visible until the next redraw. The command that runs is
+> correct; only the display can be untidy.
+
+> **Not yet.** The history is a feature of the kernel-resident shell. A
+> ring-3 userland shell with its own history is planned; it depends on the
+> kernel `read_input` syscall (SYS_READ_INPUT), which is not implemented yet.
 
 The serial terminal handles its own cursor; the framebuffer shows an
 underscore at the next character cell, erased and redrawn on every keystroke
@@ -180,6 +205,8 @@ shows it; typing `myprog arg1 arg2` runs it.
 | `version` | name, version, codename |
 | `usb` | USB controllers, hubs, and HID devices with their reports |
 | `echo` | prints its arguments |
+| `history` | lists the lines typed so far, numbered (Up/Down recall them) |
+| `usermode` | runs a built-in test program in ring 3; it writes a line through the syscall gate and exits with status 7 |
 | `calc` | `calc <a> <op> <b>` for `+ - * / %` (integers only) |
 | `clear` | clear the screen |
 | `color` | turn ANSI colour on/off: `color on`, `color off` |

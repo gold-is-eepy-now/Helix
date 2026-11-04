@@ -44,6 +44,65 @@ make BUILD_DIR=/tmp/hb test   # build + boot headlessly and verify the banner
   a real filesystem, and produced binaries cannot be executed from a mount.
 - QEMU in constrained sandboxes may need less RAM: `QEMU_MEM=512 make test`.
 
+### The required sequence after every change
+
+Every change, however small, must pass this exact sequence before it is
+reported as done. Run it from the repository root, with the cross compiler on
+`PATH`:
+
+```sh
+make clean && make test CC=x86_64-elf-gcc && make iso CC=x86_64-elf-gcc
+```
+
+- It must exit 0. Warnings are reported; a new warning in code you touched
+  should be fixed, not ignored.
+- `make test` runs the shell suite (`tests/shell-test.py`), the USB suite
+  (`tests/usb-test.py`) and the HID unit tests. All must pass. Do not report a
+  pass for a check you did not see pass.
+- A failing build or test is reported with the real output. Do not describe a
+  failure as "expected" or "unrelated" without showing why.
+
+### Virtualisation: KVM when available, TCG otherwise
+
+The tests boot Helix in QEMU (`qemu-system-x86_64`, machine `q35`, OVMF
+firmware from `OVMF_CODE` / `OVMF_VARS_SRC`). Use hardware acceleration when
+the host has it:
+
+- If `/dev/kvm` exists and is writable, QEMU uses KVM. Pass `-accel kvm` (or
+  let the harness detect it) for speed. Check with `ls -l /dev/kvm`.
+- If `/dev/kvm` is absent, as in most sandboxes and containers, QEMU falls
+  back to TCG software emulation. That is slower but correct. Do not treat the
+  missing KVM as a build failure, and do not skip the tests because of it.
+- Whichever accelerator runs, say which one in the report (for example,
+  "make test passed under TCG, no /dev/kvm"). Never claim a KVM result on a
+  TCG run.
+- Hardware-specific behaviour (USB on the 2010 iMac 11,2) is not proven by
+  either accelerator. QEMU results are evidence for the emulated controllers
+  only.
+
+### Housekeeping after every change
+
+Each change that alters the kernel or the build bumps the version identity in
+`kernel/src/version.h`. All four fields move together:
+
+| Field | Rule | Example |
+| --- | --- | --- |
+| `HELIX_VERSION` | `MAJOR.MINOR.PATCH-dev.YYYYMMDD`; bump PATCH for each change | `0.5.5-dev.20261104` |
+| `HELIX_CODENAME` | a new single word when a milestone or significant change lands; otherwise keep it | `Recall` |
+| `HELIX_BUILD_DATE` | the current date, `YYYY-MM-DD`, matching the `dev.` date | `2026-11-04` |
+| the development build string | the `dev.YYYYMMDD` part is the build string; it must match the build date | `dev.20261104` |
+
+Also, in the same change:
+
+- Update the docs the change affects: `README.md` status table,
+  `ROADMAP.md`, `docs/*.md` for the subsystem, and the "Current state" list in
+  this file. Do not list anything as implemented that was not built and booted.
+- Add a shell command to `docs/02-shell.md`'s command table if you added one.
+- Re-run the required sequence after the version bump, so the build the user
+  receives carries the new version.
+- Leave the working tree explained: list the files changed and the test results.
+  Commit or push only when asked.
+
 ## Coding rules
 
 - C11 freestanding. **No host libc in the kernel.**

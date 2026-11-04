@@ -20,6 +20,7 @@
 #include "ext4.h"
 #include "heap.h"
 #include "input.h"
+#include "keyboard.h"
 #include "version.h"
 
 #define LINE_MAX 128
@@ -148,12 +149,81 @@ static bool write_to_file(const char *path, const char *data, size_t len,
 /* Line editing                                                        */
 /* ------------------------------------------------------------------ */
 
+/* Command history: the last HISTORY_MAX non-empty lines, oldest first. */
+#define HISTORY_MAX 16u
+static char g_history[HISTORY_MAX][LINE_MAX];
+static size_t g_history_count;   /* entries stored (up to HISTORY_MAX) */
+static size_t g_history_pos;     /* navigation index while editing; == count when at the new line */
+
+static void history_add(const char *line) {
+    if (line[0] == '\0') return;
+    if (g_history_count > 0 && str_eq(g_history[(g_history_count - 1) % HISTORY_MAX], line)) return;
+    if (g_history_count < HISTORY_MAX) {
+        g_history_count++;
+    }
+    size_t slot = (g_history_count - 1) % HISTORY_MAX;
+    size_t i = 0;
+    while (line[i] != '\0' && i + 1 < LINE_MAX) {
+        g_history[slot][i] = line[i];
+        i++;
+    }
+    g_history[slot][i] = '\0';
+}
+
+/* Entry `index` (0 = oldest stored) as text. Only valid for index < g_history_count. */
+static const char *history_entry(size_t index) {
+    size_t oldest = (g_history_count < HISTORY_MAX) ? 0 : (g_history_count % HISTORY_MAX);
+    return g_history[(oldest + index) % HISTORY_MAX];
+}
+
+/* Replace the line being edited with `text`, redrawing it on the terminal. */
+static size_t line_replace(char *line, size_t max, size_t len, const char *text) {
+    while (len > 0) {
+        len--;
+        console_backspace();
+    }
+    size_t n = 0;
+    while (text[n] != '\0' && n + 1 < max) {
+        line[n] = text[n];
+        console_putc(text[n]);
+        n++;
+    }
+    line[n] = '\0';
+    return n;
+}
+
+void shell_history_print(void) {
+    for (size_t i = 0; i < g_history_count; i++) {
+        console_write_dec(i + 1u);
+        console_write("  ");
+        console_write(history_entry(i));
+        console_putc('\n');
+    }
+}
+
 static size_t read_line(char *line, size_t max) {
     size_t len = 0;
+    g_history_pos = g_history_count;
     for (;;) {
         int c = input_getchar();
         if (c < 0) {
             __asm__ volatile("pause");
+            continue;
+        }
+
+        if (c == SHELL_KEY_UP) {
+            if (g_history_pos > 0) {
+                g_history_pos--;
+                len = line_replace(line, max, len, history_entry(g_history_pos));
+            }
+            continue;
+        }
+        if (c == SHELL_KEY_DOWN) {
+            if (g_history_pos < g_history_count) {
+                g_history_pos++;
+                len = line_replace(line, max, len,
+                                   g_history_pos < g_history_count ? history_entry(g_history_pos) : "");
+            }
             continue;
         }
 
@@ -436,6 +506,7 @@ void shell_run(void) {
         if (len == (size_t)-1) {
             continue; /* cancelled */
         }
+        history_add(line);
         execute(line);
     }
 }

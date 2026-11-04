@@ -21,6 +21,10 @@ enum {
     KBD_KEY_DELETE,
 };
 
+/* Codes returned by keyboard_read for the arrow keys (outside the byte range). */
+#define SHELL_KEY_UP   0x101
+#define SHELL_KEY_DOWN 0x102
+
 typedef struct {
     int key;       /* printable ASCII or one of KBD_KEY_* */
     bool pressed;  /* false for a release */

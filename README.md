@@ -46,12 +46,13 @@ native object model. They are not the foundation.
 | Object manager and rights-bearing kernel handles | ✅ working, machine-tested (M5) |
 | Capability objects, rights reduction and revocation | ✅ working, machine-tested (M6) |
 | Scheduler, threads, IPC | ✅ threads/scheduler working, machine-tested (M7); ✅ IPC rendezvous channels working, machine-tested (M8) |
-| User space / ELF / syscalls | ✅ finished (M9) |
+| User space / ELF / syscalls | 🚧 ring-3 entry, exit and a syscall gate working, machine-tested (M9); ELF loading and a userland shell not yet |
+| Shell command history (Up/Down, `history`) | ✅ working in the kernel shell; a userland shell still to come |
 | Driver framework | ✅ complete (M10) |
 | Storage and filesystems | ✅ complete (M11) |
 | Networking, display, and input objects | ✅ complete (M12) |
 | Linux / BSD / POSIX compatibility | 🚧 in progress (runtime subsystem) |
-| USB HID support | 🚧 in progress (EHCI/XHCI drivers) |
+| USB HID support | 🚧 UHCI host, root ports, hubs and HID keyboard/mouse in QEMU; not yet verified on real iMac hardware (see docs/07-usb.md) |
 
 See [ROADMAP.md](ROADMAP.md) for the full plan, [docs/02-shell.md](docs/02-shell.md)
 for the shell, [docs/03-cpython-requirements.md](docs/03-cpython-requirements.md)

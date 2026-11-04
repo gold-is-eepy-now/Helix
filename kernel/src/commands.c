@@ -35,6 +35,7 @@
 #include "input_device.h"
 #include "net_interface.h"
 #include "ext4.h"
+#include "shell.h"
 #include "usb_host.h"
 #include "usermode.h"
 
@@ -697,6 +698,12 @@ static void cmd_usermode(int argc, char **argv) {
     console_write("usermode: ring 3 exited with status ");
     console_write_dec((uint64_t)status);
     console_putc('\n');
+}
+
+static void cmd_history(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    shell_history_print();
 }
 
 static void cmd_usb(int argc, char **argv) {
@@ -1926,6 +1933,7 @@ const command_t helix_commands[] = {
     {"fault",   "deliberately trigger a CPU exception",  cmd_fault},
     {"uptime",  "time since boot",                      cmd_uptime},
     {"echo",    "print the arguments back",             cmd_echo},
+    {"history", "list the commands typed so far",       cmd_history},
     {"calc",    "integer calculator: calc 2 + 3",       cmd_calc},
     {"clear",   "clear the screen",                     cmd_clear},
     {"color",   "turn ANSI colour on/off: color on|off", cmd_color},

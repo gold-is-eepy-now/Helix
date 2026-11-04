@@ -41,4 +41,7 @@ int shell_execute_parsed(parsed_cmd_t cmd);
 /* Check for built-in command; returns true if handled. */
 bool shell_is_builtin(const char *name);
 
+/* Print the command history, numbered from 1 (oldest first). */
+void shell_history_print(void);
+
 #endif /* HELIX_SHELL_H */
