@@ -77,9 +77,11 @@ S_SOURCES := $(wildcard $(SRC_DIR)/*.S)
 # embedding is a generated .S file so the path is always the one make used.
 USER_DIR    := ../userspace
 USER_ELF    := $(BUILD_DIR)/user/shell.elf
+USER_INIT_ELF := $(BUILD_DIR)/user/init.elf
 USER_BLOB_S := $(BUILD_DIR)/user/user_blob.S
 USER_BLOB_O := $(BUILD_DIR)/obj/user_blob.o
 USER_SRCS   := $(USER_DIR)/libhelix.c $(USER_DIR)/shell/shell.c
+USER_INIT_SRCS := $(USER_DIR)/libhelix.c $(USER_DIR)/init.c
 USER_CFLAGS := -std=gnu11 -O2 -m64 -march=x86-64 -mcmodel=small \
                -ffreestanding -fno-builtin -fno-stack-protector -U_FORTIFY_SOURCE \
                -fno-pic -fno-pie -fno-common -fno-asynchronous-unwind-tables \
@@ -133,7 +135,12 @@ $(USER_ELF): $(USER_SRCS) $(USER_DIR)/libhelix.h $(USER_DIR)/shell/shell.c
 	$(CC) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $(USER_SRCS)
 	@echo "[user] built $@"
 
-$(USER_BLOB_S): $(USER_ELF)
+$(USER_INIT_ELF): $(USER_INIT_SRCS) $(USER_DIR)/libhelix.h $(USER_DIR)/init.c
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $(USER_INIT_SRCS)
+	@echo "[user] built $@"
+
+$(USER_BLOB_S): $(USER_ELF) $(USER_INIT_ELF)
 	@mkdir -p $(dir $@)
 	@printf '%s\n' \
 	  '.section .rodata' \
@@ -143,6 +150,12 @@ $(USER_BLOB_S): $(USER_ELF)
 	  '.incbin "$(abspath $(USER_ELF))"' \
 	  '.global user_shell_elf_end' \
 	  'user_shell_elf_end:' \
+	  '.balign 4096' \
+	  '.global user_init_elf_start' \
+	  'user_init_elf_start:' \
+	  '.incbin "$(abspath $(USER_INIT_ELF))"' \
+	  '.global user_init_elf_end' \
+	  'user_init_elf_end:' \
 	  '.section .note.GNU-stack,"",@progbits' > $@
 
 $(USER_BLOB_O): $(USER_BLOB_S)

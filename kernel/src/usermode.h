@@ -18,6 +18,9 @@ int64_t usermode_run_elf(const uint8_t *img, size_t len);
 /* Run the userland shell embedded in the kernel (see userspace/shell). */
 int64_t usermode_run_user_shell(void);
 
+/* Run the system init process embedded in the kernel (PID 1). */
+int64_t usermode_run_init(void);
+
 /* True while a user program is running (its exit syscall unwinds to the launcher). */
 bool usermode_is_active(void);
 

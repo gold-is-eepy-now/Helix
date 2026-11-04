@@ -17,6 +17,8 @@
 #include "../include/bundle.h"
 #include "../include/darwin_env.h"
 #include "../include/mac_appkit_x11.h"
+#include "../include/launchd.h"
+#include "../include/darwin_runtime.h"
 
 /* External tool declarations */
 extern int mac_tool_sw_vers(int argc, char **argv);
@@ -25,6 +27,7 @@ extern int mac_tool_plutil(int argc, char **argv);
 extern int mac_tool_uname(int argc, char **argv);
 extern int mac_tool_otool(int argc, char **argv);
 extern int mac_tool_open(int argc, char **argv);
+extern int mac_tool_launchctl(int argc, char **argv);
 extern int mac_app_calculator_init(void);
 extern int mac_app_textedit_init(const char *file);
 
@@ -34,7 +37,7 @@ int main(int argc, char **argv) {
     if (argc < 2) {
         printf("Darwin/macOS Subsystem for Helix OS\n");
         printf("Usage: %s <tool | bundle | binary> [args...]\n", argv[0]);
-        printf("Built-in CLI tools: sw_vers, defaults, plutil, uname, otool, open\n");
+        printf("Built-in CLI tools: sw_vers, defaults, plutil, uname, otool, open, launchctl\n");
         printf("Built-in GUI apps:  calc, textedit (renders via X11)\n");
         return 0;
     }
@@ -53,6 +56,8 @@ int main(int argc, char **argv) {
         return mac_tool_otool(argc - 1, argv + 1);
     } else if (strcmp(cmd, "open") == 0) {
         return mac_tool_open(argc - 1, argv + 1);
+    } else if (strcmp(cmd, "launchctl") == 0) {
+        return mac_tool_launchctl(argc - 1, argv + 1);
     } else if (strcmp(cmd, "calc") == 0) {
         return mac_app_calculator_init();
     } else if (strcmp(cmd, "textedit") == 0) {
@@ -71,8 +76,15 @@ int main(int argc, char **argv) {
     if (mac_fs_read_file_data(cmd, buf, sizeof(buf), &len) >= 0 && len >= sizeof(mach_header_64_t)) {
         macho_binary_t bin;
         if (macho_parse(buf, len, &bin) == 0) {
-            printf("[macOS] Executing Mach-O binary %s (entry: 0x%lx)...\n", cmd, (unsigned long)bin.entrypoint);
-            return 0;
+            uint32_t pid = 0;
+            darwin_runtime_spawn(cmd, argc - 1, argv + 1, &pid);
+            darwin_runtime_step(pid);
+            int status = 0;
+            darwin_runtime_step(pid);
+            darwin_runtime_waitpid(pid, &status);
+            printf("[macOS] Executed Mach-O binary %s (PID %u, entry: 0x%lx, exit: %d)\n",
+                   cmd, pid, (unsigned long)bin.entrypoint, status);
+            return status;
         }
     }
 

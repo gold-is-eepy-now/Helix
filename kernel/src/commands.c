@@ -719,6 +719,24 @@ static void cmd_usershell(int argc, char **argv) {
     console_putc('\n');
 }
 
+/* Start the system init process in ring 3. */
+static void cmd_init(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    int64_t status = usermode_run_init();
+    if (status == -2) {
+        console_write("init: embedded init image is not a loadable ELF\n");
+        return;
+    }
+    if (status < 0) {
+        console_write("init: could not set up user init process\n");
+        return;
+    }
+    console_write("init: ring 3 exited with status ");
+    console_write_dec((uint64_t)status);
+    console_putc('\n');
+}
+
 static void cmd_history(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -1960,6 +1978,7 @@ const command_t helix_commands[] = {
     {"usb",     "USB controllers, hubs and HID devices", cmd_usb},
     {"usermode", "run a test program in ring 3", cmd_usermode},
     {"usershell", "run the userland shell in ring 3 (type exit to return)", cmd_usershell},
+    {"init",    "run the system init process in ring 3", cmd_init},
     {"halt",    "halt the machine",                     cmd_halt},
     {"reboot",  "restart the machine",                  cmd_reboot},
     {"fsinfo",  "show filesystem information",          cmd_fsinfo},

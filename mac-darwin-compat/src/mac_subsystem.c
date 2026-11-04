@@ -11,6 +11,8 @@
 #include "../include/plist.h"
 #include "../include/bundle.h"
 #include "../include/darwin_env.h"
+#include "../include/darwin_runtime.h"
+#include "../include/launchd.h"
 #include "../include/mac_appkit_x11.h"
 #include <string.h>
 
@@ -48,6 +50,8 @@ void mac_subsystem_init(void) {
     mac_fs_init();
     darwin_env_init();
     mach_port_subsystem_init();
+    darwin_runtime_init();
+    launchd_init();
     ns_application_init(":0.0");
 
     /* Populate Calculator.app */

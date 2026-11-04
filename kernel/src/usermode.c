@@ -252,6 +252,15 @@ int64_t usermode_run_user_shell(void) {
                             (size_t)(user_shell_elf_end - user_shell_elf_start));
 }
 
+/* The init process, built from userspace/init.c and linked into the kernel. */
+extern const uint8_t user_init_elf_start[];
+extern const uint8_t user_init_elf_end[];
+
+int64_t usermode_run_init(void) {
+    return usermode_run_elf(user_init_elf_start,
+                            (size_t)(user_init_elf_end - user_init_elf_start));
+}
+
 int64_t usermode_run_test(void) {
     g_kernel_as = *vmm_current_as();
 

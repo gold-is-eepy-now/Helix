@@ -27,6 +27,8 @@
 #include "../include/plist.h"
 #include "../include/bundle.h"
 #include "../include/darwin_env.h"
+#include "../include/darwin_runtime.h"
+#include "../include/launchd.h"
 #include "../include/mac_appkit_x11.h"
 
 /* External tool & app declarations */
@@ -37,6 +39,7 @@ extern int mac_tool_plutil(int argc, char **argv);
 extern int mac_tool_uname(int argc, char **argv);
 extern int mac_tool_otool(int argc, char **argv);
 extern int mac_tool_open(int argc, char **argv);
+extern int mac_tool_launchctl(int argc, char **argv);
 extern int mac_app_calculator_init(void);
 extern int mac_app_textedit_init(const char *file);
 
@@ -547,6 +550,105 @@ static void test_mac_gui_appkit_x11(void) {
     check(mac_app_textedit_init("test.txt") == 0, "mac_app_textedit_init succeeds");
 }
 
+/* 11. Test Darwin Runtime (real userspace execution & process management) */
+static void test_darwin_runtime(void) {
+    printf("[test] 11. Darwin userspace runtime & process lifecycle\n");
+
+    check(darwin_runtime_init() == 0, "darwin_runtime_init succeeds");
+    check(g_darwin_runtime.initialized, "runtime reports initialized");
+
+    /* Spawn synthetic process */
+    uint32_t pid = 0;
+    char *argv[] = { "test_proc", NULL };
+    check(darwin_runtime_spawn("/bin/echo", 1, argv, &pid) == 0, "darwin_runtime_spawn succeeds");
+    check(pid > 0, "valid PID assigned");
+
+    darwin_process_t *proc = darwin_runtime_get_proc(pid);
+    check(proc != NULL, "darwin_runtime_get_proc returns process");
+    check(proc->state == DARWIN_PROC_READY, "initial state is READY");
+    check(proc->task_port > 0, "task port allocated for process");
+
+    /* Step execution */
+    check(darwin_runtime_step(pid) == 0, "first step moves to RUNNING");
+    check(proc->state == DARWIN_PROC_RUNNING, "process is RUNNING");
+
+    check(darwin_runtime_step(pid) == 0, "second step moves to TERMINATED");
+    check(proc->state == DARWIN_PROC_TERMINATED, "process is TERMINATED");
+
+    int status = -1;
+    check(darwin_runtime_waitpid(pid, &status) == 0, "waitpid collects status");
+    check(status == 0, "exit status is 0");
+    check(proc->state == DARWIN_PROC_FREE, "process slot freed after waitpid");
+
+    /* Test signal killing */
+    uint32_t pid2 = 0;
+    check(darwin_runtime_spawn("/usr/bin/daemon", 1, argv, &pid2) == 0, "spawn second process");
+    check(darwin_runtime_kill(pid2, 9) == 0, "kill SIGKILL delivered");
+    check(darwin_runtime_waitpid(pid2, &status) == 0, "waitpid collects signal status");
+    check(status == 128 + 9, "exit status reflects SIGKILL");
+}
+
+/* 12. Test Darwin launchd (PID 1 Init & Service Manager) */
+static void test_launchd_init(void) {
+    printf("[test] 12. Darwin launchd (PID 1 Init) and launchctl\n");
+
+    check(launchd_init() == 0, "launchd_init succeeds");
+    check(g_launchd.is_running, "launchd is running");
+    check(g_launchd.launchd_port > 0, "launchd Mach port assigned");
+
+    /* Register job */
+    check(launchd_register_job("com.apple.syslogd", "/usr/sbin/syslogd", true, true) == 0,
+          "register syslogd service");
+    const launchd_job_t *job = launchd_find_job("com.apple.syslogd");
+    check(job != NULL, "found registered job");
+    check(job->state == JOB_STATE_RUNNING, "run_at_load started the job");
+    check(job->pid > 0, "job has running PID");
+
+    /* Stop job */
+    check(launchd_stop_job("com.apple.syslogd") == 0, "stop job succeeds");
+    check(job->state == JOB_STATE_STOPPED, "job is STOPPED");
+
+    /* Start job */
+    check(launchd_start_job("com.apple.syslogd") == 0, "start job succeeds");
+    check(job->state == JOB_STATE_RUNNING, "job is RUNNING again");
+
+    /* Unload job */
+    check(launchd_unload_job("com.apple.syslogd") == 0, "unload job succeeds");
+    check(launchd_find_job("com.apple.syslogd") == 0, "job unregistered");
+
+    /* Test launchd plist loading */
+    const char *daemon_plist =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        "<plist version=\"1.0\">\n"
+        "<dict>\n"
+        "    <key>Label</key>\n"
+        "    <string>com.helix.networkd</string>\n"
+        "    <key>Program</key>\n"
+        "    <string>/usr/libexec/networkd</string>\n"
+        "    <key>RunAtLoad</key>\n"
+        "    <true/>\n"
+        "    <key>KeepAlive</key>\n"
+        "    <true/>\n"
+        "</dict>\n"
+        "</plist>\n";
+    mac_fs_write_file_data("/System/Library/LaunchDaemons/com.helix.networkd.plist",
+                          daemon_plist, strlen(daemon_plist));
+
+    check(launchd_load_plist("/System/Library/LaunchDaemons/com.helix.networkd.plist") == 0,
+          "launchd loads daemon plist");
+    const launchd_job_t *net_job = launchd_find_job("com.helix.networkd");
+    check(net_job != NULL, "networkd job created from plist");
+    check(net_job->run_at_load, "RunAtLoad parsed true");
+    check(net_job->keep_alive, "KeepAlive parsed true");
+
+    /* Test launchctl CLI */
+    char *lctl_list[] = { "launchctl", "list", NULL };
+    check(mac_tool_launchctl(2, lctl_list) == 0, "launchctl list executes");
+
+    char *lctl_stop[] = { "launchctl", "stop", "com.helix.networkd", NULL };
+    check(mac_tool_launchctl(3, lctl_stop) == 0, "launchctl stop executes");
+}
+
 int main(void) {
     printf("====================================================\n");
     printf("Helix OS — Mac/Darwin Compatibility Subsystem Tests\n");
@@ -562,6 +664,8 @@ int main(void) {
     test_app_bundle();
     test_mac_cli_tools();
     test_mac_gui_appkit_x11();
+    test_darwin_runtime();
+    test_launchd_init();
 
     printf("====================================================\n");
     if (g_failures == 0) {

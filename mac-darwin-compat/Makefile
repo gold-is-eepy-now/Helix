@@ -11,6 +11,8 @@ SRCS := src/mach_o.c \
         src/plist.c \
         src/bundle.c \
         src/darwin_env.c \
+        src/darwin_runtime.c \
+        src/launchd.c \
         src/mac_appkit_x11.c \
         src/mac_subsystem.c \
         src/cli/sw_vers.c \
