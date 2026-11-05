@@ -15,6 +15,7 @@
 
 #include "console.h"
 #include "linux_compat.h"
+#include "usermode.h"
 #include "doom_wad.h"
 #include "filesystem.h"
 #include "apic.h"
@@ -206,6 +207,17 @@ static void kernel_main_continue(void) {
 
     /* The syscall table is filled here; int $0x80 (user code and tests) uses it. */
     syscall_init();
+
+    /* M9: the system init process (PID 1) runs in ring 3 before the shell starts.
+     * It needs the GDT, TSS and IDT from kmain and the syscall table above. */
+    {
+        int64_t init_status = usermode_run_init();
+        if (init_status < 0) {
+            kprintf("[init] could not start init (status %d)\n", (int)init_status);
+        } else {
+            kprintf("[init] PID 1 exited with status %d\n", (int)init_status);
+        }
+    }
 
     /* USB needs our page tables (vmm_init ran in kmain) to map the EHCI registers,
      * so it starts here, before the shell takes the keyboard. See docs/07-usb.md. */

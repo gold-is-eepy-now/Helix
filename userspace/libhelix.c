@@ -169,7 +169,10 @@ long helix_channel_recv(handle_t channel, void *buf, size_t size)
 
 /* -- String / utility ------------------------------------------------------ */
 
-/* Write formatted output to fd via SYS_WRITE.
+/* Write formatted output to fd. Output to the console (fd 1 or 2) goes through
+ * SYS_DEBUG_WRITE, because the ext4-backed SYS_WRITE does not reach the console
+ * yet. Other fds use SYS_WRITE. The kernel accepts at most 256 bytes per call,
+ * so long output is sent in pieces.
  * Supports %s, %d, %u, %llu/%lu, %p only — no libc printf. */
 int helix_write_fd(int fd, const char *fmt, ...)
 {
@@ -239,10 +242,22 @@ int helix_write_fd(int fd, const char *fmt, ...)
     buf[len] = '\0';
     va_end(ap);
 
-    uint64_t result = helix_syscall(SYS_WRITE, (uint64_t)fd,
-                                    (uint64_t)(uintptr_t)buf,
-                                    (uint64_t)len, 0, 0, 0, 0);
-    return (int)result;
+    if (fd != 1 && fd != 2) {
+        uint64_t result = helix_syscall(SYS_WRITE, (uint64_t)fd,
+                                        (uint64_t)(uintptr_t)buf,
+                                        (uint64_t)len, 0, 0, 0, 0);
+        return (int)result;
+    }
+
+    int sent = 0;
+    while (sent < len) {
+        int chunk = len - sent;
+        if (chunk > 256) chunk = 256;
+        helix_syscall(SYS_DEBUG_WRITE, (uint64_t)(uintptr_t)(buf + sent),
+                      (uint64_t)chunk, 0, 0, 0, 0, 0);
+        sent += chunk;
+    }
+    return sent;
 }
 
 /* Read a line from fd (1=stdin). */

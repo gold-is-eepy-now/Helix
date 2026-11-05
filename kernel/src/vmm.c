@@ -208,6 +208,37 @@ vmm_as_t *vmm_create_as(void) {
     return as;
 }
 
+/* Free the page-table frames below one user PML4 entry. `level` is the level of
+ * the table at `phys` (3 = PDPT). Leaf data frames are not freed here: the
+ * owner of the address space frees those. User mappings are 4 KiB only, so no
+ * entry in the user half is a huge page. */
+static void free_table_tree(uint64_t phys, int level) {
+    if (level > 1) {
+        uint64_t *tab = table_at(phys);
+        for (int i = 0; i < 512; i++) {
+            if (tab[i] & VMM_PRESENT) {
+                free_table_tree(tab[i] & ADDR_MASK, level - 1);
+            }
+        }
+    }
+    pmm_free_frame((uintptr_t)phys);
+}
+
+void vmm_destroy_as(vmm_as_t *as) {
+    if (as == NULL || as->pml4 == NULL) return;
+    /* Never tear down the address space the CPU is running in. */
+    if (as->pml4 == g_pml4) return;
+
+    uint64_t *pml4 = as->pml4;
+    for (int i = 0; i < 0x100; i++) {
+        if (pml4[i] & VMM_PRESENT) {
+            free_table_tree(pml4[i] & ADDR_MASK, 3);
+        }
+    }
+    pmm_free_frame((uintptr_t)((uint64_t)(uintptr_t)pml4 - g_hhdm));
+    kfree(as);
+}
+
 void vmm_switch_as(vmm_as_t *as) {
     if (as == NULL) return;
 

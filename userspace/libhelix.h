@@ -72,6 +72,7 @@ static inline uint64_t helix_syscall(uint64_t native_num,
 #define SYS_OBJECT_RETAIN      19
 #define SYS_READ               20
 #define SYS_WRITE              21
+#define SYS_DEBUG_WRITE        26   /* temporary console write; see helix_write_fd */
 #define SYS_READ_INPUT         22
 #define SYS_EXIT               23
 #define SYS_BRK                24

@@ -55,10 +55,10 @@ The shell talks to the kernel only through two native syscalls:
 Built-ins: `echo`, `history`, `help`, `exit`. Up and Down recall the last 16
 lines. Typing `exit` returns to the kernel shell with status 0.
 
-> **Known limitations.** The loader does not yet free the frames of a process
-> when it exits, nor the page tables of its address space, so each run leaks
-> memory. There is no `init` yet, and `libhelix`'s `helix_write_fd` still calls
-> the ext4-backed `SYS_WRITE`, so the shell does not use it.
+> **Known limitations.** `init` runs at boot and exits; it does not start the
+> shell, and the kernel shell still runs in the kernel. Userland cannot yet open
+> or write files: `helix_write_fd` sends its output to the console only, and the
+> ext4-backed `SYS_WRITE` path for other descriptors is not used by any program.
 
 ## The input layer — two devices, one stream
 

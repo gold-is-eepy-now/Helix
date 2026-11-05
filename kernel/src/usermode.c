@@ -121,6 +121,15 @@ typedef struct {
     size_t count;
 } user_pages_t;
 
+/* Free every data and stack frame a process was given, then the list itself. */
+static void free_user_pages(user_pages_t *up) {
+    if (up == NULL) return;
+    for (size_t i = 0; i < up->count; i++) {
+        pmm_free_frame(up->pages[i].frame);
+    }
+    kfree(up);
+}
+
 static bool elf_validate(const uint8_t *img, size_t len, elf64_ehdr_t *eh) {
     if (len < sizeof(elf64_ehdr_t)) return false;
     memcpy(eh, img, sizeof(*eh));
@@ -229,17 +238,21 @@ int64_t usermode_run_elf(const uint8_t *img, size_t len) {
     }
     if (!ok) {
         vmm_switch_as(&g_kernel_as);
-        if (up != NULL) kfree(up);
+        free_user_pages(up);
+        vmm_destroy_as(as);
         return -1;
     }
-    kfree(up);
 
     g_active = true;
     int64_t status = (int64_t)usermode_run(entry, USER_STACK_TOP,
                                            g_save,
                                            gdt_user_code_selector(),
                                            gdt_user_data_selector());
+    /* The process has exited. Return to the kernel's address space, then give
+     * back everything the process owned. */
     vmm_switch_as(&g_kernel_as);
+    free_user_pages(up);
+    vmm_destroy_as(as);
     return status;
 }
 

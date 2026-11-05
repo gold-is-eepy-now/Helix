@@ -155,6 +155,27 @@ class Serial:
         self.sock.sendall(text.encode())
 
 
+def pmm_allocated(ser):
+    """Send `pmm` and return the allocated-frame count it prints now, or None."""
+    pattern = r"allocated : (\d+) frames"
+    before = len(re.findall(pattern, ser.text()))
+    ser.send("pmm\n")
+    deadline = time.time() + 8
+    while time.time() < deadline:
+        if len(re.findall(pattern, ser.text())) > before:
+            break
+        ser.sock.settimeout(0.3)
+        try:
+            data = ser.sock.recv(65536)
+        except socket.timeout:
+            continue
+        if not data:
+            break
+        ser.raw += data
+    found = re.findall(pattern, ser.text())
+    return int(found[-1]) if len(found) > before else None
+
+
 def main():
     if not os.path.exists(IMAGE):
         print(f"[shell-test] no image at {IMAGE}; run 'make image' first")
@@ -202,6 +223,7 @@ def main():
         check("boot banner: HELIX OS", "HELIX OS")
         check("boot banner: Boot successful.", "Boot successful.")
         check("linux compat self-test passed at boot", "[compat] self-test passed")
+        check("init (PID 1) runs at boot", "[init] PID 1 exited with status 0")
         check("shell prompt", "helix> ")
 
         # --- commands ---
@@ -226,6 +248,16 @@ def main():
         check("userland shell echo command", "\nring3-ok\n")
         ser.send("exit\n")
         check("userland shell exits with status 0", "usershell: ring 3 exited with status 0")
+
+        # Teardown (M9): a process's frames and page tables are freed when it exits,
+        # so repeated runs of the same ELF do not grow the allocated-frame count.
+        frames_before = pmm_allocated(ser)
+        for _ in range(3):
+            ser.send("init\n")
+            check("init (ring 3 ELF) runs and exits", "init: ring 3 exited with status 0")
+        frames_after = pmm_allocated(ser)
+        check_true("process frames are freed on exit (allocated count unchanged)",
+                   frames_before is not None and frames_after == frames_before)
 
         ser.send("cpu\n")
         check("cpu reports vendor", "Vendor:")

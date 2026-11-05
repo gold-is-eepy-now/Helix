@@ -23,6 +23,11 @@ void vmm_init(uint64_t hhdm_offset);
 /* Create a new address space (AS) by copying the current kernel AS. */
 vmm_as_t *vmm_create_as(void);
 
+/* Free an address space's user page tables and its PML4. Leaf data frames are
+ * not freed: the caller frees those first. The active address space cannot be
+ * destroyed; switch away from it first. */
+void vmm_destroy_as(vmm_as_t *as);
+
 /* Switch to a different address space. */
 void vmm_switch_as(vmm_as_t *as);
 

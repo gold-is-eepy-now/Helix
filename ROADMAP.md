@@ -189,13 +189,21 @@ first arrival delivers, both resume correctly).
   serial port and keyboard, with arrow keys decoded on both paths.
 - ✅ ELF64 loader for static `ET_EXEC` x86_64 images: each `PT_LOAD` segment is
   mapped into a new address space with its own permissions (W, NX), bss zeroed.
-- 🚧 A minimal native runtime: `libhelix` plus the userland shell (`usershell`),
-  which has its own line editor and 16-entry history. It is not a libc.
-- ⛔ `init` as the first user-space process.
+- ✅ `init` (PID 1) runs at boot in ring 3, from an embedded ELF
+  (`userspace/init.c`), and exits with status 0 before the shell starts.
+- ✅ Process teardown: on exit a process's frames and page tables are freed.
+  Repeated runs of the same ELF leave the allocated-frame count unchanged
+  (checked in `tests/shell-test.py`).
+- ✅ Console output from userland: `helix_write_fd` writes to the console
+  through the temporary debug-write syscall.
+- 🚧 A minimal native runtime: `libhelix` (formatting, syscalls, console output)
+  plus the userland shell (`usershell`) with its own line editor and 16-entry
+  history. It is not a libc, and userland cannot open or write files yet.
 
-**M9 exit gate:** not yet passed. Ring-3 processes run and the ELF loader works,
-but `init` is not running, the runtime is minimal, and user-space memory and
-process cleanup are not complete (see the known limitations in docs/02-shell.md).
+**M9 exit gate:** not yet passed. Ring-3 processes, the ELF loader, boot-time
+`init` and process teardown work. Still missing: a libc-style runtime, file I/O
+from userland, and `init` starting the shell (the kernel shell still runs in the
+kernel).
 
 ## M10 — Driver framework and isolated drivers 🚧
 
