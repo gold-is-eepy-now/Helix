@@ -18,8 +18,16 @@ int64_t usermode_run_elf(const uint8_t *img, size_t len);
 /* Run the userland shell embedded in the kernel (see userspace/shell). */
 int64_t usermode_run_user_shell(void);
 
-/* Run the system init process embedded in the kernel (PID 1). */
-int64_t usermode_run_init(void);
+/* Limits for argv passed to a new process (see usermode_spawn). */
+#define USERMODE_MAX_ARGS  16
+#define USERMODE_ARG_BYTES 2048
+
+/* Load the program at the absolute path `path` from the root and run it to exit,
+ * with argv[0..argc-1] (argv[0] is conventionally the path). Returns its exit
+ * status, -1 if it could not be found, loaded or set up, or -2 if the file is
+ * not a loadable executable. May be called from inside a system call (a child
+ * process): the caller resumes with the child's status. */
+int64_t usermode_spawn(const char *path, int argc, const char *const *argv);
 
 /* Program break of the running process (see usermode.c). brk(0) queries it.
  * Returns the new break, the old one if the request is refused, or 0 when no

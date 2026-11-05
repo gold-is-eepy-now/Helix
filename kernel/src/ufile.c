@@ -9,15 +9,8 @@
 #include <stddef.h>
 
 #include "ext4.h"
+#include "heap.h"
 #include "kstring.h"
-
-typedef struct {
-    bool used;
-    uint64_t ino;
-    uint64_t pos;
-    bool readable;
-    bool writable;
-} ufd_t;
 
 static ufd_t g_fds[UFILE_MAX_FDS];
 
@@ -164,4 +157,38 @@ int64_t ufile_close(int64_t fd) {
     if (!fd_valid(fd)) return -1;
     g_fds[fd].used = false;
     return 0;
+}
+
+void ufile_save(ufile_state_t *st) {
+    memcpy(st->fds, g_fds, sizeof(g_fds));
+}
+
+void ufile_restore(const ufile_state_t *st) {
+    memcpy(g_fds, st->fds, sizeof(g_fds));
+}
+
+/* Largest file the loader will read (executables here are far smaller). */
+#define UFILE_LOAD_MAX (1u << 20)
+
+bool ufile_load_file(const char *path, uint8_t **out, uint64_t *out_len) {
+    ext4_fs_t *fs = ext4_get_current();
+    ext4_stat_t st;
+    if (fs == NULL || path == NULL || out == NULL || out_len == NULL) return false;
+    if (!resolve(fs, path, &st, NULL, NULL, 0)) return false;
+    if (!EXT4_S_ISREG(st.mode) || st.size == 0 || st.size > UFILE_LOAD_MAX) return false;
+
+    uint8_t *buf = kmalloc((size_t)st.size);
+    if (buf == NULL) return false;
+    uint64_t got = 0;
+    while (got < st.size) {
+        uint64_t n = ext4_read(fs, st.ino, got, buf + got, st.size - got);
+        if (n == 0) {
+            kfree(buf);
+            return false;
+        }
+        got += n;
+    }
+    *out = buf;
+    *out_len = st.size;
+    return true;
 }

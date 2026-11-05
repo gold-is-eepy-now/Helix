@@ -223,7 +223,14 @@ def main():
         check("boot banner: HELIX OS", "HELIX OS")
         check("boot banner: Boot successful.", "Boot successful.")
         check("linux compat self-test passed at boot", "[compat] self-test passed")
-        check("init (PID 1) runs at boot", "[init] PID 1 exited with status 0")
+        # M9: the kernel installs /bin, starts /bin/init (PID 1) from it, and init
+        # starts /bin/sh, so the first prompt at boot is the userland shell.
+        check("boot installs /bin/sh from the embedded image", "[bin] installed /bin/sh")
+        check("PID 1 (/bin/init) starts /bin/sh", "[init] starting /bin/sh")
+        check("userland shell is the first prompt at boot", "ring3> ")
+        ser.send("exit\n")
+        check("PID 1 reports /bin/sh's exit status", "[init] /bin/sh exited with status 0")
+        check("init (PID 1) exits with status 0 at boot", "[init] PID 1 exited with status 0")
         check("shell prompt", "helix> ")
 
         # --- commands ---
@@ -246,6 +253,13 @@ def main():
         check("userland shell starts in ring 3", "userland shell (ring 3)")
         ser.send("echo ring3-ok\n")
         check("userland shell echo command", "\nring3-ok\n")
+        # M9 spawn: the shell runs /bin/args as a child process (nested under the
+        # kernel-started shell), and argv arrives intact.
+        ser.send("args one two\n")
+        check("shell runs /bin/args with argc", "args: argc=3")
+        check("shell passes argv[2] to the child", "args: argv[2]=two")
+        ser.send("nosuchprog\n")
+        check("shell reports a program it cannot find", "unknown command: nosuchprog")
         # M9 file I/O: write creates a file on ext4, cat reads it back through a
         # descriptor, and a missing path is refused.
         ser.send("write /note.txt gold-42\n")
@@ -268,9 +282,10 @@ def main():
         # Teardown (M9): a process's frames and page tables are freed when it exits,
         # so repeated runs of the same ELF do not grow the allocated-frame count.
         frames_before = pmm_allocated(ser)
-        for _ in range(3):
-            ser.send("init\n")
-            check("init (ring 3 ELF) runs and exits", "init: ring 3 exited with status 0")
+        for n in range(3):
+            ser.send(f"exec /bin/args run{n}\n")
+            check("exec runs a program from /bin and waits for it",
+                  f"args: argv[1]=run{n}")
         frames_after = pmm_allocated(ser)
         check_true("process frames are freed on exit (allocated count unchanged)",
                    frames_before is not None and frames_after == frames_before)

@@ -15,6 +15,7 @@
 #include "kstring.h"
 #include "pmm.h"
 #include "ufile.h"
+#include "userprogs.h"
 #include "vmm.h"
 
 /* Defined in usermode.S. */
@@ -49,7 +50,10 @@ static const uint8_t k_user_program[] = {
     'r', 'i', 'n', 'g', ' ', '3', '\n',
 };
 
-static uint64_t g_save[8];
+static uint64_t g_test_save[8];
+/* Where the running process saves the kernel state to return to; launch() points
+ * it at a save area on the kernel stack for each process it starts. */
+static uint64_t *g_save = g_test_save;
 static bool g_active;
 static vmm_as_t g_kernel_as;
 
@@ -247,69 +251,128 @@ uint64_t usermode_brk(uint64_t want) {
     return g_brk;
 }
 
-/* Run a static ELF64 image in a new process. Returns its exit status, -1 if the
- * process could not be set up, or -2 if the image is not a loadable executable. */
-int64_t usermode_run_elf(const uint8_t *img, size_t len) {
+/* -- Launching a process ---------------------------------------------------
+ *
+ * launch() builds a process from an ELF image and runs it to exit. A process can
+ * start a child from inside a system call (SYS_EXECVE, see syscall.c). launch()
+ * saves the caller's state on the kernel stack and restores it when the child
+ * exits, so the caller resumes its system call with the child's status. The
+ * nesting depth is capped so kernel stack use stays bounded. */
+#define SPAWN_MAX_DEPTH 8u
+
+static unsigned g_spawn_depth;
+
+/* Write argc, argv[0..argc-1], a NULL terminator and the strings into the top of
+ * the child's stack. Runs while the child's address space is active, so the
+ * addresses written are the ones the child sees. Returns the initial stack
+ * pointer, which points at argc (the System V entry layout). */
+static bool build_argv(int argc, const char *const *argv, uint64_t *sp_out) {
+    uint64_t ptrs[USERMODE_MAX_ARGS];
+    uint64_t cursor = USER_STACK_TOP;
+    size_t total = 0;
+    for (int i = argc - 1; i >= 0; i--) {
+        size_t n = strlen(argv[i]) + 1;
+        total += n;
+        if (total > USERMODE_ARG_BYTES) return false;
+        cursor -= n;
+        memcpy((void *)(uintptr_t)cursor, argv[i], n);
+        ptrs[i] = cursor;
+    }
+    cursor &= ~7ULL;
+    uint64_t words = (uint64_t)argc + 2u;   /* argc, argv[], NULL */
+    uint64_t sp = (cursor - words * 8u) & ~15ULL;
+    uint64_t *w = (uint64_t *)(uintptr_t)sp;
+    w[0] = (uint64_t)argc;
+    for (int i = 0; i < argc; i++) w[1 + i] = ptrs[i];
+    w[1 + argc] = 0;
+    *sp_out = sp;
+    return true;
+}
+
+static int64_t launch(const uint8_t *img, size_t len, int argc, const char *const *argv) {
     elf64_ehdr_t eh;
     if (!elf_validate(img, len, &eh)) return -2;
-    ufile_reset();
+    if (argc < 0 || argc > (int)USERMODE_MAX_ARGS) return -1;
+    if (g_spawn_depth >= SPAWN_MAX_DEPTH) return -1;
 
-    g_kernel_as = *vmm_current_as();
+    /* The caller's state, restored when the child exits. */
+    vmm_as_t caller_as = *vmm_current_as();
+    bool caller_active = g_active;
+    user_pages_t *caller_pages = g_proc_pages;
+    uint64_t caller_brk = g_brk;
+    uint64_t *caller_save = g_save;
+    uint64_t caller_rsp0 = gdt_get_rsp0();
+    ufile_state_t caller_fds;
+    ufile_save(&caller_fds);
+
+    uint64_t child_save[8];
     vmm_as_t *as = vmm_create_as();
     if (as == NULL) return -1;
 
-    /* The user map is built in a new address space; the kernel's half is shared. */
+    /* Build the child in its own address space: its segments, stack and argv. */
     vmm_switch_as(as);
     user_pages_t *up = kzalloc(sizeof(*up));
     uint64_t entry = 0;
     bool ok = up != NULL && elf_load_segments(img, len, &eh, up, &entry);
-    /* Stack: NX, user-writable, mapped just below the top of its window. */
     for (size_t i = 0; ok && i < USER_STACK_PAGES; i++) {
         uint8_t *dst = NULL;
         ok = user_page_get(up, USER_STACK_BASE + i * 4096ULL,
                            VMM_PRESENT | VMM_WRITE | VMM_USER | VMM_NX, &dst);
     }
+    uint64_t sp = 0;
+    ok = ok && build_argv(argc, argv, &sp);
     if (!ok) {
-        vmm_switch_as(&g_kernel_as);
+        vmm_switch_as(&caller_as);
         free_user_pages(up);
         vmm_destroy_as(as);
         return -1;
     }
 
+    /* The child starts with no open files and its own heap. */
+    ufile_reset();
     g_proc_pages = up;
     g_brk = USER_HEAP_BASE;
+    g_save = child_save;
+    g_spawn_depth++;
     g_active = true;
-    int64_t status = (int64_t)usermode_run(entry, USER_STACK_TOP,
-                                           g_save,
+    int64_t status = (int64_t)usermode_run(entry, sp, child_save,
                                            gdt_user_code_selector(),
                                            gdt_user_data_selector());
-    /* The process has exited. Return to the kernel's address space, then give
-     * back everything the process owned: its pages, heap included, and its
-     * open files. */
-    vmm_switch_as(&g_kernel_as);
-    g_proc_pages = NULL;
-    ufile_reset();
+
+    /* The child exited (usermode_exit unwound to here). Free its address space
+     * and pages, then put the caller back exactly as it was. */
+    g_spawn_depth--;
+    vmm_switch_as(&caller_as);
     free_user_pages(up);
     vmm_destroy_as(as);
+    ufile_restore(&caller_fds);
+    g_proc_pages = caller_pages;
+    g_brk = caller_brk;
+    g_save = caller_save;
+    g_active = caller_active;
+    gdt_set_rsp0(caller_rsp0);
     return status;
 }
 
-/* The userland shell, built from userspace/shell and linked into the kernel. */
-extern const uint8_t user_shell_elf_start[];
-extern const uint8_t user_shell_elf_end[];
-
-int64_t usermode_run_user_shell(void) {
-    return usermode_run_elf(user_shell_elf_start,
-                            (size_t)(user_shell_elf_end - user_shell_elf_start));
+/* Run a static ELF64 image that is already in kernel memory, with no arguments. */
+int64_t usermode_run_elf(const uint8_t *img, size_t len) {
+    return launch(img, len, 0, NULL);
 }
 
-/* The init process, built from userspace/init.c and linked into the kernel. */
-extern const uint8_t user_init_elf_start[];
-extern const uint8_t user_init_elf_end[];
+int64_t usermode_spawn(const char *path, int argc, const char *const *argv) {
+    uint8_t *img = NULL;
+    uint64_t len = 0;
+    if (!ufile_load_file(path, &img, &len)) return -1;
+    int64_t status = launch(img, (size_t)len, argc, argv);
+    kfree(img);
+    return status;
+}
 
-int64_t usermode_run_init(void) {
-    return usermode_run_elf(user_init_elf_start,
-                            (size_t)(user_init_elf_end - user_init_elf_start));
+/* The userland shell embedded in the kernel (the `usershell` command). */
+int64_t usermode_run_user_shell(void) {
+    const userprog_t *p = userprog_find("sh");
+    if (p == NULL) return -2;
+    return usermode_run_elf(p->start, (size_t)(p->end - p->start));
 }
 
 int64_t usermode_run_test(void) {

@@ -72,21 +72,28 @@ endif
 C_SOURCES := $(wildcard $(SRC_DIR)/*.c)
 S_SOURCES := $(wildcard $(SRC_DIR)/*.S)
 
-# The userland shell: a static ring-3 ELF built from userspace/, then embedded
-# in the kernel as a blob (user_shell_elf_start .. user_shell_elf_end). The
-# embedding is a generated .S file so the path is always the one make used.
-USER_DIR    := ../userspace
-USER_ELF    := $(BUILD_DIR)/user/shell.elf
-USER_INIT_ELF := $(BUILD_DIR)/user/init.elf
-USER_BLOB_S := $(BUILD_DIR)/user/user_blob.S
-USER_BLOB_O := $(BUILD_DIR)/obj/user_blob.o
-USER_SRCS   := $(USER_DIR)/libhelix.c $(USER_DIR)/shell/shell.c
-USER_INIT_SRCS := $(USER_DIR)/libhelix.c $(USER_DIR)/init.c
+# The ring-3 programs (userspace/): static ELFs built from libhelix plus their
+# source, each embedded in the kernel as a blob between user_blob_<name>_start and
+# _end (the generated user_blob.S; the table is kernel/src/userprogs.c). The
+# kernel installs them under /bin at boot (kernel/src/userbin.c).
+USER_DIR      := ../userspace
+USER_BLOB_DIR := $(BUILD_DIR)/user
+USER_SH_ELF   := $(USER_BLOB_DIR)/sh.elf
+USER_INIT_ELF := $(USER_BLOB_DIR)/init.elf
+USER_ARGS_ELF := $(USER_BLOB_DIR)/args.elf
+USER_ELFS     := $(USER_SH_ELF) $(USER_INIT_ELF) $(USER_ARGS_ELF)
+USER_BLOB_S   := $(USER_BLOB_DIR)/user_blob.S
+USER_BLOB_O   := $(BUILD_DIR)/obj/user_blob.o
+USER_LIB      := $(USER_DIR)/libhelix.c $(USER_DIR)/libhelix.h
+# The runtime every ring-3 program links: libhelix plus the C library subset in
+# userspace/libc (headers in userspace/include).
+USER_RT_SRCS := $(USER_DIR)/libhelix.c $(wildcard $(USER_DIR)/libc/*.c)
+USER_RT_HDRS := $(USER_DIR)/libhelix.h $(wildcard $(USER_DIR)/include/*.h)
 USER_CFLAGS := -std=gnu11 -O2 -m64 -march=x86-64 -mcmodel=small \
                -ffreestanding -fno-builtin -fno-stack-protector -U_FORTIFY_SOURCE \
                -fno-pic -fno-pie -fno-common -fno-asynchronous-unwind-tables \
                -fno-unwind-tables -mno-red-zone -mgeneral-regs-only -mno-sse -mno-mmx -mno-80387 \
-               -Wall -Wextra -I$(USER_DIR)
+               -Wall -Wextra -I$(USER_DIR) -I$(USER_DIR)/include
 USER_LDFLAGS := -nostdlib -static -no-pie \
                 -Wl,-Ttext-segment=0x400000 -Wl,-z,max-page-size=0x1000 \
                 -Wl,-z,separate-code -Wl,-z,noexecstack -Wl,--build-id=none
@@ -130,32 +137,43 @@ $(BUILD_DIR)/obj/%.o: $(SRC_DIR)/%.S
 	@mkdir -p $(dir $@)
 	$(CC) -c $< -o $@
 
-$(USER_ELF): $(USER_SRCS) $(USER_DIR)/libhelix.h $(USER_DIR)/shell/shell.c
+$(USER_SH_ELF): $(USER_RT_HDRS) $(USER_RT_SRCS) $(USER_DIR)/shell/shell.c
 	@mkdir -p $(dir $@)
-	$(CC) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $(USER_SRCS)
+	$(CC) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $(USER_RT_SRCS) $(USER_DIR)/shell/shell.c
 	@echo "[user] built $@"
 
-$(USER_INIT_ELF): $(USER_INIT_SRCS) $(USER_DIR)/libhelix.h $(USER_DIR)/init.c
+$(USER_INIT_ELF): $(USER_RT_HDRS) $(USER_RT_SRCS) $(USER_DIR)/init.c
 	@mkdir -p $(dir $@)
-	$(CC) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $(USER_INIT_SRCS)
+	$(CC) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $(USER_RT_SRCS) $(USER_DIR)/init.c
 	@echo "[user] built $@"
 
-$(USER_BLOB_S): $(USER_ELF) $(USER_INIT_ELF)
+$(USER_ARGS_ELF): $(USER_RT_HDRS) $(USER_RT_SRCS) $(USER_DIR)/bin/args.c
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $(USER_RT_SRCS) $(USER_DIR)/bin/args.c
+	@echo "[user] built $@"
+
+$(USER_BLOB_S): $(USER_ELFS)
 	@mkdir -p $(dir $@)
 	@printf '%s\n' \
 	  '.section .rodata' \
 	  '.balign 4096' \
-	  '.global user_shell_elf_start' \
-	  'user_shell_elf_start:' \
-	  '.incbin "$(abspath $(USER_ELF))"' \
-	  '.global user_shell_elf_end' \
-	  'user_shell_elf_end:' \
+	  '.global user_blob_sh_start' \
+	  'user_blob_sh_start:' \
+	  '.incbin "$(abspath $(USER_SH_ELF))"' \
+	  '.global user_blob_sh_end' \
+	  'user_blob_sh_end:' \
 	  '.balign 4096' \
-	  '.global user_init_elf_start' \
-	  'user_init_elf_start:' \
+	  '.global user_blob_init_start' \
+	  'user_blob_init_start:' \
 	  '.incbin "$(abspath $(USER_INIT_ELF))"' \
-	  '.global user_init_elf_end' \
-	  'user_init_elf_end:' \
+	  '.global user_blob_init_end' \
+	  'user_blob_init_end:' \
+	  '.balign 4096' \
+	  '.global user_blob_args_start' \
+	  'user_blob_args_start:' \
+	  '.incbin "$(abspath $(USER_ARGS_ELF))"' \
+	  '.global user_blob_args_end' \
+	  'user_blob_args_end:' \
 	  '.section .note.GNU-stack,"",@progbits' > $@
 
 $(USER_BLOB_O): $(USER_BLOB_S)

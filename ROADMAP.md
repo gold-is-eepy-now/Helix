@@ -204,17 +204,32 @@ first arrival delivers, both resume correctly).
 - ✅ Real `brk`: a per-process heap at `0x10000000`, up to 2 MiB, mapped zeroed as
   it grows and freed at exit. `libhelix` has `helix_malloc`/`helix_free_mem` on
   top of it. Checked by the `heap` command and by a frame-count test.
-- 🚧 A minimal native runtime: `libhelix` (formatting, syscalls, file wrappers,
-  brk-backed malloc) plus the userland shell (`usershell`) with its own line
-  editor and 16-entry history. It is not a libc: no `argv`, no stdio, no
-  `execve`.
+- ✅ `execve(path, argv)` runs a program from the root as a child and waits for
+  it (no fork: the caller resumes with the child's exit status). Nesting is
+  capped at 8. The caller's address space, pages, heap, descriptors and kernel
+  stack pointer are saved and restored around the child.
+- ✅ `argc`/`argv` on the stack at entry; `libhelix`'s `_start` passes them to
+  `main`.
+- ✅ `/bin` is installed on the root at boot from programs embedded in the
+  kernel: `/bin/init`, `/bin/sh`, `/bin/args` (`kernel/src/userbin.c`).
+- ✅ `/bin/init` (PID 1) is started by the kernel after USB, starts `/bin/sh`
+  and waits for it. The first prompt at boot is the userland shell; `exit`
+  returns to the kernel shell.
+- ✅ The userland shell runs `/bin/<word>` for any command it has no built-in
+  for, with the rest of the line as argv.
+- ✅ A C runtime for ring-3 programs: `libhelix` (syscalls, `_start` with argv,
+  `helix_spawn`, brk-backed malloc) under a libc subset in `userspace/libc` with
+  headers in `userspace/include`: `string.h`, `stdlib.h` (malloc/calloc/realloc/
+  free, exit, strtol), `stdio.h` (printf family, puts/fputs/fgets, fopen/fclose
+  over files, unbuffered), `unistd.h`/`fcntl.h` (read/write/open/close/lseek),
+  `errno.h`. `/bin/args` uses `printf`. No fork, no environment (`getenv` finds
+  nothing: envp is not passed yet).
 
 **M9 exit gate:** not yet passed. Done: ring-3 processes, the ELF loader,
-boot-time `init`, process teardown, userland file I/O, and brk. Still missing:
-a libc-style runtime with `argv` and stdio, a real `execve` (nested launch of a
-file from the root), installing `/bin/init` and `/bin/sh` on the root at boot,
-and `init` starting `/bin/sh` and waiting for it (the kernel shell still runs
-in the kernel).
+userland file I/O, brk, nested `execve` with argv, `/bin` installed at boot,
+`init` starting `/bin/sh`, and a C runtime subset. Still missing: the
+environment (envp on the stack and `getenv`/`setenv`) and a complete C library
+(only the subset above).
 
 ## M10 — Driver framework and isolated drivers 🚧
 

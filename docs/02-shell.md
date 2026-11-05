@@ -62,11 +62,18 @@ The shell talks to the kernel through these native syscalls:
 - `SYS_DEBUG_WRITE` (26) writes a user buffer to the console. Temporary; `SYS_WRITE`
   to fd 1 now does the same job.
 
-Built-ins: `echo`, `cat`, `write`, `heap`, `history`, `help`, `exit`. Up and Down
-recall the last 16 lines. Typing `exit` returns to the kernel shell with status 0.
+Built-ins: `echo`, `cat`, `write`, `heap`, `history`, `help`, `exit`. Any other
+word runs `/bin/<word>` as a child process, with the rest of the line as argv.
+Up and Down recall the last 16 lines. Typing `exit` returns to the kernel shell
+with status 0.
 
-> **Known limitations.** `init` runs at boot and exits; it does not start the
-> shell, and the kernel shell still runs in the kernel. Userland file paths must
+At boot the kernel installs `/bin/init`, `/bin/sh` and `/bin/args` on the root,
+starts `/bin/init` (PID 1), and `init` starts `/bin/sh`. The first prompt is
+therefore the userland shell (`ring3> `); `exit` returns to the kernel shell.
+
+> **Known limitations.** Files in `/bin` are copies of programs embedded in the
+> kernel image; the root is a ramdisk, so they are rewritten every boot. The
+> kernel shell still runs in the kernel. Userland file paths must
 > be absolute and there are no directories, permissions, `dup` or pipes. Shrinking
 > the break does not unmap pages until the process exits. `helix_malloc` does not
 > coalesce freed blocks. The kernel-heap `SYS_ALLOC` remains for the test programs.
@@ -243,7 +250,8 @@ shows it; typing `myprog arg1 arg2` runs it.
 | `history` | lists the lines typed so far, numbered (Up/Down recall them) |
 | `usermode` | runs a built-in test program in ring 3; it writes a line through the syscall gate and exits with status 7 |
 | `usershell` | runs the userland shell in ring 3 (an ELF loaded into its own process); type `exit` to return. Inside it: `cat <path>`, `write <path> <text>` and `heap` (a 64 KiB brk heap check) |
-| `init` | runs the system init process in ring 3 (PID 1 bootstrap sequence) |
+| `init` | runs `/bin/init` (PID 1) in ring 3; it starts `/bin/sh` |
+| `exec` | `exec <path> [args...]`: runs a program from the root and waits for it |
 | `calc` | `calc <a> <op> <b>` for `+ - * / %` (integers only) |
 | `clear` | clear the screen |
 | `color` | turn ANSI colour on/off: `color on`, `color off` |

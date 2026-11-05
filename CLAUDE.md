@@ -144,17 +144,21 @@ Also, in the same change:
   preemption via saved context switches — M7, machine-tested via the boot and
   shell suites.
 - **Implemented (M9):** `int $0x80` syscalls, ring-3 entry and exit,
-  a console input syscall, an ELF64 loader for static `ET_EXEC` images, the
-  userland shell (`usershell`), and the native `init` process (`userspace/init.c`,
-  PID 1, started at boot and runnable via the shell command `init`), with process
-  teardown on exit. Userland file I/O on the ext4 root (`open`/`read`/`write`/
-  `close`/`lseek`, a per-process descriptor table, checked user pointers) and a
-  real `brk` heap. Machine-tested.
+  a console input syscall, an ELF64 loader for static `ET_EXEC` images, process
+  teardown on exit, userland file I/O on the ext4 root (`open`/`read`/`write`/
+  `close`/`lseek`, a per-process descriptor table, checked user pointers), a real
+  `brk` heap, nested `execve` (spawn and wait) with argc/argv, `/bin` installed at
+  boot from embedded programs (`/bin/init`, `/bin/sh`, `/bin/args`), and PID 1
+  (`/bin/init`) starting `/bin/sh`, and a libc subset for ring-3 programs.
+  Machine-tested.
 - **Implemented (LC-1, Linux compat):** `compat/include/linux/*` headers (types, slab, spinlock, atomic, mutex, module_init, printk) and a self-test driver run at boot. See docs/08-linux-compat.md.
 - **Implemented (Mac/Darwin compat):** `mac-darwin-compat/` subsystem with 64-bit Mach-O loader, Darwin BSD & Mach trap translation, Darwin process runtime (`darwin_runtime.c`), Darwin `launchd` PID 1 daemon with plist service loading and `launchctl` CLI (`launchd.c`), Mac-like case-insensitive filesystem, extended attributes (xattr), property list (.plist) engine, .app bundle resolution, CLI tools (`sw_vers`, `defaults`, `plutil`, `uname`, `otool`, `open`, `launchctl`), and AppKit/Cocoa GUI translation to Helix X11 server (`Calculator.app`, `TextEdit.app`), machine-tested (157 checks).
-- **Not implemented:** a libc-style runtime (only `libhelix`: no argv, stdio or
-  `execve`), `execve` and `/bin/sh` (M9 remainder), isolated driver services,
-  networking, graphics, POSIX translation layer.
+- **Not implemented:** the full C library and an environment (userspace has a
+  libc subset in `userspace/libc`: string, stdlib, stdio, unistd, errno, but
+  `getenv` finds nothing and there is no `fork`; the M9 exit gate is not yet
+  passed), the `installer` / live install environment (needs a disk driver and
+  partitioning), isolated driver services, networking, graphics, POSIX
+  translation layer.
 
 Do not write documentation or commit messages that imply unimplemented systems
 exist.

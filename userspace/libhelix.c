@@ -13,25 +13,29 @@
 /* Program entry point — defined by each user program. */
 extern int main(int argc, char **argv);
 
-/* -- freestanding entry point (crt0).
- * The kernel jumps to the ELF entry; we provide _start which calls main
- * and exits with its return value. argv/envp are empty for now. */
+/* -- Program entry (crt0).
+ * The kernel starts a program with rsp pointing at argc, then argv[0..argc-1], a
+ * NULL, then the strings (usermode.c build_argv). _start passes that block to
+ * helix_crt_main, which calls main and exits with its return value. */
+__asm__(
+    ".text\n"
+    ".global _start\n"
+    "_start:\n"
+    "    mov %rsp, %rdi\n"
+    "    and $-16, %rsp\n"
+    "    call helix_crt_main\n"
+    "    ud2\n");
+
 __attribute__((noreturn))
-void _start(void)
+void helix_crt_main(uint64_t *sp)
 {
-    static char *const empty_argv[1] = { 0 };
-    int status = main(0, empty_argv);
+    int argc = (int)sp[0];
+    char **argv = (char **)(sp + 1);
+    int status = main(argc, argv);
     helix_exit(status);
 }
 
-/* -- freestanding memcpy (no libc linked). */
-static void *memcpy(void *restrict dst, const void *restrict src, size_t n)
-{
-    char *d = dst;
-    const char *s = src;
-    while (n--) *d++ = *s++;
-    return dst;
-}
+#include <string.h>
 
 /* -- Files ----------------------------------------------------------------- */
 
@@ -143,6 +147,20 @@ void *helix_malloc(size_t bytes)
     return (char *)b + HBLOCK_HDR;
 }
 
+size_t helix_msize(void *ptr)
+{
+    return ((hblock_t *)((char *)ptr - HBLOCK_HDR))->size;
+}
+
+int helix_console_getchar(void)
+{
+    for (;;) {
+        uint64_t r = helix_syscall(SYS_READ_INPUT, 0, 0, 0, 0, 0, 0, 0);
+        if ((int64_t)r >= 0) return (int)r;
+        __asm__ volatile("pause");
+    }
+}
+
 void helix_free_mem(void *ptr)
 {
     if (ptr == NULL) return;
@@ -212,10 +230,20 @@ uint64_t helix_object_count(void)
 
 /* -- Process control ------------------------------------------------------- */
 
+int64_t helix_spawn(const char *path, char *const argv[])
+{
+    uint64_t r = helix_syscall(SYS_EXECVE, (uint64_t)(uintptr_t)path,
+                               (uint64_t)(uintptr_t)argv, 0, 0, 0, 0, 0);
+    return r == (uint64_t)-1 ? -1 : (int64_t)r;
+}
+
 void helix_exit(int status)
 {
     helix_syscall(SYS_EXIT, (uint64_t)status, 0, 0, 0, 0, 0, 0);
-    /* Not expected to return. */
+    /* The kernel does not return here; if it ever did, spin rather than run on. */
+    for (;;) {
+        __asm__ volatile("pause");
+    }
 }
 
 void helix_yield(void)

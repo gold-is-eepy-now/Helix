@@ -155,6 +155,11 @@ void gdt_set_rsp0(uint64_t rsp0) {
     g_tss.rsp0 = rsp0;
 }
 
+/* Read it back: a nested launch restores the caller's kernel stack. */
+uint64_t gdt_get_rsp0(void) {
+    return g_tss.rsp0;
+}
+
 /* Not used when TSS is not installed. */
 void gdt_load_tss(uint64_t tss_phys, uint64_t hhdm_offset) {
     (void)tss_phys;

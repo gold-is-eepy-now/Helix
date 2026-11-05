@@ -30,6 +30,7 @@
 #include "usermode.h"
 #include "vmm.h"
 #include "ext4.h"
+#include "kstring.h"
 #include "ufile.h"
 #include "usermem.h"
 
@@ -361,116 +362,47 @@ static uint64_t handle_brk(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, u
     return usermode_brk(a1);
 }
 
-/* ELF segment loading flags. */
-#define ELF_PROT_READ  (1u << 0)
-#define ELF_PROT_WRITE (1u << 1)
-#define ELF_PROT_EXEC  (1u << 2)
-
-/* Map a memory region into the current address space. */
-static bool map_region(uint64_t virt, uint64_t phys, uint64_t flags) {
-    bool ret = vmm_map(virt, phys, flags);
-    (void)ret;  /* For now we don't check the return value */
-    return ret;
-}
-
-/* Simple ELF loader that loads an ELF binary from the ramdisk filesystem.
- * For now, this is a basic implementation that reads the ELF file and
- * sets up basic mappings. The full ELF loading (including copying segment
- * data, setting up the user stack with argv/envp, etc.) is deferred.
- *
- * Returns 0 on success, or -errno on failure. */
-static int elf_load_from_ramdisk(const char *filename, uint64_t *ret_rip) {
-    (void)ret_rip;
-    
-    ext4_fs_t *fs = ext4_get_current();
-    if (fs == NULL) {
-        kprintf("[elf] ext4 not mounted\n");
-        return -1;
-    }
-    
-    /* Read the file from ramdisk. First, we need to find the inode.
-     * The ramdisk root is inode 2. */
-    uint64_t ino = 2;  /* root inode */
-    
-    /* Look up the file by name in the root directory. This is simplified -
-     * we just read inode 2 directly as a stub. */
-    uint8_t buf[4096];
-    uint64_t nread = ext4_read(fs, ino, 0, buf, sizeof(buf));
-    if (nread == 0) {
-        kprintf("[elf] failed to read root inode\n");
-        return -1;
-    }
-    
-    /* Scan the directory entry for our filename. This is very simplified. */
-    /* For now, just check if we can read the file at a known path. */
-    kprintf("[elf] loading: %s from ramdisk\n", filename);
-    
-    /* Return the entry point at the start of the mapped region. */
-    return 0;
-}
-
-/* Execute a new program. */
+/* execve(path, argv): run the program at the absolute path `path` as a child
+ * process and wait for it. This kernel has no fork, so execve does not replace
+ * the caller. It starts a child with the given argv and returns the child's exit
+ * status, or -1 if the child could not run. argv is a NULL-terminated array of
+ * user pointers; a NULL argv gives the child just its path as argv[0]. */
 static uint64_t handle_execve(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
-    (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
-    /* a1 = filename pointer (user-space virtual address) */
-    
-    /* Read the filename string from user space. We'll use it to look up
-     * the file on the ramdisk filesystem. */
-    char filename[256];
-    size_t i;
-    for (i = 0; i < sizeof(filename) - 1; i++) {
-        char c;
-        /* Copy user byte directly (simplified: assumes caller is kernel thread
-         * or user address is mapped). Real implementation would copy from user
-         * space via vmm_get_mapping. */
-        c = (char)a1;
-        filename[i] = c;
-        if (c == '\0') break;
-        a1++;
+    (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
+    char path[256];
+    if (!usermem_copy_str(path, sizeof(path), a1)) return UINT64_MAX;
+
+    char *store = kmalloc(USERMODE_ARG_BYTES);
+    if (store == NULL) return UINT64_MAX;
+    const char *argv_k[USERMODE_MAX_ARGS];
+    int argc = 0;
+    size_t used = 0;
+
+    if (a2 != 0) {
+        for (;;) {
+            uint64_t p = 0;
+            if (argc == (int)USERMODE_MAX_ARGS) goto fail;
+            if (!usermem_copy_in(&p, a2 + (uint64_t)argc * 8u, 8)) goto fail;
+            if (p == 0) break;
+            if (!usermem_copy_str(store + used, USERMODE_ARG_BYTES - used, p)) goto fail;
+            argv_k[argc++] = store + used;
+            used += strlen(store + used) + 1u;
+        }
     }
-    filename[i] = '\0';
-    
-    /* Look up the file on the ramdisk ext4 filesystem.
-     * Inode 2 is the root directory. */
-    ext4_fs_t *fs = ext4_get_current();
-    if (fs == NULL) {
-        kprintf("[syscall] execve: ext4 not mounted\n");
-        return UINT64_MAX;
+    if (argc == 0) {
+        size_t n = strlen(path) + 1u;
+        if (n > USERMODE_ARG_BYTES) goto fail;
+        memcpy(store, path, n);
+        argv_k[argc++] = store;
     }
-    
-    /* Read the root directory to find our file by name. */
-    uint8_t dir_buf[4096];
-    uint64_t nread = ext4_read(fs, 2, 0, dir_buf, sizeof(dir_buf));
-    if (nread == 0) {
-        kprintf("[syscall] execve: failed to read root inode\n");
-        return UINT64_MAX;
-    }
-    
-    /* Scan directory entries for our filename (simplified - reads first entry
-     * as a placeholder; real implementation parses ext4 directory entries properly).
-     * For now, just validate the file can be read. */
-    kprintf("[syscall] execve: loading: %s\n", filename);
-    
-    uint8_t file_buf[4096];
-    nread = ext4_read(fs, 2, 0, file_buf, sizeof(file_buf));
-    if (nread == 0) {
-        kprintf("[syscall] execve: failed to read file\n");
-        return UINT64_MAX;
-    }
-    
-    /* Parse ELF header - validate magic bytes */
-    if (nread < 16 || file_buf[0] != 0x7f || file_buf[1] != 'E' ||
-        file_buf[2] != 'L' || file_buf[3] != 'F') {
-        kprintf("[syscall] execve: not an ELF file\n");
-        return UINT64_MAX;
-    }
-    
-    /* Get entry point from ELF header (offset 24, 8 bytes) */
-    uint64_t entry_point = *(uint64_t *)(file_buf + 24);
-    
-    kprintf("[syscall] execve: entry point = 0x%llx\n",
-            (unsigned long long)entry_point);
-    return entry_point;
+
+    int64_t status = usermode_spawn(path, argc, argv_k);
+    kfree(store);
+    return (uint64_t)status;
+
+fail:
+    kfree(store);
+    return UINT64_MAX;
 }
 
 void syscall_dispatch(registers_t *regs) {

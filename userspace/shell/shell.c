@@ -205,6 +205,75 @@ static void cmd_heap(void) {
     say(reused ? ", freed block reused\n" : ", freed block not reused\n");
 }
 
+/* Run a program for a command the shell does not have a built-in for. The first
+ * word names the program: a word with no '/' is looked up as /bin/<word>. The
+ * rest of the words are its arguments. Words are split on spaces; quoting is not
+ * supported. Returns 0. Prints "unknown command" if the program cannot run. */
+/* True if the string contains a '/' (so it is a path, not a bare program name). */
+static int str_has_slash(const char *s) {
+    for (; *s != '\0'; s++) {
+        if (*s == '/') return 1;
+    }
+    return 0;
+}
+
+#define ARGV_MAX 16
+static int run_program(const char *line) {
+    static char words[LINE_MAX];
+    char *argv[ARGV_MAX + 1];
+    int argc = 0;
+    size_t i = 0;
+    while (line[i] != '\0' && i < LINE_MAX - 1) {
+        words[i] = line[i];
+        i++;
+    }
+    words[i] = '\0';
+
+    char *p = words;
+    while (*p != '\0') {
+        while (*p == ' ') p++;
+        if (*p == '\0') break;
+        if (argc == ARGV_MAX) {
+            say("too many arguments\n");
+            return 0;
+        }
+        argv[argc++] = p;
+        while (*p != '\0' && *p != ' ') p++;
+        if (*p == ' ') *p++ = '\0';
+    }
+    argv[argc] = NULL;
+    if (argc == 0) return 0;
+
+    char path[128];
+    if (str_has_slash(argv[0])) {
+        size_t n = 0;
+        while (argv[0][n] != '\0' && n < sizeof(path) - 1) {
+            path[n] = argv[0][n];
+            n++;
+        }
+        path[n] = '\0';
+    } else {
+        const char *prefix = "/bin/";
+        size_t n = 0;
+        while (prefix[n] != '\0') {
+            path[n] = prefix[n];
+            n++;
+        }
+        size_t k = 0;
+        while (argv[0][k] != '\0' && n < sizeof(path) - 1) {
+            path[n++] = argv[0][k++];
+        }
+        path[n] = '\0';
+    }
+
+    if (helix_spawn(path, argv) < 0) {
+        say("unknown command: ");
+        say(argv[0]);
+        say("\n");
+    }
+    return 0;
+}
+
 /* Run one non-empty line. Returns 1 if the shell should exit. */
 static int run_line(const char *line) {
     if (str_eq(line, "exit")) return 1;
@@ -214,7 +283,7 @@ static int run_line(const char *line) {
     }
     if (str_eq(line, "help")) {
         say("commands: echo <text>, cat <path>, write <path> <text>,\n");
-        say("          heap, history, help, exit\n");
+        say("          heap, history, help, exit; any other word runs /bin/<word>\n");
         say("Up/Down recall earlier lines.\n");
         return 0;
     }
@@ -247,10 +316,7 @@ static int run_line(const char *line) {
         say("\n");
         return 0;
     }
-    say("unknown command: ");
-    say(line);
-    say("\n");
-    return 0;
+    return run_program(line);
 }
 
 int main(int argc, char **argv) {

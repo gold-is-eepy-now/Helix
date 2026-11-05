@@ -723,16 +723,33 @@ static void cmd_usershell(int argc, char **argv) {
 static void cmd_init(int argc, char **argv) {
     (void)argc;
     (void)argv;
-    int64_t status = usermode_run_init();
-    if (status == -2) {
-        console_write("init: embedded init image is not a loadable ELF\n");
-        return;
-    }
+    const char *init_argv[] = { "/bin/init", NULL };
+    int64_t status = usermode_spawn("/bin/init", 1, init_argv);
     if (status < 0) {
-        console_write("init: could not set up user init process\n");
+        console_write("init: could not run /bin/init (is /bin installed?)\n");
         return;
     }
     console_write("init: ring 3 exited with status ");
+    console_write_dec((uint64_t)status);
+    console_putc('\n');
+}
+
+/* exec <path> [args...]: run a program from the root and wait for it. */
+static void cmd_exec(int argc, char **argv) {
+    if (argc < 2) {
+        console_write("usage: exec <path> [args...]\n");
+        return;
+    }
+    int64_t status = usermode_spawn(argv[1], argc - 1, (const char *const *)(argv + 1));
+    if (status < 0) {
+        console_write("exec: could not run ");
+        console_write(argv[1]);
+        console_putc('\n');
+        return;
+    }
+    console_write("exec: ");
+    console_write(argv[1]);
+    console_write(" exited with status ");
     console_write_dec((uint64_t)status);
     console_putc('\n');
 }
@@ -1978,7 +1995,8 @@ const command_t helix_commands[] = {
     {"usb",     "USB controllers, hubs and HID devices", cmd_usb},
     {"usermode", "run a test program in ring 3", cmd_usermode},
     {"usershell", "run the userland shell in ring 3 (type exit to return)", cmd_usershell},
-    {"init",    "run the system init process in ring 3", cmd_init},
+    {"init",    "run /bin/init (PID 1) in ring 3; it starts /bin/sh", cmd_init},
+    {"exec",    "run a program from the root: exec <path> [args...]", cmd_exec},
     {"halt",    "halt the machine",                     cmd_halt},
     {"reboot",  "restart the machine",                  cmd_reboot},
     {"fsinfo",  "show filesystem information",          cmd_fsinfo},

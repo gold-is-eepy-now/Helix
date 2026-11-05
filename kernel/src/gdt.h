@@ -40,6 +40,7 @@ uint16_t gdt_user_data_selector(void);
 
 /* Kernel stack used when a ring-3 interrupt or int $0x80 enters the kernel. */
 void gdt_set_rsp0(uint64_t rsp0);
+uint64_t gdt_get_rsp0(void);
 
 /* Not used: the TSS is installed by gdt_init. */
 void gdt_load_tss(uint64_t tss_phys, uint64_t hhdm_offset);

@@ -136,13 +136,25 @@ void helix_object_release(void *object);
 uint64_t helix_object_count(void);
 
 /* Process control. */
-void helix_exit(int status);
+__attribute__((noreturn)) void helix_exit(int status);
+
+/* Run the program at the absolute path `path` as a child and wait for it. argv is
+ * NULL-terminated; argv[0] is conventionally the path. Returns the child's exit
+ * status, or -1 if it could not run. This kernel has no fork: the caller is not
+ * replaced, it resumes with the child's status. */
+int64_t helix_spawn(const char *path, char *const argv[]);
 void helix_yield(void);
 void *helix_thread_create(void (*entry)(void));
 
 /* Channel IPC. */
 int helix_channel_send(handle_t channel, void *msg, size_t size);
 long helix_channel_recv(handle_t channel, void *buf, size_t size);
+
+/* Size of a block returned by helix_malloc (its usable bytes). */
+size_t helix_msize(void *p);
+
+/* Wait for the next console key (blocking) and return it. */
+int helix_console_getchar(void);
 
 /* String / utility. */
 int helix_write_fd(int fd, const char *fmt, ...);

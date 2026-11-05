@@ -11,6 +11,8 @@
 #ifndef HELIX_UFILE_H
 #define HELIX_UFILE_H
 
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /* open(2) flag values; these match Linux so they read the same in libhelix. */
@@ -26,6 +28,28 @@
 #define UFILE_SEEK_END 2
 
 #define UFILE_MAX_FDS 16
+
+/* One open file. Used is false for a free slot. */
+typedef struct {
+    bool used;
+    uint64_t ino;
+    uint64_t pos;
+    bool readable;
+    bool writable;
+} ufd_t;
+
+/* A copy of the descriptor table, so a nested launch can restore the caller's. */
+typedef struct {
+    ufd_t fds[UFILE_MAX_FDS];
+} ufile_state_t;
+
+/* Copy the table out, or back in. */
+void ufile_save(ufile_state_t *st);
+void ufile_restore(const ufile_state_t *st);
+
+/* Read a whole regular file at an absolute path into kernel memory (kmalloc, so
+ * the caller frees it). Files above 1 MiB are refused. */
+bool ufile_load_file(const char *path, uint8_t **out, uint64_t *out_len);
 
 /* Forget every open descriptor. */
 void ufile_reset(void);
