@@ -19,6 +19,7 @@
 #define HELIX_CONSOLE_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 struct limine_framebuffer;
@@ -49,6 +50,13 @@ void console_init(struct limine_framebuffer *fb);
 /* Write a NUL-terminated string / one character to every active backend. */
 void console_write(const char *s);
 void console_putc(char c);
+
+/* A sink diverts console output away from the backends. While one is set,
+ * console_write/console_putc hand their bytes to it instead of serial and
+ * framebuffer — that is how the shell captures a command's output for `>`
+ * redirection and for pipes. Pass NULL to restore normal output. */
+typedef void (*console_sink_fn)(const char *data, size_t len);
+void console_set_sink(console_sink_fn fn);
 
 /* Rub out the previous character on every backend. */
 void console_backspace(void);

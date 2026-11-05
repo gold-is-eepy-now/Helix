@@ -151,6 +151,10 @@ Also, in the same change:
   boot from embedded programs (`/bin/init`, `/bin/sh`, `/bin/args`), and PID 1
   (`/bin/init`) starting `/bin/sh`, and a libc subset for ring-3 programs.
   Machine-tested.
+- **Implemented:** shell output redirection (`>`, `>>`) and input redirection
+  (`<`) in the kernel shell — a console capture sink collects the command's
+  output and the shell writes it to ext4 with shared path resolution — plus
+  ext4-backed `cat`/`ls`, machine-tested via `tests/shell-test.py`.
 - **Implemented (LC-1, Linux compat):** `compat/include/linux/*` headers (types, slab, spinlock, atomic, mutex, module_init, printk) and a self-test driver run at boot. See docs/08-linux-compat.md.
 - **Implemented (Mac/Darwin compat):** `mac-darwin-compat/` subsystem with 64-bit Mach-O loader, Darwin BSD & Mach trap translation, Darwin process runtime (`darwin_runtime.c`), Darwin `launchd` PID 1 daemon with plist service loading and `launchctl` CLI (`launchd.c`), Mac-like case-insensitive filesystem, extended attributes (xattr), property list (.plist) engine, .app bundle resolution, CLI tools (`sw_vers`, `defaults`, `plutil`, `uname`, `otool`, `open`, `launchctl`), and AppKit/Cocoa GUI translation to Helix X11 server (`Calculator.app`, `TextEdit.app`), machine-tested (157 checks).
 - **Not implemented:** the full C library and an environment (userspace has a

@@ -200,6 +200,58 @@ and fails if it finds solid light-coloured background blocks behind text.
 
 ---
 
+## Redirection and pipes
+
+The kernel shell supports the Unix-style operators `>`, `>>`, `<` and the pipe.
+
+```
+helix> echo hello world
+hello world
+helix> echo hello world > /tmp/greet
+helix> echo hi >> /tmp/greet
+helix> ls /tmp
+[FILE] greet (15 bytes)
+```
+
+### How output redirection works
+
+`> file` and `>> file` run the command, then write what it printed to the file.
+Two pieces make that work:
+
+1. **Capture.** Before a command runs with a file target, the shell installs a
+   console sink (`console_set_sink` in `kernel/src/console.c`). While a sink is
+   set, `console_write` and `console_putc` hand their bytes to the sink instead
+   of fanning out to the serial and framebuffer backends. The sink collects the
+   bytes into the shell's capture buffer; when the command is done the sink is
+   removed.
+2. **File.** The captured bytes go to ext4 with `ext4_write`, via the shell's
+   `write_to_file` helper. A target that does not exist yet is created in its
+   parent directory; a target that does exist is truncated first (`>`), or the
+   write is appended to the current end (`>>`).
+
+The path itself is resolved like every other shell path: absolute paths start
+at the ext4 root, relative paths at the shell's working directory (`cd`), split
+into parent directory plus entry name.
+
+### Files and reading back
+
+`cat`, `ls`, `mkdir`, `touch`, `rm`, `cp`, `mv`, `df` and `find` all work on the
+ext4 root filesystem through the shell's shared path resolver, so `cat` can
+read back what `>` wrote.
+
+### Known limitations
+
+- `<<` (heredoc) is parsed but not implemented; `< file` reads the file into
+  the command's stdin buffer.
+- Argument quoting is not implemented: `echo "hi"` prints and writes `"hi"`,
+  quotes included.
+- There is no stderr channel yet, so a command's diagnostics ride along with its
+  captured output.
+- Pipes (`cmd | cmd2`) capture a segment's output into the next command's stdin;
+  not every builtin reads that buffer yet.
+
+---
+
 ## The commands — the first Helix "programs"
 
 Adding a program is two steps: write the function, add a row in `helix_commands`.

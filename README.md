@@ -34,6 +34,7 @@ native object model. They are not the foundation.
 | Framebuffer text console (8×8 font) | ✅ working (cursor, backspace, colour) |
 | PS/2 keyboard input | ✅ working (polling, US layout, shift) |
 | Interactive shell (`helixsh`) | ✅ working, machine-tested |
+| Shell output redirection (`>`, `>>`, `<`) and ext4 file commands (`cat`, `ls`, `mkdir`, `touch`, ...) | ✅ working, machine-tested |
 | Kernel-resident commands (help, sysinfo, cpu, mem, uptime, ...) | ✅ working |
 | Time source (TSC calibrated against the PIT) | ✅ working |
 | Calibrated time, memory map, firmware detection | ✅ working |
@@ -261,8 +262,9 @@ Type 'help' for a list of commands, 'sysinfo' for system info.
 helix> 
 ```
 
-`make test` boots the image, drives the shell over a serial socket, checks 53
-behaviours (banner, prompt, `help`, `echo`, `calc`, `cpu`, `mem`, `pmm`,
+`make test` boots the image, drives the shell over a serial socket, checks 62
+behaviours (banner, prompt, `help`, `echo`, output redirection into an ext4
+file, `calc`, `cpu`, `mem`, `pmm`,
 `heap`, `memtest`, `vmtest`, `ticks`, `uptime`, `date`, `time`, `sysinfo`,
 error handling, `color`, and a caught CPU exception), and audits the
 framebuffer screenshot for readability. It also saves that screenshot to

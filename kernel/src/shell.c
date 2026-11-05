@@ -40,7 +40,6 @@ static bool g_stdin_active = false;
 /* Output capture buffer for > and >>. */
 static char g_out_buf[PIPE_BUF_MAX];
 static size_t g_out_len;
-static bool g_capturing = false;
 
 static bool str_eq(const char *a, const char *b) {
     while (*a && *b && *a == *b) {
@@ -89,47 +88,72 @@ void shell_stdin_clear(void) {
 /* Output capture                                                      */
 /* ------------------------------------------------------------------ */
 
-static void capture_write(const char *s) {
-    if (!g_capturing) {
-        console_write(s);
-    } else {
-        while (*s && g_out_len < PIPE_BUF_MAX - 1) {
-            g_out_buf[g_out_len++] = *s++;
-        }
-    }
-}
-
-static void capture_putc(char c) {
-    if (!g_capturing) {
-        console_putc(c);
-    } else if (g_out_len < PIPE_BUF_MAX - 1) {
-        g_out_buf[g_out_len++] = c;
+/* Sink installed while a command runs with its output captured. The console
+ * hands every byte written by a command to this, so `>` and `|` see the real
+ * output instead of the shell's own bookkeeping. */
+static void capture_sink(const char *data, size_t len) {
+    while (len > 0 && g_out_len < PIPE_BUF_MAX - 1) {
+        g_out_buf[g_out_len++] = *data++;
+        len--;
     }
 }
 
 static void start_output_capture(void) {
-    g_capturing = true;
     g_out_len = 0;
     g_out_buf[0] = '\0';
+    console_set_sink(capture_sink);
 }
 
 static const char *stop_output_capture(void) {
-    g_capturing = false;
+    console_set_sink(NULL);
     g_out_buf[g_out_len] = '\0';
     return g_out_buf;
 }
 
-/* Write data to a file on ext4. */
+/* Write data to a file on ext4. The path is resolved like every other path
+ * in the shell: absolute from the root, relative to the working directory.
+ * A missing file is created in its parent directory. */
 static bool write_to_file(const char *path, const char *data, size_t len,
                           bool append) {
     ext4_fs_t *fs = ext4_get_current();
     if (!fs) return false;
 
+    /* Split the path into parent directory and file name: ext4 stores one
+     * name per directory entry, so "/foo/bar" is the directory "foo" plus
+     * the entry "bar". */
+    const char *slash = strrchr(path, '/');
+    char name[EXT4_NAME_MAX + 1];
+    char dir_path[256];
+    uint64_t dir_ino;
     ext4_stat_t st;
+
+    size_t name_len = slash ? strlen(slash + 1) : strlen(path);
+    if (name_len == 0 || name_len > EXT4_NAME_MAX) return false;
+    memcpy(name, slash ? slash + 1 : path, name_len);
+    name[name_len] = '\0';
+
+    if (!slash) {
+        /* No directory part: the current directory. */
+        dir_ino = shell_cwd();
+    } else {
+        size_t dir_len = (size_t)(slash - path);
+        if (dir_len == 0) {
+            dir_path[0] = '/';
+            dir_path[1] = '\0';
+        } else {
+            if (dir_len + 1 > sizeof(dir_path)) return false;
+            memcpy(dir_path, path, dir_len);
+            dir_path[dir_len] = '\0';
+        }
+        dir_ino = shell_resolve_path(fs, dir_path, &st);
+    }
+    if (!dir_ino || !ext4_stat(fs, dir_ino, &st) || !EXT4_S_ISDIR(st.mode)) {
+        return false;
+    }
+
     uint64_t ino;
-    if (!ext4_lookup(fs, ext4_root(fs), path, &st)) {
-        if (!ext4_create(fs, ext4_root(fs), path,
-                         EXT4_S_IFREG | 0644, &ino)) {
+    if (!ext4_lookup(fs, dir_ino, name, &st)) {
+        if (!ext4_create(fs, dir_ino, name, EXT4_S_IFREG | 0644, &ino)) {
             return false;
         }
         st.size = 0;
@@ -304,6 +328,9 @@ static const char *parse_one_cmd(char *line, parsed_cmd_t *cmd, bool *is_or) {
                 p = (char *)skip_ws(p);
                 cmd->redirs[ri].file = p;
                 while (*p && *p != ' ' && *p != '\t' && !is_meta(*p)) p++;
+                /* Cut the target out of the line: without the terminator the
+                 * name would run on into the next word or the pipe. */
+                if (*p == ' ' || *p == '\t') *p++ = '\0';
                 continue;
             } else {
                 p++;
@@ -316,6 +343,7 @@ static const char *parse_one_cmd(char *line, parsed_cmd_t *cmd, bool *is_or) {
                 p = (char *)skip_ws(p);
                 cmd->redirs[ri].file = p;
                 while (*p && *p != ' ' && *p != '\t' && *p != '|') p++;
+                if (*p == ' ' || *p == '\t') *p++ = '\0';
                 continue;
             }
         }
@@ -385,9 +413,9 @@ static int execute_cmd(parsed_cmd_t *cmd) {
                 helix_commands[i].fn(cmd->argc, cmd->argv);
                 const char *captured = stop_output_capture();
                 if (!write_to_file(out_file, captured, g_out_len, append)) {
-                    capture_write("shell: failed to write to '");
-                    capture_write(out_file);
-                    capture_write("'\n");
+                    console_write("shell: failed to write to '");
+                    console_write(out_file);
+                    console_write("'\n");
                     return 1;
                 }
             } else {
@@ -409,24 +437,19 @@ static int execute_cmd(parsed_cmd_t *cmd) {
                  * otherwise try < file redirection. */
                 if (in_file && !shell_stdin_available() && !heredoc) {
                     /* Load file into stdin buffer. */
-                    char *buf = NULL;
-                    size_t len = 0;
                     ext4_fs_t *fs = ext4_get_current();
                     if (fs) {
                         ext4_stat_t st;
-                        uint64_t ino = ext4_lookup(fs, ext4_root(fs),
-                                                    in_file, &st);
-                        if (buf) {
-                            buf = kmalloc(st.size + 1);
+                        uint64_t ino = shell_resolve_path(fs, in_file, &st);
+                        if (ino && EXT4_S_ISREG(st.mode) && st.size > 0) {
+                            char *buf = kmalloc(st.size + 1);
                             if (buf) {
-                                len = ext4_read(fs, ino, 0, buf, st.size);
-                                buf[len] = '\0';
+                                uint64_t n = ext4_read(fs, ino, 0, buf, st.size);
+                                buf[n] = '\0';
+                                shell_stdin_set(buf, n);
+                                kfree(buf);
                             }
                         }
-                    }
-                    if (buf) {
-                        shell_stdin_set(buf, len);
-                        kfree(buf);
                     }
                 }
                 helix_commands[i].fn(cmd->argc, cmd->argv);
@@ -436,9 +459,9 @@ static int execute_cmd(parsed_cmd_t *cmd) {
         }
     }
 
-    capture_write("helixsh: command not found: ");
-    capture_write(cmd->argv[0]);
-    capture_putc('\n');
+    console_write("helixsh: command not found: ");
+    console_write(cmd->argv[0]);
+    console_putc('\n');
     return 127;
 }
 

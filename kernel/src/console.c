@@ -18,11 +18,13 @@
 
 #include "fb.h"
 #include "serial.h"
+#include "kstring.h"
 
 static bool g_fb_ok;
 static bool g_color_enabled = true;
 static console_color_t g_fg = CONSOLE_DEFAULT;
 static console_color_t g_bg = CONSOLE_DEFAULT;
+static console_sink_fn g_sink;
 
 /* ------------------------------------------------------------------ */
 /* Serial (ANSI) colour                                                */
@@ -155,7 +157,15 @@ void console_init(struct limine_framebuffer *fb) {
     apply_colors();
 }
 
+void console_set_sink(console_sink_fn fn) {
+    g_sink = fn;
+}
+
 void console_write(const char *s) {
+    if (g_sink) {
+        g_sink(s, strlen(s));
+        return;
+    }
     serial_write(s);
     if (g_fb_ok) {
         fb_write(s);
@@ -163,6 +173,11 @@ void console_write(const char *s) {
 }
 
 void console_putc(char c) {
+    if (g_sink) {
+        char b[1] = { c };
+        g_sink(b, 1);
+        return;
+    }
     serial_putc(c);
     if (g_fb_ok) {
         fb_putchar(c);

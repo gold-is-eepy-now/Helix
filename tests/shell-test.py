@@ -241,6 +241,18 @@ def main():
         ser.send("echo hello world\n")
         check("echo", "hello world")
 
+        # --- output redirection: > and >> write into a file on ext4 ---
+        ser.send("mkdir /rdir\n")
+        ser.send("echo redirect-body > /rdir/redir.txt\n")
+        ser.send("ls /rdir\n")
+        check("redirect creates a file in a subdirectory",
+              "redir.txt (14 bytes)")
+        ser.send("cat /rdir/redir.txt\n")
+        check("redirected content can be read back", "redirect-body\n")
+        ser.send("echo more >> /rdir/redir.txt\n")
+        ser.send("ls /rdir\n")
+        check("append redirect grows the file", "redir.txt (19 bytes)")
+
         ser.send("calc 6 * 7\n")
         check("calc 6 * 7 = 42", "= 42")
 

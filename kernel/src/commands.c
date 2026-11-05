@@ -853,6 +853,11 @@ static bool ls_ext4_cb(void *ctx, const ext4_stat_t *st,
         console_write("[FILE] ");
     }
     console_write(buf);
+    if (!EXT4_S_ISDIR(st->mode)) {
+        console_write(" (");
+        console_write_dec(st->size);
+        console_write(" bytes)");
+    }
     console_putc('\n');
     console_reset_color();
     return false;
@@ -905,6 +910,44 @@ static void cmd_cat(int argc, char **argv) {
         console_write("cat: missing file operand\n");
         return;
     }
+
+    /* ext4 is the root filesystem, so read from it when it is mounted. */
+    ext4_fs_t *fs = ext4_get_current();
+    if (fs) {
+        ext4_stat_t st;
+        uint64_t ino = resolve_path(fs, argv[1], &st);
+        if (!ino) {
+            console_write("cat: ");
+            console_write(argv[1]);
+            console_write(": No such file\n");
+            return;
+        }
+        if (EXT4_S_ISDIR(st.mode)) {
+            console_write("cat: ");
+            console_write(argv[1]);
+            console_write(": Is a directory\n");
+            return;
+        }
+        if (st.size == 0) {
+            console_putc('\n');
+            return;
+        }
+        char *buf = kmalloc(st.size + 1);
+        if (!buf) {
+            console_write("cat: out of memory\n");
+            return;
+        }
+        uint64_t n = ext4_read(fs, ino, 0, buf, st.size);
+        buf[n] = '\0';
+        console_write(buf);
+        if (n == 0 || buf[n - 1] != '\n') {
+            console_putc('\n');
+        }
+        kfree(buf);
+        return;
+    }
+
+    /* Fallback: helixfs boot filesystem */
     file_entry_t *file = fs_open(argv[1]);
     if (file == NULL) {
         console_write("cat: ");
@@ -969,6 +1012,14 @@ static uint64_t resolve_path(ext4_fs_t *fs, const char *path, ext4_stat_t *out) 
     }
     if (out) *out = st;
     return ino;
+}
+
+uint64_t shell_resolve_path(ext4_fs_t *fs, const char *path, ext4_stat_t *out) {
+    return resolve_path(fs, path, out);
+}
+
+uint64_t shell_cwd(void) {
+    return g_cwd_ino;
 }
 
 static void cmd_cd(int argc, char **argv) {
