@@ -143,14 +143,14 @@ Also, in the same change:
 - **Implemented:** kernel threads with a round-robin scheduler and timer
   preemption via saved context switches — M7, machine-tested via the boot and
   shell suites.
-- **Implemented (M9, partial):** `int $0x80` syscalls, ring-3 entry and exit,
-  a console input syscall, and an ELF64 loader for static `ET_EXEC` images. The
-  userland shell (`usershell`) runs in ring 3, machine-tested. `init` and a real
-  runtime are not done.
+- **Implemented (M9):** `int $0x80` syscalls, ring-3 entry and exit,
+  a console input syscall, an ELF64 loader for static `ET_EXEC` images, the
+  userland shell (`usershell`), and the native `init` process (`userspace/init.c`,
+  PID 1, runnable via shell command `init`), machine-tested.
 - **Implemented (LC-1, Linux compat):** `compat/include/linux/*` headers (types, slab, spinlock, atomic, mutex, module_init, printk) and a self-test driver run at boot. See docs/08-linux-compat.md.
-- **Implemented (Mac/Darwin compat):** `mac-darwin-compat/` subsystem with 64-bit Mach-O loader, Darwin BSD & Mach trap translation, Mac-like case-insensitive filesystem, extended attributes (xattr), property list (.plist) engine, .app bundle resolution, CLI tools (`sw_vers`, `defaults`, `plutil`, `uname`, `otool`, `open`), and AppKit/Cocoa GUI translation to Helix X11 server (`Calculator.app`, `TextEdit.app`), machine-tested (120 checks).
-- **Not implemented:** `init`, a libc-style runtime, process cleanup, isolated driver
-  services, networking, graphics, compatibility layers.
+- **Implemented (Mac/Darwin compat):** `mac-darwin-compat/` subsystem with 64-bit Mach-O loader, Darwin BSD & Mach trap translation, Darwin process runtime (`darwin_runtime.c`), Darwin `launchd` PID 1 daemon with plist service loading and `launchctl` CLI (`launchd.c`), Mac-like case-insensitive filesystem, extended attributes (xattr), property list (.plist) engine, .app bundle resolution, CLI tools (`sw_vers`, `defaults`, `plutil`, `uname`, `otool`, `open`, `launchctl`), and AppKit/Cocoa GUI translation to Helix X11 server (`Calculator.app`, `TextEdit.app`), machine-tested (157 checks).
+- **Not implemented:** libc-style runtime, process cleanup, isolated driver
+  services, networking, graphics, POSIX translation layer.
 
 Do not write documentation or commit messages that imply unimplemented systems
 exist.

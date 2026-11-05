@@ -232,6 +232,7 @@ shows it; typing `myprog arg1 arg2` runs it.
 | `history` | lists the lines typed so far, numbered (Up/Down recall them) |
 | `usermode` | runs a built-in test program in ring 3; it writes a line through the syscall gate and exits with status 7 |
 | `usershell` | runs the userland shell in ring 3 (an ELF loaded into its own process); type `exit` to return |
+| `init` | runs the system init process in ring 3 (PID 1 bootstrap sequence) |
 | `calc` | `calc <a> <op> <b>` for `+ - * / %` (integers only) |
 | `clear` | clear the screen |
 | `color` | turn ANSI colour on/off: `color on`, `color off` |
