@@ -11,3 +11,4 @@ tests/__pycache__/
 mac-darwin-compat/darwin-exec
 mac-darwin-compat/mac_test
 mac-darwin-compat/**/*.o
+third-party/linux
