@@ -45,20 +45,31 @@ linked as a static ELF at `0x400000`, and embedded in the kernel as a blob
 `PT_LOAD` segments into a new address space, respecting the write and execute
 flags, and zeroes bss.
 
-The shell talks to the kernel only through two native syscalls:
+The shell talks to the kernel through these native syscalls:
 
 - `SYS_READ_INPUT` (22) with fd 0 returns one console character, or `-1` if none
   is waiting. Ring 3 runs with interrupts off, so the program polls it.
-- `SYS_DEBUG_WRITE` (26) writes a user buffer to the console. This is temporary;
-  the real write path needs console handles.
+- `SYS_OPEN` (27), `SYS_CLOSE` (28) and `SYS_LSEEK` (29) open, close and
+  reposition files. Paths are absolute (`/note.txt`) and resolve on the ext4 root.
+  Flags are the Linux values (`O_WRONLY`, `O_CREAT`, `O_TRUNC`, …). The running
+  process has a descriptor table of 16 entries, reset at each launch (one process runs
+  at a time); 0, 1 and 2 are the console.
+- `SYS_READ` (20) and `SYS_WRITE` (21) move bytes between a descriptor and a user
+  buffer. `write` to fd 1 or 2 reaches the console. Both copy in 512-byte pieces
+  after checking the user range is mapped and user-accessible.
+- `SYS_BRK` (24) moves the program break. The heap starts at `0x10000000` and may
+  grow to 2 MiB. Pages are mapped zeroed as the break moves up.
+- `SYS_DEBUG_WRITE` (26) writes a user buffer to the console. Temporary; `SYS_WRITE`
+  to fd 1 now does the same job.
 
-Built-ins: `echo`, `history`, `help`, `exit`. Up and Down recall the last 16
-lines. Typing `exit` returns to the kernel shell with status 0.
+Built-ins: `echo`, `cat`, `write`, `heap`, `history`, `help`, `exit`. Up and Down
+recall the last 16 lines. Typing `exit` returns to the kernel shell with status 0.
 
 > **Known limitations.** `init` runs at boot and exits; it does not start the
-> shell, and the kernel shell still runs in the kernel. Userland cannot yet open
-> or write files: `helix_write_fd` sends its output to the console only, and the
-> ext4-backed `SYS_WRITE` path for other descriptors is not used by any program.
+> shell, and the kernel shell still runs in the kernel. Userland file paths must
+> be absolute and there are no directories, permissions, `dup` or pipes. Shrinking
+> the break does not unmap pages until the process exits. `helix_malloc` does not
+> coalesce freed blocks. The kernel-heap `SYS_ALLOC` remains for the test programs.
 
 ## The input layer — two devices, one stream
 
@@ -231,7 +242,7 @@ shows it; typing `myprog arg1 arg2` runs it.
 | `echo` | prints its arguments |
 | `history` | lists the lines typed so far, numbered (Up/Down recall them) |
 | `usermode` | runs a built-in test program in ring 3; it writes a line through the syscall gate and exits with status 7 |
-| `usershell` | runs the userland shell in ring 3 (an ELF loaded into its own process); type `exit` to return |
+| `usershell` | runs the userland shell in ring 3 (an ELF loaded into its own process); type `exit` to return. Inside it: `cat <path>`, `write <path> <text>` and `heap` (a 64 KiB brk heap check) |
 | `init` | runs the system init process in ring 3 (PID 1 bootstrap sequence) |
 | `calc` | `calc <a> <op> <b>` for `+ - * / %` (integers only) |
 | `clear` | clear the screen |

@@ -77,6 +77,9 @@ static inline uint64_t helix_syscall(uint64_t native_num,
 #define SYS_EXIT               23
 #define SYS_BRK                24
 #define SYS_EXECVE             25
+#define SYS_OPEN               27   /* open(path, flags) */
+#define SYS_CLOSE              28   /* close(fd) */
+#define SYS_LSEEK              29   /* lseek(fd, offset, whence) */
 
 /* Return values / error codes. */
 #define HELIX_SUCCESS          0
@@ -96,9 +99,28 @@ static inline uint64_t helix_syscall(uint64_t native_num,
  * Standard API function declarations.
  * ----------------------------------------------------------- */
 
-/* Memory management. */
+/* Files. Paths are absolute ("/bin/sh"). Flags use the Linux values. */
+#define HELIX_O_RDONLY 0x0
+#define HELIX_O_WRONLY 0x1
+#define HELIX_O_RDWR   0x2
+#define HELIX_O_CREAT  0x40
+#define HELIX_O_TRUNC  0x200
+#define HELIX_SEEK_SET 0
+#define HELIX_SEEK_CUR 1
+#define HELIX_SEEK_END 2
+int helix_open(const char *path, int flags);
+int64_t helix_read(int fd, void *buf, size_t count);
+int64_t helix_write(int fd, const void *buf, size_t count);
+int helix_close(int fd);
+int64_t helix_lseek(int fd, int64_t offset, int whence);
+
+/* Memory management. helix_malloc/helix_free_mem use the program break (brk),
+ * so they allocate from this process's own heap. helix_alloc is the older
+ * kernel-heap call and is kept for the kernel test programs. */
 void *helix_alloc(size_t bytes);
 void helix_free(void *ptr);
+void *helix_malloc(size_t bytes);
+void helix_free_mem(void *ptr);
 int helix_map(void *virt, void *phys, uint64_t flags);
 int helix_unmap(void *virt);
 uint64_t helix_brk(uint64_t brk);

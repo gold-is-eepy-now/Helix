@@ -14,6 +14,7 @@
 #include "heap.h"
 #include "kstring.h"
 #include "pmm.h"
+#include "ufile.h"
 #include "vmm.h"
 
 /* Defined in usermode.S. */
@@ -52,6 +53,12 @@ static uint64_t g_save[8];
 static bool g_active;
 static vmm_as_t g_kernel_as;
 
+/* The running process's page list and program break. brk grows the heap by
+ * adding pages to g_proc_pages, so process exit frees them with the rest. */
+#define USER_HEAP_BASE  0x10000000ULL
+#define USER_HEAP_LIMIT (USER_HEAP_BASE + 2ULL * 1024 * 1024)
+static uint64_t g_brk;
+
 bool usermode_is_active(void) {
     return g_active;
 }
@@ -72,7 +79,7 @@ void usermode_exit(uint64_t status) {
 #define ELF_PF_W        0x2
 #define ELF_PHDR_SIZE   56
 #define ELF_MAX_PHDRS   16
-#define ELF_MAX_PAGES   256
+#define ELF_MAX_PAGES   640   /* code, stack and up to a 2 MiB heap */
 
 #define USER_STACK_PAGES 4
 #define USER_STACK_BASE  0x800000ULL   /* stack occupies [base, base + 16 KiB) */
@@ -120,6 +127,9 @@ typedef struct {
     user_page_t pages[ELF_MAX_PAGES];
     size_t count;
 } user_pages_t;
+
+/* The running process's page list (set while it runs; see usermode_brk). */
+static user_pages_t *g_proc_pages;
 
 /* Free every data and stack frame a process was given, then the list itself. */
 static void free_user_pages(user_pages_t *up) {
@@ -215,11 +225,34 @@ static bool elf_load_segments(const uint8_t *img, size_t len, const elf64_ehdr_t
     return false;
 }
 
+/* Move the program break for the running process (the brk system call).
+ * brk(0) reads it. A new break is accepted only inside the heap window; pages
+ * between the old and new break are mapped zeroed. Shrinking only moves the
+ * break: the pages stay mapped until the process exits. A refused request
+ * returns the old break, as brk(2) does. Returns 0 when no process is running. */
+uint64_t usermode_brk(uint64_t want) {
+    if (!g_active || g_proc_pages == NULL) return 0;
+    if (want == 0) return g_brk;
+    if (want < USER_HEAP_BASE || want > USER_HEAP_LIMIT) return g_brk;
+
+    uint64_t va = (g_brk + 4095ULL) & ~4095ULL;
+    uint64_t end = (want + 4095ULL) & ~4095ULL;
+    for (; va < end; va += 4096) {
+        uint8_t *dst = NULL;
+        if (!user_page_get(g_proc_pages, va, VMM_PRESENT | VMM_WRITE | VMM_USER | VMM_NX, &dst)) {
+            return g_brk;
+        }
+    }
+    g_brk = want;
+    return g_brk;
+}
+
 /* Run a static ELF64 image in a new process. Returns its exit status, -1 if the
  * process could not be set up, or -2 if the image is not a loadable executable. */
 int64_t usermode_run_elf(const uint8_t *img, size_t len) {
     elf64_ehdr_t eh;
     if (!elf_validate(img, len, &eh)) return -2;
+    ufile_reset();
 
     g_kernel_as = *vmm_current_as();
     vmm_as_t *as = vmm_create_as();
@@ -243,14 +276,19 @@ int64_t usermode_run_elf(const uint8_t *img, size_t len) {
         return -1;
     }
 
+    g_proc_pages = up;
+    g_brk = USER_HEAP_BASE;
     g_active = true;
     int64_t status = (int64_t)usermode_run(entry, USER_STACK_TOP,
                                            g_save,
                                            gdt_user_code_selector(),
                                            gdt_user_data_selector());
     /* The process has exited. Return to the kernel's address space, then give
-     * back everything the process owned. */
+     * back everything the process owned: its pages, heap included, and its
+     * open files. */
     vmm_switch_as(&g_kernel_as);
+    g_proc_pages = NULL;
+    ufile_reset();
     free_user_pages(up);
     vmm_destroy_as(as);
     return status;

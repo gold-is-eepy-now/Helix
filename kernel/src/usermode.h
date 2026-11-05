@@ -21,6 +21,11 @@ int64_t usermode_run_user_shell(void);
 /* Run the system init process embedded in the kernel (PID 1). */
 int64_t usermode_run_init(void);
 
+/* Program break of the running process (see usermode.c). brk(0) queries it.
+ * Returns the new break, the old one if the request is refused, or 0 when no
+ * process is running. */
+uint64_t usermode_brk(uint64_t want);
+
 /* True while a user program is running (its exit syscall unwinds to the launcher). */
 bool usermode_is_active(void);
 

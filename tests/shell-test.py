@@ -246,6 +246,22 @@ def main():
         check("userland shell starts in ring 3", "userland shell (ring 3)")
         ser.send("echo ring3-ok\n")
         check("userland shell echo command", "\nring3-ok\n")
+        # M9 file I/O: write creates a file on ext4, cat reads it back through a
+        # descriptor, and a missing path is refused.
+        ser.send("write /note.txt gold-42\n")
+        check("ring 3 write() creates and fills a file", "wrote 7 bytes")
+        ser.send("cat /note.txt\n")
+        check("ring 3 read() returns the written bytes", "\ngold-42")
+        ser.send("write /note.txt x\n")
+        check("write truncates an existing file (O_TRUNC)", "wrote 1 bytes")
+        ser.send("cat /note.txt\n")
+        check("truncated file reads back the new contents", "\nx")
+        ser.send("cat /no-such-file\n")
+        check("open() of a missing path fails cleanly", "cat: cannot open /no-such-file")
+        # M9 heap: brk grows the process heap; malloc fills, verifies, frees, reuses.
+        ser.send("heap\n")
+        check("ring 3 heap via brk: 64 KiB written, verified and reused",
+              "heap: 65536 bytes written and verified, freed block reused")
         ser.send("exit\n")
         check("userland shell exits with status 0", "usershell: ring 3 exited with status 0")
 
@@ -258,6 +274,17 @@ def main():
         frames_after = pmm_allocated(ser)
         check_true("process frames are freed on exit (allocated count unchanged)",
                    frames_before is not None and frames_after == frames_before)
+
+        # Heap teardown (M9): pages a process adds with brk are freed when it exits,
+        # like its ELF pages. This run grows the heap by 64 KiB and then exits.
+        heap_before = pmm_allocated(ser)
+        ser.send("usershell\n")
+        ser.send("heap\n")
+        ser.send("exit\n")
+        check("usershell heap run exits cleanly", "usershell: ring 3 exited with status 0")
+        heap_after = pmm_allocated(ser)
+        check_true("brk heap frames are freed on exit (allocated count unchanged)",
+                   heap_before is not None and heap_after == heap_before)
 
         ser.send("cpu\n")
         check("cpu reports vendor", "Vendor:")

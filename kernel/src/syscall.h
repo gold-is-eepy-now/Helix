@@ -50,7 +50,12 @@ enum {
     SYSCALL_BRK,
     SYSCALL_EXECVE,
     SYSCALL_DEBUG_WRITE,   /* temporary: write a user buffer to the console */
+    SYSCALL_OPEN,          /* open(path, flags) -> fd, or -1 */
+    SYSCALL_CLOSE,         /* close(fd) -> 0, or -1 */
+    SYSCALL_LSEEK,         /* lseek(fd, offset, whence) -> new offset, or -1 */
 };
+
+/* Numbers are append-only: user programs (libhelix.h) depend on them. */
 
 /* System call handler signature. All syscalls use a uniform 7-argument
  * interface matching the x86_64 ABI: rax = syscall number, then rdi,

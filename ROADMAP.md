@@ -196,14 +196,25 @@ first arrival delivers, both resume correctly).
   (checked in `tests/shell-test.py`).
 - ✅ Console output from userland: `helix_write_fd` writes to the console
   through the temporary debug-write syscall.
-- 🚧 A minimal native runtime: `libhelix` (formatting, syscalls, console output)
-  plus the userland shell (`usershell`) with its own line editor and 16-entry
-  history. It is not a libc, and userland cannot open or write files yet.
+- ✅ Userland file I/O on the ext4 root: `SYS_OPEN`, `SYS_CLOSE`, `SYS_LSEEK`,
+  and real `SYS_READ`/`SYS_WRITE` through a per-process descriptor table (16
+  entries, console on 0–2). User pointers are checked against the page tables
+  before the kernel touches them (`usermem.c`). Checked in `tests/shell-test.py`
+  by `write`, `cat` and a missing-path open in the userland shell.
+- ✅ Real `brk`: a per-process heap at `0x10000000`, up to 2 MiB, mapped zeroed as
+  it grows and freed at exit. `libhelix` has `helix_malloc`/`helix_free_mem` on
+  top of it. Checked by the `heap` command and by a frame-count test.
+- 🚧 A minimal native runtime: `libhelix` (formatting, syscalls, file wrappers,
+  brk-backed malloc) plus the userland shell (`usershell`) with its own line
+  editor and 16-entry history. It is not a libc: no `argv`, no stdio, no
+  `execve`.
 
-**M9 exit gate:** not yet passed. Ring-3 processes, the ELF loader, boot-time
-`init` and process teardown work. Still missing: a libc-style runtime, file I/O
-from userland, and `init` starting the shell (the kernel shell still runs in the
-kernel).
+**M9 exit gate:** not yet passed. Done: ring-3 processes, the ELF loader,
+boot-time `init`, process teardown, userland file I/O, and brk. Still missing:
+a libc-style runtime with `argv` and stdio, a real `execve` (nested launch of a
+file from the root), installing `/bin/init` and `/bin/sh` on the root at boot,
+and `init` starting `/bin/sh` and waiting for it (the kernel shell still runs
+in the kernel).
 
 ## M10 — Driver framework and isolated drivers 🚧
 

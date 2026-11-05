@@ -30,6 +30,8 @@
 #include "usermode.h"
 #include "vmm.h"
 #include "ext4.h"
+#include "ufile.h"
+#include "usermem.h"
 
 /* Per-process system call table. Currently one system table for kernel
  * initialization; M9 will add per-process tables when user threads exist.
@@ -64,6 +66,9 @@ static uint64_t handle_exit(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, 
 static uint64_t handle_brk(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
 static uint64_t handle_execve(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
 static uint64_t handle_debug_write(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
+static uint64_t handle_open(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
+static uint64_t handle_fd_close(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
+static uint64_t handle_lseek(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
 
 void syscall_init(void) {
     for (size_t i = 0; i < 64u; i++) {
@@ -96,6 +101,9 @@ void syscall_init(void) {
     syscall_table[SYSCALL_BRK]           = handle_brk;
     syscall_table[SYSCALL_EXECVE]        = handle_execve;
     syscall_table[SYSCALL_DEBUG_WRITE]   = handle_debug_write;
+    syscall_table[SYSCALL_OPEN]          = handle_open;
+    syscall_table[SYSCALL_CLOSE]         = handle_fd_close;
+    syscall_table[SYSCALL_LSEEK]         = handle_lseek;
 }
 
 /* -- Handler implementations ------------------------------------------ */
@@ -243,35 +251,73 @@ static uint64_t handle_object_retain(uint64_t a1, uint64_t a2, uint64_t a3, uint
     return 0;
 }
 
+/* Largest piece moved between user memory and a kernel buffer at a time. */
+#define IO_CHUNK 512u
+
+/* read(fd, buf, count): fd 0 is the console and is read with SYS_READ_INPUT, so
+ * it returns -1 here. Other descriptors read from their file. Returns the number
+ * of bytes read (0 at end of file), or -1. */
 static uint64_t handle_read(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     (void)a4; (void)a5; (void)a6; (void)a7;
-    ext4_fs_t *fs = ext4_get_current();
-    if (fs == NULL) {
-        kprintf("[syscall] read: ext4 not mounted\n");
-        return -1;
+    if (a1 < 3) return UINT64_MAX;
+    if (!usermem_valid(a2, a3, true)) return UINT64_MAX;
+    uint8_t kbuf[IO_CHUNK];
+    uint64_t total = 0;
+    while (total < a3) {
+        uint64_t want = a3 - total < IO_CHUNK ? a3 - total : IO_CHUNK;
+        int64_t got = ufile_read((int64_t)a1, kbuf, want);
+        if (got < 0) return total > 0 ? total : UINT64_MAX;
+        if (got == 0) break;
+        usermem_copy_out(a2 + total, kbuf, (uint64_t)got);
+        total += (uint64_t)got;
+        if ((uint64_t)got < want) break;
     }
-    /* a1 = file handle, a2 = user buffer, a3 = count */
-    /* For now, simplified: read from the root file if handle is valid */
-    uint8_t buf[4096];
-    uint64_t nread = ext4_read(fs, 2, a2, buf, a3); /* simplified: always read from root inode */
-    if (nread == 0) return 0;
-    /* Copy kernel-space result back to user buffer (simplified) */
-    return nread;
+    return total;
 }
 
+/* write(fd, buf, count): fd 1 and 2 go to the console; other descriptors write
+ * to their file. Returns the number of bytes written, or -1. */
 static uint64_t handle_write(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     (void)a4; (void)a5; (void)a6; (void)a7;
-    ext4_fs_t *fs = ext4_get_current();
-    if (fs == NULL) {
-        kprintf("[syscall] write: ext4 not mounted\n");
-        return -1;
+    if (!usermem_valid(a2, a3, false)) return UINT64_MAX;
+    uint8_t kbuf[IO_CHUNK];
+    uint64_t total = 0;
+    while (total < a3) {
+        uint64_t want = a3 - total < IO_CHUNK ? a3 - total : IO_CHUNK;
+        usermem_copy_in(kbuf, a2 + total, want);
+        if (a1 == 1 || a1 == 2) {
+            for (uint64_t i = 0; i < want; i++) console_putc((char)kbuf[i]);
+            total += want;
+            continue;
+        }
+        int64_t put = ufile_write((int64_t)a1, kbuf, want);
+        if (put < 0) return total > 0 ? total : UINT64_MAX;
+        total += (uint64_t)put;
+        if ((uint64_t)put < want) break;
     }
-    /* a1 = file handle, a2 = user buffer, a3 = count */
-    /* For now, simplified: write to root file */
-    uint8_t buf[4096];
-    /* Copy from user buffer - simplified, just attempt write */
-    uint64_t nwritten = ext4_write(fs, 2, a2, buf, a3); /* simplified */
-    return nwritten;
+    return total;
+}
+
+/* open(path, flags): path is a NUL-terminated absolute path in user memory.
+ * Returns a descriptor, or -1. */
+static uint64_t handle_open(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
+    (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
+    char path[256];
+    if (!usermem_copy_str(path, sizeof(path), a1)) return UINT64_MAX;
+    int64_t fd = ufile_open(path, a2);
+    return fd < 0 ? UINT64_MAX : (uint64_t)fd;
+}
+
+static uint64_t handle_fd_close(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
+    (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
+    return ufile_close((int64_t)a1) < 0 ? UINT64_MAX : 0;
+}
+
+/* lseek(fd, offset, whence): offset is signed. Returns the new position. */
+static uint64_t handle_lseek(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
+    (void)a4; (void)a5; (void)a6; (void)a7;
+    int64_t pos = ufile_seek((int64_t)a1, (int64_t)a2, (int)a3);
+    return pos < 0 ? UINT64_MAX : (uint64_t)pos;
 }
 
 /* read_input(fd): return the next console character, or (uint64_t)-1 if none.
@@ -309,21 +355,10 @@ static uint64_t handle_exit(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, 
     return 0;
 }
 
+/* brk(addr): move the process's program break. See usermode_brk. */
 static uint64_t handle_brk(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
-    /* a1 = new program break value.
-     * For now, just validate and return current break.
-     * Real implementation would grow/shrink heap and switch program break. */
-    uint64_t prev_brk = heap_brk();
-    if (a1 == 0) return prev_brk;
-    /* Simple: allow setting break to current + offset (if within heap) */
-    if (a1 > prev_brk) {
-        /* Try to extend heap - simplified */
-        uint64_t result = (uint64_t)kmalloc(a1 - prev_brk);
-        if (result == UINT64_MAX) return prev_brk;
-        return a1;
-    }
-    return prev_brk;
+    return usermode_brk(a1);
 }
 
 /* ELF segment loading flags. */

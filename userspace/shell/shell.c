@@ -9,7 +9,8 @@
  *                          until a real write path exists);
  *   SYS_EXIT               via helix_exit, when `exit` is typed.
  *
- * Built-ins: echo, history, help, exit. Up/Down recall the last 16 lines. */
+ * Built-ins: echo, cat, write, heap, history, help, exit. Up/Down recall the
+ * last 16 lines. */
 #include "libhelix.h"
 
 #define SYS_DEBUG_WRITE_NUM 26u
@@ -148,6 +149,62 @@ static void cmd_history(void) {
     }
 }
 
+/* cat PATH: print the file's bytes exactly. */
+static void cmd_cat(const char *path) {
+    int fd = helix_open(path, HELIX_O_RDONLY);
+    if (fd < 0) {
+        say("cat: cannot open ");
+        say(path);
+        say("\n");
+        return;
+    }
+    char buf[128];
+    int64_t n;
+    while ((n = helix_read(fd, buf, sizeof(buf))) > 0) {
+        out(buf, (size_t)n);
+    }
+    helix_close(fd);
+}
+
+/* write PATH TEXT: create or replace PATH with TEXT (no newline added). */
+static void cmd_write(const char *path, const char *text) {
+    int fd = helix_open(path, HELIX_O_WRONLY | HELIX_O_CREAT | HELIX_O_TRUNC);
+    if (fd < 0) {
+        say("write: cannot open ");
+        say(path);
+        say("\n");
+        return;
+    }
+    size_t n = 0;
+    while (text[n] != '\0') n++;
+    int64_t put = helix_write(fd, text, n);
+    helix_close(fd);
+    say("wrote ");
+    say_dec(put < 0 ? 0u : (size_t)put);
+    say(" bytes\n");
+}
+
+/* heap: allocate 64 KiB on the program break, fill and check it, free it, then
+ * allocate a small block and confirm the freed block is reused. */
+#define HEAP_TEST_BYTES 65536u
+static void cmd_heap(void) {
+    unsigned char *p = helix_malloc(HEAP_TEST_BYTES);
+    if (p == NULL) {
+        say("heap: malloc failed\n");
+        return;
+    }
+    for (size_t i = 0; i < HEAP_TEST_BYTES; i++) p[i] = (unsigned char)(i * 7u);
+    int ok = 1;
+    for (size_t i = 0; i < HEAP_TEST_BYTES; i++) {
+        if (p[i] != (unsigned char)(i * 7u)) { ok = 0; break; }
+    }
+    helix_free_mem(p);
+    unsigned char *q = helix_malloc(1024);
+    int reused = q == p;
+    say(ok ? "heap: 65536 bytes written and verified" : "heap: FAILED verification");
+    say(reused ? ", freed block reused\n" : ", freed block not reused\n");
+}
+
 /* Run one non-empty line. Returns 1 if the shell should exit. */
 static int run_line(const char *line) {
     if (str_eq(line, "exit")) return 1;
@@ -156,8 +213,31 @@ static int run_line(const char *line) {
         return 0;
     }
     if (str_eq(line, "help")) {
-        say("commands: echo <text>, history, help, exit\n");
+        say("commands: echo <text>, cat <path>, write <path> <text>,\n");
+        say("          heap, history, help, exit\n");
         say("Up/Down recall earlier lines.\n");
+        return 0;
+    }
+    if (str_eq(line, "heap")) {
+        cmd_heap();
+        return 0;
+    }
+    if (starts_with(line, "cat") && line[3] == ' ') {
+        cmd_cat(line + 4);
+        return 0;
+    }
+    if (starts_with(line, "write") && line[5] == ' ') {
+        /* The path is the next word; the text is the rest of the line. */
+        char path[128];
+        const char *p = line + 6;
+        size_t n = 0;
+        while (p[n] != '\0' && p[n] != ' ' && n < sizeof(path) - 1) {
+            path[n] = p[n];
+            n++;
+        }
+        path[n] = '\0';
+        const char *text = p[n] == ' ' ? p + n + 1 : p + n;
+        cmd_write(path, text);
         return 0;
     }
     /* `echo` alone prints an empty line; `echo text` prints text. */

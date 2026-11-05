@@ -17,13 +17,12 @@ int main(int argc, char **argv)
     helix_write_fd(1, "========================================\n");
 
     helix_write_fd(1, "[init] starting system services...\n");
-    helix_write_fd(1, "[init] mounting virtual filesystems... [OK]\n");
-    helix_write_fd(1, "[init] initializing subsystem runtimes... [OK]\n");
+    helix_write_fd(1, "[init] (no services yet: file-backed startup is M9 work)\n");
     helix_write_fd(1, "[init] launching user environment...\n\n");
 
     /* Yield to scheduler to allow queued threads to advance */
     helix_yield();
 
-    helix_write_fd(1, "[init] system ready.\n");
+    helix_write_fd(1, "[init] done.\n");
     helix_exit(0);
 }

@@ -147,11 +147,14 @@ Also, in the same change:
   a console input syscall, an ELF64 loader for static `ET_EXEC` images, the
   userland shell (`usershell`), and the native `init` process (`userspace/init.c`,
   PID 1, started at boot and runnable via the shell command `init`), with process
-  teardown on exit. Machine-tested.
+  teardown on exit. Userland file I/O on the ext4 root (`open`/`read`/`write`/
+  `close`/`lseek`, a per-process descriptor table, checked user pointers) and a
+  real `brk` heap. Machine-tested.
 - **Implemented (LC-1, Linux compat):** `compat/include/linux/*` headers (types, slab, spinlock, atomic, mutex, module_init, printk) and a self-test driver run at boot. See docs/08-linux-compat.md.
 - **Implemented (Mac/Darwin compat):** `mac-darwin-compat/` subsystem with 64-bit Mach-O loader, Darwin BSD & Mach trap translation, Darwin process runtime (`darwin_runtime.c`), Darwin `launchd` PID 1 daemon with plist service loading and `launchctl` CLI (`launchd.c`), Mac-like case-insensitive filesystem, extended attributes (xattr), property list (.plist) engine, .app bundle resolution, CLI tools (`sw_vers`, `defaults`, `plutil`, `uname`, `otool`, `open`, `launchctl`), and AppKit/Cocoa GUI translation to Helix X11 server (`Calculator.app`, `TextEdit.app`), machine-tested (157 checks).
-- **Not implemented:** libc-style runtime, userland file I/O, isolated driver
-  services, networking, graphics, POSIX translation layer.
+- **Not implemented:** a libc-style runtime (only `libhelix`: no argv, stdio or
+  `execve`), `execve` and `/bin/sh` (M9 remainder), isolated driver services,
+  networking, graphics, POSIX translation layer.
 
 Do not write documentation or commit messages that imply unimplemented systems
 exist.

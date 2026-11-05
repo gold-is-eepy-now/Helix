@@ -33,6 +33,38 @@ static void *memcpy(void *restrict dst, const void *restrict src, size_t n)
     return dst;
 }
 
+/* -- Files ----------------------------------------------------------------- */
+
+int helix_open(const char *path, int flags)
+{
+    uint64_t r = helix_syscall(SYS_OPEN, (uint64_t)(uintptr_t)path, (uint64_t)flags, 0, 0, 0, 0, 0);
+    return r == (uint64_t)-1 ? -1 : (int)r;
+}
+
+int64_t helix_read(int fd, void *buf, size_t count)
+{
+    uint64_t r = helix_syscall(SYS_READ, (uint64_t)fd, (uint64_t)(uintptr_t)buf, (uint64_t)count, 0, 0, 0, 0);
+    return r == (uint64_t)-1 ? -1 : (int64_t)r;
+}
+
+int64_t helix_write(int fd, const void *buf, size_t count)
+{
+    uint64_t r = helix_syscall(SYS_WRITE, (uint64_t)fd, (uint64_t)(uintptr_t)buf, (uint64_t)count, 0, 0, 0, 0);
+    return r == (uint64_t)-1 ? -1 : (int64_t)r;
+}
+
+int helix_close(int fd)
+{
+    uint64_t r = helix_syscall(SYS_CLOSE, (uint64_t)fd, 0, 0, 0, 0, 0, 0);
+    return r == (uint64_t)-1 ? -1 : 0;
+}
+
+int64_t helix_lseek(int fd, int64_t offset, int whence)
+{
+    uint64_t r = helix_syscall(SYS_LSEEK, (uint64_t)fd, (uint64_t)offset, (uint64_t)whence, 0, 0, 0, 0);
+    return r == (uint64_t)-1 ? -1 : (int64_t)r;
+}
+
 /* -- Memory management ----------------------------------------------------- */
 
 void *helix_alloc(size_t bytes)
@@ -66,6 +98,57 @@ int helix_unmap(void *virt)
 uint64_t helix_brk(uint64_t brk)
 {
     return helix_syscall(SYS_BRK, brk, 0, 0, 0, 0, 0, 0);
+}
+
+/* A small allocator on the program break. Every block has a 16-byte header
+ * holding its usable size and, while free, a link to the next free block.
+ * malloc takes the first free block that is large enough, else it moves the
+ * break up. free puts the block on the free list. There is no coalescing, so
+ * freed memory is reused only for requests it can hold. */
+typedef struct hblock {
+    size_t size;               /* usable bytes after the header */
+    struct hblock *next;       /* free-list link (valid only while free) */
+} hblock_t;
+
+#define HBLOCK_HDR 16u
+#define HALIGN     16u
+static hblock_t *g_free_blocks;
+
+void *helix_malloc(size_t bytes)
+{
+    size_t need = (bytes + HALIGN - 1u) & ~(size_t)(HALIGN - 1u);
+    if (need == 0) need = HALIGN;
+
+    /* First fit from the free list. */
+    hblock_t **link = &g_free_blocks;
+    while (*link != NULL) {
+        hblock_t *b = *link;
+        if (b->size >= need) {
+            *link = b->next;
+            return (char *)b + HBLOCK_HDR;
+        }
+        link = &b->next;
+    }
+
+    /* Grow the break. brk returns the old break if it refuses. */
+    uint64_t cur = helix_brk(0);
+    if (cur == 0) return NULL;
+    uint64_t total = HBLOCK_HDR + need;
+    uint64_t want = cur + total;
+    if (helix_brk(want) != want) return NULL;
+
+    hblock_t *b = (hblock_t *)(uintptr_t)cur;
+    b->size = need;
+    b->next = NULL;
+    return (char *)b + HBLOCK_HDR;
+}
+
+void helix_free_mem(void *ptr)
+{
+    if (ptr == NULL) return;
+    hblock_t *b = (hblock_t *)((char *)ptr - HBLOCK_HDR);
+    b->next = g_free_blocks;
+    g_free_blocks = b;
 }
 
 /* -- Object / handle API --------------------------------------------------- */
@@ -169,10 +252,7 @@ long helix_channel_recv(handle_t channel, void *buf, size_t size)
 
 /* -- String / utility ------------------------------------------------------ */
 
-/* Write formatted output to fd. Output to the console (fd 1 or 2) goes through
- * SYS_DEBUG_WRITE, because the ext4-backed SYS_WRITE does not reach the console
- * yet. Other fds use SYS_WRITE. The kernel accepts at most 256 bytes per call,
- * so long output is sent in pieces.
+/* Write formatted output to fd through SYS_WRITE (fd 1 and 2 are the console).
  * Supports %s, %d, %u, %llu/%lu, %p only — no libc printf. */
 int helix_write_fd(int fd, const char *fmt, ...)
 {
@@ -242,22 +322,9 @@ int helix_write_fd(int fd, const char *fmt, ...)
     buf[len] = '\0';
     va_end(ap);
 
-    if (fd != 1 && fd != 2) {
-        uint64_t result = helix_syscall(SYS_WRITE, (uint64_t)fd,
-                                        (uint64_t)(uintptr_t)buf,
-                                        (uint64_t)len, 0, 0, 0, 0);
-        return (int)result;
-    }
-
-    int sent = 0;
-    while (sent < len) {
-        int chunk = len - sent;
-        if (chunk > 256) chunk = 256;
-        helix_syscall(SYS_DEBUG_WRITE, (uint64_t)(uintptr_t)(buf + sent),
-                      (uint64_t)chunk, 0, 0, 0, 0, 0);
-        sent += chunk;
-    }
-    return sent;
+    /* One write call: the kernel moves it to the console (fd 1, 2) or to the
+     * descriptor's file, in pieces of IO_CHUNK. */
+    return (int)helix_write(fd, buf, (size_t)len);
 }
 
 /* Read a line from fd (1=stdin). */
@@ -281,11 +348,11 @@ char *helix_read_line(int fd)
     return buf;
 }
 
-/* String duplication (kernel heap). */
+/* String duplication (program heap). */
 char *helix_strdup(const char *s)
 {
     size_t len = helix_strlen(s);
-    char *dst = (char *)helix_alloc(len + 1);
+    char *dst = (char *)helix_malloc(len + 1);
     if (dst == NULL) return NULL;
     memcpy(dst, s, len + 1);
     return dst;
@@ -310,12 +377,12 @@ int helix_strcmp(const char *s1, const char *s2)
     return (int)(unsigned char)s1[i] - (int)(unsigned char)s2[i];
 }
 
-/* Concatenate strings (kernel heap result). */
+/* Concatenate strings (program heap result). */
 char *helix_strcat(char *restrict s1, const char *restrict s2)
 {
     size_t n1 = helix_strlen(s1);
     size_t n2 = helix_strlen(s2);
-    char *dst = (char *)helix_alloc(n1 + n2 + 1);
+    char *dst = (char *)helix_malloc(n1 + n2 + 1);
     if (dst == NULL) return NULL;
     memcpy(dst, s1, n1);
     memcpy(dst + n1, s2, n2);
