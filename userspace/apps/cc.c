@@ -16,9 +16,21 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/mman.h>
 #include <fcntl.h>
-#include <sys/stat.h>
+
+static int asprintf(char **strp, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    char buf[512];
+    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    if (n < 0) {
+        *strp = NULL;
+        return -1;
+    }
+    *strp = strdup(buf);
+    return n;
+}
 
 /* ======================= TOKENIZER ======================= */
 
@@ -64,7 +76,7 @@ static token_t *make_token(token_type_t type, const char *start, int len, int li
 
 static int is_keyword(const char *s, int len) {
     for (int i = 0; keywords[i]; i++) {
-        if (strlen(keywords[i]) == len && strncmp(keywords[i], s, len) == 0)
+        if ((int)strlen(keywords[i]) == len && strncmp(keywords[i], s, len) == 0)
             return 1;
     }
     return 0;
@@ -173,7 +185,7 @@ typedef struct {
     token_t *token;
 } parser_t;
 
-static token_t *peek(parser_t *p) { return p->token; }
+__attribute__((unused)) static token_t *peek(parser_t *p) { return p->token; }
 static token_t *consume(parser_t *p) { token_t *t = p->token; p->token = p->token->next; return t; }
 static int match(parser_t *p, token_type_t type) { return p->token && p->token->type == type; }
 static int expect(parser_t *p, token_type_t type) {
@@ -442,6 +454,7 @@ static void gen_expr(ast_t *a, vec_t *out, int reg);
 static void gen_stmt(ast_t *a, vec_t *out);
 
 static void gen_expr(ast_t *a, vec_t *out, int reg) {
+    (void)reg;
     switch (a->type) {
         case AST_INT:
             EMIT(out, "    mov $%d, %%rax\n", a->value);
@@ -539,7 +552,7 @@ static char *codegen(ast_t *prog) {
 /* ======================= ELF WRITER ======================= */
 
 static void write_elf(const char *asm_code, const char *output) {
-    int fd = open(output, O_WRONLY | O_CREAT | O_TRUNC, 0755);
+    int fd = open(output, O_WRONLY | O_CREAT | O_TRUNC);
     if (fd < 0) return;
     
     struct {

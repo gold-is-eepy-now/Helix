@@ -63,6 +63,16 @@ int open(const char *path, int flags) {
     return fd;
 }
 
+unsigned int sleep(unsigned int seconds) {
+    /* ponytail: spin-yield loop, upgrade when timer/sleep syscall added */
+    for (unsigned int s = 0; s < seconds; s++) {
+        for (volatile uint64_t i = 0; i < 50000000ULL; i++) {
+        }
+        helix_yield();
+    }
+    return 0;
+}
+
 void _exit(int status) {
     helix_exit(status);
 }

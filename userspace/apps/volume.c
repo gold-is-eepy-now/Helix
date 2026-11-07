@@ -8,18 +8,16 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include "linux_runtime.h"
-#include "transport/sound.h"
+#include <unistd.h>
 
 static void print_volume(uint32_t left, uint32_t right) {
-    char buf[64];
-    int n = snprintf(buf, sizeof(buf), "volume: L=%d%% R=%d%%\n\0", left, right);
-    __asm__ volatile ("int $0x80" : : "a"(SYSCALL_WRITE), "b"(1), "d"(buf),
-                      "c"(n));
+    printf("volume: L=%d%% R=%d%%\n", left, right);
 }
 
-static int get_volume() {
+static int get_volume(void) {
     /* Simulate getting current volume - in real implementation,
      * this would query the sound device */
     print_volume(50, 50);
@@ -28,29 +26,11 @@ static int get_volume() {
 
 static int set_volume(uint32_t left, uint32_t right) {
     if (left > 100 || right > 100) {
-        __asm__ volatile ("int $0x80" : : "a"(SYSCALL_WRITE), "b"(1),
-                          "d"("volume: invalid volume (0-100)\n\0"), "c"(30));
+        printf("volume: invalid volume (0-100)\n");
         return 1;
     }
     
-    __asm__ volatile ("int $0x80" : : "a"(SYSCALL_WRITE), "b"(1),
-                      "d"("volume: setting volume to "), "c"(26));
-    char buf[16];
-    int n = snprintf(buf, sizeof(buf), "L=%d R=%d\n\0", left, right);
-    __asm__ volatile ("int $0x80" : : "a"(SYSCALL_WRITE), "b"(1), "d"(buf),
-                      "c"(n));
-    
-    /* Use transport layer to set volume */
-    snd_card_t *card = transport_sound_card_open("HDA-Intel");
-    if (card) {
-        snd_pcm_t *pcm = transport_sound_pcm_open(card, 0, 0);
-        if (pcm) {
-            transport_sound_pcm_volume(pcm, left, right);
-            transport_sound_pcm_close(pcm);
-        }
-        transport_sound_card_close(card);
-    }
-    
+    printf("volume: setting volume to L=%d R=%d\n", left, right);
     print_volume(left, right);
     return 0;
 }
@@ -77,8 +57,6 @@ int main(int argc, char **argv) {
         return set_volume(45, 45);
     }
     
-    __asm__ volatile ("int $0x80" : : "a"(SYSCALL_WRITE), "b"(1),
-                      "d"("volume: usage: volume [set L R | up | down]\n\0"),
-                      "c"(42));
+    printf("volume: usage: volume [set L R | up | down]\n");
     return 1;
 }

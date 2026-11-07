@@ -7,17 +7,18 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include "linux_runtime.h"
+#include <unistd.h>
 
 static void print_error(const char *msg) {
-    __asm__ volatile ("int $0x80" : : "a"(SYSCALL_WRITE), "b"(1), "d"(msg),
-                      "c"(strlen(msg)));
+    write(2, msg, strlen(msg));
 }
 
 static int parse_url(const char *url, char *host, char *path, uint16_t *port) {
     if (strncmp(url, "http://", 7) != 0) {
-        print_error("wget: URL must start with http://\n\0");
+        print_error("wget: URL must start with http://\n");
         return -1;
     }
     
@@ -36,7 +37,7 @@ static int parse_url(const char *url, char *host, char *path, uint16_t *port) {
         strncpy(path, slash, 256);
     }
     
-    const char *colon = strchr(host, ':');
+    char *colon = strchr(host, ':');
     if (colon != NULL) {
         *port = 80;
         *colon = '\0';
@@ -48,29 +49,16 @@ static int parse_url(const char *url, char *host, char *path, uint16_t *port) {
 }
 
 static int fetch_http(const char *host, const char *path, uint16_t port) {
-    __asm__ volatile ("int $0x80" : : "a"(SYSCALL_WRITE), "b"(1),
-                      "d"("wget: fetching "), "c"(15));
-    __asm__ volatile ("int $0x80" : : "a"(SYSCALL_WRITE), "b"(1), "d"(host),
-                      "c"(strlen(host)));
-    __asm__ volatile ("int $0x80" : : "a"(SYSCALL_WRITE), "b"(1),
-                      "d"(": port "), "c"(8));
-    char port_buf[16];
-    int n = snprintf(port_buf, sizeof(port_buf), "%d\0", port);
-    __asm__ volatile ("int $0x80" : : "a"(SYSCALL_WRITE), "b"(1), "d"(port_buf),
-                      "c"(n));
-    __asm__ volatile ("int $0x80" : : "a"(SYSCALL_WRITE), "b"(1),
-                      "d"("\n\0"), "c"(1));
-    
+    (void)path;
+    printf("wget: fetching %s: port %u\n", host, (unsigned int)port);
     /* Simulate HTTP GET */
-    __asm__ volatile ("int $0x80" : : "a"(SYSCALL_WRITE), "b"(1),
-                      "d"("wget: download complete\n\0"), "c"(22));
-    
+    printf("wget: download complete\n");
     return 0;
 }
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        print_error("wget: missing URL argument\n\0");
+        print_error("wget: missing URL argument\n");
         return 1;
     }
     

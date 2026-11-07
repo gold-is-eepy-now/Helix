@@ -1,5 +1,6 @@
 /* string.c — memory and string functions (see include/string.h). */
 #include <string.h>
+#include <stdlib.h>
 
 void *memcpy(void *dst, const void *src, size_t n) {
     unsigned char *d = dst;
@@ -92,3 +93,39 @@ char *strrchr(const char *s, int c) {
         if (*s == '\0') return (char *)last;
     }
 }
+
+char *strstr(const char *haystack, const char *needle) {
+    if (!haystack || !needle) return NULL;
+    if (*needle == '\0') return (char *)haystack;
+    for (; *haystack != '\0'; haystack++) {
+        const char *h = haystack;
+        const char *n = needle;
+        while (*h != '\0' && *n != '\0' && *h == *n) {
+            h++;
+            n++;
+        }
+        if (*n == '\0') return (char *)haystack;
+    }
+    return NULL;
+}
+
+char *strdup(const char *s) {
+    if (!s) return NULL;
+    size_t len = strlen(s);
+    char *copy = malloc(len + 1);
+    if (!copy) return NULL;
+    memcpy(copy, s, len + 1);
+    return copy;
+}
+
+char *strndup(const char *s, size_t n) {
+    if (!s) return NULL;
+    size_t len = 0;
+    while (len < n && s[len] != '\0') len++;
+    char *copy = malloc(len + 1);
+    if (!copy) return NULL;
+    memcpy(copy, s, len);
+    copy[len] = '\0';
+    return copy;
+}
+

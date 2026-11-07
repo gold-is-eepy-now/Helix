@@ -10,6 +10,10 @@
 
 #define EOF (-1)
 
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+
 typedef struct _helix_file FILE;
 extern FILE *stdin;
 extern FILE *stdout;
@@ -36,5 +40,7 @@ size_t fread(void *p, size_t size, size_t n, FILE *f);
 FILE *fopen(const char *path, const char *mode);
 int fclose(FILE *f);
 int fflush(FILE *f);
+int fseek(FILE *f, long offset, int whence);
+long ftell(FILE *f);
 
 #endif

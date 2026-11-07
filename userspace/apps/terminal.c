@@ -12,7 +12,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include "linux_runtime.h"
 
 /* Buffer for line editing */
 #define TERM_HIST 8
@@ -52,6 +51,10 @@ static void terminal_newline(terminal_t *t) {
 
 /* Main terminal loop */
 int main(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    (void)terminal_backspace;
+    (void)terminal_newline;
     terminal_t term;
     terminal_init(&term);
 

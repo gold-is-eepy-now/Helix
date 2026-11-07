@@ -16,8 +16,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdbool.h>
-#include <pthread.h>
-#include "linux_runtime.h"
 
 /* Browser state */
 typedef struct {
@@ -70,6 +68,7 @@ static css_style_t parse_style(const char *style_attr) {
 
 /* JavaScript mini-interpreter */
 static void js_eval(const char *code, browser_t *b) {
+    (void)b;
     if (strstr(code, "alert(")) {
         const char *start = strstr(code, "alert(\"");
         if (start) {
@@ -174,6 +173,7 @@ static void fetch_page(browser_t *b) {
 
 /* Main browser loop */
 int main(int argc, char **argv) {
+    (void)parse_style;
     browser_t browser = {
         .running = true,
         .show_debug = false

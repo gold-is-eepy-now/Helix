@@ -317,3 +317,14 @@ int fflush(FILE *f) {
     (void)f;
     return 0;
 }
+
+int fseek(FILE *f, long offset, int whence) {
+    if (f == NULL) return -1;
+    return lseek(f->fd, (off_t)offset, whence) < 0 ? -1 : 0;
+}
+
+long ftell(FILE *f) {
+    if (f == NULL) return -1;
+    return (long)lseek(f->fd, 0, SEEK_CUR);
+}
+

@@ -19,10 +19,13 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <stdbool.h>
 
-#include "linux_runtime.h"
-#include "optional_drivers/transport/graphics.h"
-#include "../../kernel/src/fb.h"
+/* ponytail: the ring-3 server has no framebuffer mapping yet; the display
+ * geometry is fixed until the kernel exposes a display surface. */
+#define X11_SCREEN_WIDTH  1920u
+#define X11_SCREEN_HEIGHT 1080u
+#define X11_SCREEN_BPP    32u
 
 /* X11 protocol opcodes */
 enum {
@@ -62,7 +65,6 @@ typedef struct {
     uint32_t bitmap_format_scanline_pad;
     uint32_t min_keycode;
     uint32_t max_keycode;
-    struct drm_fb_t *framebuffer;
 } x11_client_t;
 
 /* X11 window */
@@ -76,7 +78,6 @@ typedef struct x11_window {
     uint32_t parent;
     uint32_t depth;
     uint32_t colormap;
-    struct drm_fb_t *fb;
     uint32_t border_width;
     uint32_t border_pixel;
     uint32_t background_pixel;
@@ -86,31 +87,28 @@ typedef struct x11_window {
 } x11_window_t;
 
 /* Global X11 state */
-static x11_client_t *g_client = NULL;
 static x11_window_t *g_root_window = NULL;
 static x11_window_t *g_window_list = NULL;
 static uint32_t g_next_resource_id = 100;
-static int g_socket_fd = -1;
 
 /* Forward declarations */
-static int x11_send_packet(x11_client_t *client, const void *data, size_t size);
-static int x11_setup_connection(x11_client_t *client);
+__attribute__((unused)) static int x11_send_packet(x11_client_t *client, const void *data, size_t size);
+__attribute__((unused)) static int x11_setup_connection(x11_client_t *client);
 static void x11_init_display(void);
 static x11_window_t *x11_window_create(x11_client_t *client, x11_window_t *parent,
                                        int16_t x, int16_t y, uint16_t width, uint16_t height);
-static void x11_window_destroy(x11_window_t *window);
+__attribute__((unused)) static void x11_window_destroy(x11_window_t *window);
 static void x11_window_map(x11_window_t *window);
-static void x11_window_unmap(x11_window_t *window);
 static void x11_render_window(x11_window_t *window);
-static void x11_handle_client(int client_fd);
+__attribute__((unused)) static void x11_handle_client(int client_fd);
 
 /* Helper: send X11 reply packet */
-static int x11_send_packet(x11_client_t *client, const void *data, size_t size) {
+__attribute__((unused)) static int x11_send_packet(x11_client_t *client, const void *data, size_t size) {
     return write(client->fd, data, size);
 }
 
 /* X11 protocol header */
-static inline void x11_pack_header(void *buf, uint8_t opcode, uint8_t major, uint8_t minor,
+__attribute__((unused)) static inline void x11_pack_header(void *buf, uint8_t opcode, uint8_t major, uint8_t minor,
                                    uint32_t length, uint32_t id) {
     struct {
         uint8_t opcode;
@@ -128,17 +126,14 @@ static inline void x11_pack_header(void *buf, uint8_t opcode, uint8_t major, uin
 
 /* Initialize display with framebuffer */
 static void x11_init_display(void) {
-    /* Query framebuffer info via fb_get_info */
-    uint64_t fb_width, fb_height, fb_bpp;
-    if (fb_get_info(&fb_width, &fb_height, &fb_bpp)) {
-        printf("X11: Failed to get framebuffer info\n");
-        return;
-    }
-    
-    printf("X11: Initializing display (%lux%lu, %lu bpp)\n", fb_width, fb_height, fb_bpp);
+    printf("X11: Initializing display (%lux%lu, %lu bpp)\n",
+           (unsigned long)X11_SCREEN_WIDTH, (unsigned long)X11_SCREEN_HEIGHT,
+           (unsigned long)X11_SCREEN_BPP);
     
     /* Create root window (covers entire screen) */
-    g_root_window = x11_window_create(NULL, NULL, 0, 0, fb_width, fb_height);
+    g_root_window = x11_window_create(NULL, NULL, 0, 0,
+                                      (uint16_t)X11_SCREEN_WIDTH,
+                                      (uint16_t)X11_SCREEN_HEIGHT);
     if (g_root_window) {
         g_root_window->background_pixel = 0xFFFFFF; /* White background */
         x11_window_map(g_root_window);
@@ -147,7 +142,7 @@ static void x11_init_display(void) {
 }
 
 /* Handle client connection */
-static void x11_handle_client(int client_fd) {
+__attribute__((unused)) static void x11_handle_client(int client_fd) {
     x11_client_t client;
     memset(&client, 0, sizeof(client));
     client.fd = client_fd;
@@ -204,7 +199,7 @@ static void x11_handle_client(int client_fd) {
 }
 
 /* Setup X11 connection */
-static int x11_setup_connection(x11_client_t *client) {
+__attribute__((unused)) static int x11_setup_connection(x11_client_t *client) {
     /* In real X11, this is a complex handshake. For now:
      * Send minimal handshake reply for X11 client compatibility
      */
@@ -259,7 +254,7 @@ static void x11_window_map(x11_window_t *window) {
 }
 
 /* Destroy window */
-static void x11_window_destroy(x11_window_t *window) {
+__attribute__((unused)) static void x11_window_destroy(x11_window_t *window) {
     if (!window) return;
     
     /* Remove from list */
@@ -289,6 +284,8 @@ static void x11_render_window(x11_window_t *window) {
 }
 
 int main(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
     printf("X11 server starting...\n");
     
     /* Initialize display */

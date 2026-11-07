@@ -12,9 +12,9 @@
 #include <unistd.h>
 #include <string.h>
 
-#include "linux_runtime.h"
-
 int main(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
     printf("Starting X11 graphical environment...\n");
     
     /* Initialize X11 server */

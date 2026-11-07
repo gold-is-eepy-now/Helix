@@ -19,10 +19,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
-#include <pthread.h>
-
-#include "linux_runtime.h"
-#include "../runtime/optional_drivers/transport/graphics.h"
+#include <stdbool.h>
 
 #define MAX_WINDOWS 64
 
@@ -32,27 +29,22 @@ typedef struct {
     int16_t x, y;
     uint16_t width, height;
     uint32_t *pixels;
-    uint32_t *framebuffer;
     bool mapped;
     bool focused;
     bool dirty;
-    uint32_t *window_pixels;  /* Window-specific pixel buffer */
-    uint16_t win_width, win_height;
-    uint32_t *window_base;    /* Base address in framebuffer */
 } window_t;
 
 /* Global state */
 static window_t g_windows[MAX_WINDOWS];
 static uint32_t g_next_window_id = 1;
 static window_t *g_focused_window = NULL;
-static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* Window operations */
 static window_t *window_create(uint16_t width, uint16_t height) {
     for (int i = 0; i < MAX_WINDOWS; i++) {
         if (!g_windows[i].mapped) {
             window_t *w = &g_windows[i];
-            w->pixels = calloc(width * height, sizeof(uint32_t));
+            w->pixels = calloc((size_t)width * height, sizeof(uint32_t));
             if (!w->pixels) return NULL;
             
             w->width = width;
@@ -60,8 +52,6 @@ static window_t *window_create(uint16_t width, uint16_t height) {
             w->mapped = false;
             w->focused = false;
             w->dirty = false;
-            w->window_pixels = NULL;
-            w->window_base = NULL;
             w->id = g_next_window_id++;
             
             printf("boxwm: Created window %u (%ux%u)\n", w->id, width, height);
@@ -75,7 +65,7 @@ static void window_destroy(window_t *window) {
     if (!window) return;
     
     free(window->pixels);
-    free(window->window_pixels);
+    window->pixels = NULL;
     window->mapped = false;
     window->focused = false;
     printf("boxwm: Destroyed window %u\n", window->id);
@@ -123,44 +113,24 @@ static void window_resize(window_t *window, uint16_t width, uint16_t height) {
     printf("boxwm: Resized window %u to %ux%u\n", window->id, width, height);
 }
 
-/* Render window to framebuffer */
+/* Render window. ponytail: no framebuffer mapping in ring 3 yet; the window
+ * pixels are kept in memory until the kernel exposes a display surface. */
 static void window_render(window_t *window) {
     if (!window || !window->mapped) return;
     
     if (window->dirty) {
-        /* Copy window pixels to framebuffer */
-        for (uint16_t y = 0; y < window->height; y++) {
-            for (uint16_t x = 0; x < window->width; x++) {
-                uint32_t px = (window->y + y) * window->width + (window->x + x);
-                window->framebuffer[px] = window->pixels[y * window->width + x];
-            }
-        }
         window->dirty = false;
     }
 }
 
-static void *window_thread(void *arg) {
-    window_t *window = (window_t *)arg;
-    
-    while (1) {
-        /* Simulate window manager work */
-        sleep(1);
-        
-        /* In real implementation this would process events */
-        if (window->dirty) {
-            window_render(window);
-            window->dirty = false;
-        }
-    }
-    
-    return NULL;
-}
-
 int main(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    (void)window_destroy;
+    (void)window_unmap;
+    (void)window_move;
+    (void)window_resize;
     printf("boxwm: Starting window manager...\n");
-    
-    /* Initialize X11 */
-    /* In real implementation, this would initialize the X server */
     
     /* Create test windows */
     window_t *win1 = window_create(800, 600);
@@ -172,15 +142,13 @@ int main(int argc, char **argv) {
     /* Set focus */
     window_focus(win1);
     
-    /* Start window threads */
-    pthread_t t1, t2;
-    pthread_create(&t1, NULL, window_thread, win1);
-    pthread_create(&t2, NULL, window_thread, win2);
-    
     /* Main loop */
     while (1) {
         /* Simulate window manager events */
         sleep(1);
+        
+        window_render(win1);
+        window_render(win2);
         
         /* Example: toggle focus */
         if (g_focused_window) {
