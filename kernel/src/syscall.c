@@ -25,6 +25,7 @@
 #include "object.h"
 #include "panic.h"
 #include "syscall.h"
+#include "klog.h"
 #include "thread.h"
 #include "channel.h"
 #include "usermode.h"
@@ -435,8 +436,16 @@ void syscall_dispatch(registers_t *regs) {
     }
     
     syscall_handler_t handler = syscall_table[syscall_num];
+    /* A keystroke poll (read_input with no buffer) returns -1 on most calls; logging
+     * each one would fill the ring with noise and push out the events before a crash. */
+    bool poll = (syscall_num == SYSCALL_READ_INPUT && regs->rdi == 0);
+    if (!poll) {
+        klog_event(KLOG_SYSCALL, "nr=%llu a1=%p a2=%p a3=%p", (unsigned long long)syscall_num,
+                   (uintptr_t)regs->rdi, (uintptr_t)regs->rsi, (uintptr_t)regs->rdx);
+    }
     if (handler == NULL) {
         regs->rax = UINT64_MAX; /* unimplmented syscall */
+        klog_event(KLOG_SYSCALL, "nr=%llu not implemented", (unsigned long long)syscall_num);
         return;
     }
     
@@ -445,4 +454,8 @@ void syscall_dispatch(registers_t *regs) {
      * The seventh argument is unused by all handlers. */
     regs->rax = handler(regs->rdi, regs->rsi, regs->rdx,
                         regs->r10, regs->r8, regs->r9, 0);
+    if (!poll || regs->rax != UINT64_MAX) {
+        klog_event(KLOG_SYSCALL, "nr=%llu returned %p", (unsigned long long)syscall_num,
+                   (uintptr_t)regs->rax);
+    }
 }

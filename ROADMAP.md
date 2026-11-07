@@ -222,14 +222,17 @@ first arrival delivers, both resume correctly).
   headers in `userspace/include`: `string.h`, `stdlib.h` (malloc/calloc/realloc/
   free, exit, strtol), `stdio.h` (printf family, puts/fputs/fgets, fopen/fclose
   over files, unbuffered), `unistd.h`/`fcntl.h` (read/write/open/close/lseek),
-  `errno.h`. `/bin/args` uses `printf`. No fork, no environment (`getenv` finds
-  nothing: envp is not passed yet).
+  `errno.h`. `/bin/args` uses `printf`. No fork.
+- ✅ Environment: the kernel passes `envp` on the initial stack after argv;
+  `getenv`, `setenv`, `unsetenv`; kernel-shell `export`/`unset`; `/bin/env`
+  prints the environment. Default `PATH=/bin` and `HOME=/`. Machine-tested
+  (`tests/shell-test.py`).
 
 **M9 exit gate:** not yet passed. Done: ring-3 processes, the ELF loader,
-userland file I/O, brk, nested `execve` with argv, `/bin` installed at boot,
-`init` starting `/bin/sh`, and a C runtime subset. Still missing: the
-environment (envp on the stack and `getenv`/`setenv`) and a complete C library
-(only the subset above).
+userland file I/O, brk, nested `execve` with argv and envp, `/bin` installed at
+boot, `init` starting `/bin/sh`, the environment, and a C runtime subset.
+Still missing: a complete C library (only the subset above; `strdup`, `strstr`,
+`sleep`, `fseek`/`ftell` and others are absent).
 
 ## M10 — Driver framework and isolated drivers 🚧
 
@@ -260,6 +263,13 @@ not implemented.
 
 - 🚧 Network-interface objects (`net_interface.c`). There is no network stack yet: no ARP, IPv4, UDP or TCP.
 - 🚧 Display-surface objects (`display_surface.c`). There is no compositor yet.
+- 🚧 A basic graphical desktop (`desktop` command): teal desktop, My Computer and
+  About windows, taskbar with clock, Start menu, a pointer driven by the USB
+  mouse. Tested in QEMU only (screenshots and the USB mouse emulation); not on
+  real hardware. Clicking the background does not close windows.
+- ✅ Kernel event log (`log` command): a 512-event ring of scheduler, syscall,
+  process, shell, input and exception events, printed automatically on a CPU
+  exception. Machine-tested (`tests/shell-test.py`).
 - ✅ Input-device objects.
 
 **M12 exit gate:** not passed. The object frameworks exist. The network stack and

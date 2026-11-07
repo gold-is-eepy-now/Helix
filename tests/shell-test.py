@@ -332,6 +332,26 @@ def main():
         check_true("brk heap frames are freed on exit (allocated count unchanged)",
                    heap_before is not None and heap_after == heap_before)
 
+        # Kernel event log: clear it, run a program, and the log records its spawn
+        # and exit with status (the log is what a crash report is read from).
+        ser.send("log clear\n")
+        check("log clear acknowledges", "log cleared")
+        ser.send("exec /bin/args logtest\n")
+        check("exec runs while the event log is recording", "args: argv[1]=logtest")
+        ser.send("log\n")
+        # Match the dump's category tag ("proc] [proc] ..."): the serial echo of
+        # the same event has no tag, so it cannot satisfy these checks.
+        check("log records the spawn of the program", "proc] [proc] spawn /bin/args", timeout=40)
+        check("log records the exit with its status", "proc] [proc] exit /bin/args status=0")
+        check("log ends with its end marker", "[klog] end")
+
+        # Desktop: start it, open nothing, leave with Esc. This is the path that used
+        # to fault when a process had run before it; the event log records the start.
+        ser.send("desktop\n")
+        check("desktop starts in graphics mode", "[desktop] started")
+        ser.send("\x1b")
+        check("Esc leaves the desktop and returns to the shell", "[desktop] exited")
+
         ser.send("cpu\n")
         check("cpu reports vendor", "Vendor:")
 

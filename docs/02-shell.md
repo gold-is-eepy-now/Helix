@@ -307,6 +307,7 @@ shows it; typing `myprog arg1 arg2` runs it.
 | `calc` | `calc <a> <op> <b>` for `+ - * / %` (integers only) |
 | `clear` | clear the screen |
 | `color` | turn ANSI colour on/off: `color on`, `color off` |
+| `log` | show the kernel event log, oldest first: scheduler, syscalls, process spawn/exit, shell lines, input, USB mouse, exceptions. `log clear` forgets earlier events; `log serial on`/`off` echoes every event to the serial console as it happens. The log is also dumped automatically when a CPU exception is taken |
 | `halt` | halt the machine (you may close the QEMU window) |
 | `reboot` | reset the machine |
 

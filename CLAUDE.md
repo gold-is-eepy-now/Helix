@@ -155,15 +155,24 @@ Also, in the same change:
   (`<`) in the kernel shell — a console capture sink collects the command's
   output and the shell writes it to ext4 with shared path resolution — plus
   ext4-backed `cat`/`ls`, machine-tested via `tests/shell-test.py`.
+- **Implemented (environment, M9):** `envp` on the initial stack, libc
+  `getenv`/`setenv`/`unsetenv`, kernel-shell `export`/`unset`, `/bin/env`.
+  Machine-tested.
+- **Implemented (kernel event log):** `klog` ring of scheduler, syscall, process,
+  shell, input and exception events; `log` command; dumped on CPU exceptions.
+  Machine-tested.
+- **Implemented (desktop, basic, QEMU-tested only):** `desktop` command: teal
+  desktop, My Computer and About windows, taskbar with clock, Start menu, pointer
+  driven by the USB mouse. No compositor; not tested on real hardware.
 - **Implemented (LC-1, Linux compat):** `compat/include/linux/*` headers (types, slab, spinlock, atomic, mutex, module_init, printk) and a self-test driver run at boot. See docs/08-linux-compat.md.
 - **Implemented (Mac/Darwin compat):** `mac-darwin-compat/` subsystem with 64-bit Mach-O loader, Darwin BSD & Mach trap translation, Darwin process runtime (`darwin_runtime.c`), Darwin `launchd` PID 1 daemon with plist service loading and `launchctl` CLI (`launchd.c`), Mac-like case-insensitive filesystem, extended attributes (xattr), property list (.plist) engine, .app bundle resolution, CLI tools (`sw_vers`, `defaults`, `plutil`, `uname`, `otool`, `open`, `launchctl`), and AppKit/Cocoa GUI translation to Helix X11 server (`Calculator.app`, `TextEdit.app`), machine-tested (157 checks).
 - **Implemented (DoneJS compat):** `donejs-compat/` freestanding C11 JavaScript runtime ported for Helix OS, featuring AST tree-walking interpreter, CommonJS modules (`require`), standard library (`path`, `fs`, `process`, `util`, `assert`, `events`, `buffer`, `os`, `stream`), Promises, microtasks, timers (`setTimeout`), and event loop draining. Machine-tested (hosted suite).
-- **Not implemented:** the full C library and an environment (userspace has a
-  libc subset in `userspace/libc`: string, stdlib, stdio, unistd, errno, but
-  `getenv` finds nothing and there is no `fork`; the M9 exit gate is not yet
-  passed), the `installer` / live install environment (needs a disk driver and
-  partitioning), isolated driver services, networking, graphics, POSIX
-  translation layer.
+- **Not implemented:** the full C library (userspace has a libc subset in
+  `userspace/libc`: string, stdlib, stdio, unistd, errno; there is no `fork`;
+  the M9 exit gate is not yet passed), the `installer` / live install
+  environment (needs a disk driver and partitioning), isolated driver services,
+  networking, a real graphics stack (the desktop is a basic framebuffer demo
+  with no compositor), POSIX translation layer.
 
 Do not write documentation or commit messages that imply unimplemented systems
 exist.

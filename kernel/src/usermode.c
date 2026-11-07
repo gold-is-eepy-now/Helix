@@ -5,6 +5,7 @@
  *                            mapped into the process (`usershell` command).
  * The ELF loader accepts only ET_EXEC x86_64 images that fit the user half. */
 #include "usermode.h"
+#include "klog.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -436,8 +437,15 @@ int64_t usermode_spawn_env(const char *path, int argc, const char *const *argv,
                            int envc, const char *const *envp) {
     uint8_t *img = NULL;
     uint64_t len = 0;
-    if (!ufile_load_file(path, &img, &len)) return -1;
+    if (!ufile_load_file(path, &img, &len)) {
+        klog_note(KLOG_PROC, "[proc] cannot load %s\n", path);
+        return -1;
+    }
+    /* envc < 0 means "keep the current environment" (see usermode_spawn). */
+    klog_note(KLOG_PROC, "[proc] spawn %s argc=%d env=%s depth=%d\n", path, argc,
+              envc < 0 ? "inherit" : "given", (int)g_spawn_depth);
     int64_t status = launch(img, (size_t)len, argc, argv, envc, envp);
+    klog_note(KLOG_PROC, "[proc] exit %s status=%lld\n", path, (long long)status);
     kfree(img);
     return status;
 }

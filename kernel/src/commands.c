@@ -7,6 +7,7 @@
  */
 
 #include "desktop.h"
+#include "klog.h"
 #include "commands.h"
 
 #include <stdbool.h>
@@ -738,6 +739,34 @@ static void cmd_init(int argc, char **argv) {
 /* exec <path> [args...]: run a program from the root and wait for it. */
 /* desktop: the Windows 98-style graphical desktop. Returns to the text shell when
  * the user chooses Shut Down (or presses Esc). */
+/* log            print the recent kernel events, oldest first
+ * log clear      forget the events recorded so far
+ * log serial on|off   echo every event to the serial console as it happens */
+static void cmd_log(int argc, char **argv) {
+    if (argc >= 2 && str_eq(argv[1], "clear")) {
+        klog_clear();
+        kprintf("log cleared\n");
+        return;
+    }
+    if (argc >= 3 && str_eq(argv[1], "serial")) {
+        if (str_eq(argv[2], "on")) {
+            klog_set_serial(KLOG_ALL);
+        } else if (str_eq(argv[2], "off")) {
+            klog_set_serial(KLOG_PROC | KLOG_SHELL | KLOG_DESKTOP | KLOG_EXC);
+        } else {
+            kprintf("usage: log serial on|off\n");
+            return;
+        }
+        kprintf("log serial %s\n", str_eq(argv[2], "on") ? "on" : "off");
+        return;
+    }
+    if (argc >= 2) {
+        kprintf("usage: log [clear | serial on|off]\n");
+        return;
+    }
+    klog_dump();
+}
+
 static void cmd_desktop(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -2060,6 +2089,7 @@ const command_t helix_commands[] = {
     {"init",    "run /bin/init (PID 1) in ring 3; it starts /bin/sh", cmd_init},
     {"exec",    "run a program from the root: exec <path> [args...]", cmd_exec},
     {"desktop", "start the graphical desktop (Start, My Computer, Esc to leave)", cmd_desktop},
+    {"log",     "show the kernel event log (log clear | log serial on|off)", cmd_log},
     {"halt",    "halt the machine",                     cmd_halt},
     {"reboot",  "restart the machine",                  cmd_reboot},
     {"fsinfo",  "show filesystem information",          cmd_fsinfo},

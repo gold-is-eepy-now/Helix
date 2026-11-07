@@ -12,6 +12,9 @@
  * the middle of some other function when the timer preempted it.
  */
 #include "thread.h"
+#include "klog.h"
+#include "usermode.h"
+#include "gdt.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -131,10 +134,13 @@ thread_t *thread_create(void (*entry)(void)) {
     /* A new thread has no saved state; its resume point is simply `entry`
      * running on the fresh stack (16-byte aligned, per the SysV ABI). */
     t->ctx.rip = (uint64_t)(uintptr_t)entry;
-    t->ctx.rsp = vaddr + THREAD_STACK_BYTES - 16u;
+    /* The first resume `ret`s into entry with rsp = this value. The SysV ABI wants
+     * rsp == 8 (mod 16) at a function's first instruction, so leave 8 bytes, not 16. */
+    t->ctx.rsp = vaddr + THREAD_STACK_BYTES - 8u;
     t->ctx.rflags = THREAD_INITIAL_RFLAGS;
     t->ctx.cs = 0x08;  /* kernel code selector */
     t->ctx.ss = 0x10;  /* kernel data selector */
+    klog_event(KLOG_SCHED, "thread %llu created", (unsigned long long)t->id);
     return t;
 }
 
@@ -163,6 +169,12 @@ void thread_tick(void) {
     if (cur == NULL || cur->state != THREAD_RUNNING) return;
     cur->ticks++;
     if (cur->ticks < THREAD_QUANTUM_TICKS) return;
+    /* Two cases must not switch threads: the interrupt came from ring 3 (the
+     * user code has no kernel context to save), or a process is active (its
+     * address space and kernel stack are global state; switching away and
+     * back in the middle of a process corrupts them). Keep the quantum, retry
+     * on the next tick. */
+    if (g_interrupt_frame[18] != SEL_KERNEL_CODE || usermode_is_active()) return;
 
     /* The timer ISR interrupted `cur`; rebuild its context from the frame so
      * the switch resumes it exactly where it was interrupted. */
@@ -194,6 +206,8 @@ void thread_tick(void) {
 
     thread_t *next = rr_next(g_run_queue, cur);
     if (next == cur) return;
+    klog_event(KLOG_SCHED, "preempt %llu -> %llu", (unsigned long long)cur->id,
+               (unsigned long long)next->id);
     cur->state = THREAD_READY;
     next->state = THREAD_RUNNING;
     g_current = next;
@@ -215,9 +229,13 @@ void thread_block_current(void) {
         irq_restore(irq);
         return;
     }
+    klog_event(KLOG_SCHED, "block %llu -> %llu", (unsigned long long)cur->id,
+               (unsigned long long)next->id);
     g_current = next;
-    thread_switch_load(&next->ctx);
-    irq_restore(irq); /* not reached for a parked thread; kept for symmetry */
+    /* Save this thread's full state, then run next. The thread resumes here later
+     * (thread_resume_context), so its saved context must be the real one. */
+    thread_switch_to(&cur->ctx, &next->ctx);
+    irq_restore(irq);
 }
 
 void thread_set_state(thread_t *thread, thread_state_t state) {
@@ -226,6 +244,7 @@ void thread_set_state(thread_t *thread, thread_state_t state) {
 
 void thread_resume_context(thread_context_t *ctx, thread_t *thread) {
     irq_save_disable(); /* the resumed context restores its own IF bit */
+    klog_event(KLOG_SCHED, "resume %llu", thread ? (unsigned long long)thread->id : 0ull);
     g_current = thread;
     thread_switch_load(ctx);
 }
@@ -241,6 +260,7 @@ void thread_exit_current(void) {
         *pp = cur->next;
         cur->next = NULL;
     }
+    klog_event(KLOG_SCHED, "thread %llu exited", (unsigned long long)cur->id);
     kfree(cur);
     g_current = g_run_queue;
 }

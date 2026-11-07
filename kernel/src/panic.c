@@ -15,6 +15,23 @@
 #include "io.h"
 
 /* Format `value` into `buf` and return the length (no NUL terminator). */
+/* kprintf writes through out_c/out_s. Normally that is the console; kvprintf_to
+ * redirects it (the kernel log formats into its ring that way). */
+static kout_fn g_kout;
+static void *g_kctx;
+
+static void out_c(char c) {
+    if (g_kout != NULL) {
+        g_kout(c, g_kctx);
+    } else {
+        console_putc(c);
+    }
+}
+
+static void out_s(const char *s) {
+    while (*s != '\0') out_c(*s++);
+}
+
 static int format_unsigned(char *buf, uint64_t value, unsigned base, bool upper) {
     const char *digits = upper ? "0123456789ABCDEF" : "0123456789abcdef";
     char tmp[70];
@@ -41,23 +58,39 @@ static void emit_number(uint64_t value, unsigned base, bool upper, bool negative
     int total = len + (negative ? 1 : 0);
 
     for (int i = total; i < width; i++) {
-        console_putc(pad);
+        out_c(pad);
     }
     if (negative) {
-        console_putc('-');
+        out_c('-');
     }
     for (int i = 0; i < len; i++) {
-        console_putc(buf[i]);
+        out_c(buf[i]);
     }
+}
+
+static void vemit(const char *fmt, va_list args);
+
+void kvprintf_to(kout_fn fn, void *ctx, const char *fmt, va_list args) {
+    kout_fn saved_fn = g_kout;
+    void *saved_ctx = g_kctx;
+    g_kout = fn;
+    g_kctx = ctx;
+    vemit(fmt, args);
+    g_kout = saved_fn;
+    g_kctx = saved_ctx;
 }
 
 void kprintf(const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
+    vemit(fmt, args);
+    va_end(args);
+}
 
+static void vemit(const char *fmt, va_list args) {
     for (const char *p = fmt; *p != '\0'; p++) {
         if (*p != '%') {
-            console_putc(*p);
+            out_c(*p);
             continue;
         }
 
@@ -89,11 +122,11 @@ void kprintf(const char *fmt, ...) {
                 if (s == NULL) {
                     s = "(null)";
                 }
-                console_write(s);
+                out_s(s);
                 break;
             }
             case 'c':
-                console_putc((char)va_arg(args, int));
+                out_c((char)va_arg(args, int));
                 break;
             case 'd': {
                 int64_t v = is_long ? va_arg(args, long long) : va_arg(args, int);
@@ -118,20 +151,19 @@ void kprintf(const char *fmt, ...) {
                 break;
             }
             case 'p':
-                console_write("0x");
+                out_s("0x");
                 emit_number(va_arg(args, uintptr_t), 16, false, false, 16, '0');
                 break;
             case '%':
-                console_putc('%');
+                out_c('%');
                 break;
             default:
-                console_putc('%');
-                console_putc(*p);
+                out_c('%');
+                out_c(*p);
                 break;
         }
     }
 
-    va_end(args);
 }
 
 __attribute__((noreturn))

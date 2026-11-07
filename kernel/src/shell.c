@@ -21,6 +21,7 @@
 #include "heap.h"
 #include "input.h"
 #include "keyboard.h"
+#include "klog.h"
 #include "version.h"
 
 #define LINE_MAX 128
@@ -389,6 +390,7 @@ bool shell_is_builtin(const char *name) {
 
 /* Execute a single parsed command. Returns 0 on success. */
 static int execute_cmd(parsed_cmd_t *cmd) {
+    klog_event(KLOG_SHELL, "command: %s argc=%d", cmd->argv[0], cmd->argc);
     if (cmd->argc == 0) return 0;
 
     for (size_t i = 0; i < helix_command_count; i++) {
@@ -468,6 +470,7 @@ static int execute_cmd(parsed_cmd_t *cmd) {
 /* Split a line into segments separated by | or ||, parse each segment,
  * and execute the chain. */
 static void execute(char *line) {
+    klog_event(KLOG_SHELL, "line: %s", line);
     char *p = line;
     parsed_cmd_t cmds[MAX_SEGMENTS];
     bool is_or[MAX_SEGMENTS];

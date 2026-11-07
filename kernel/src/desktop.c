@@ -4,8 +4,13 @@
  * and a clock, and bevelled windows with navy title bars. "My Computer" lists the
  * real root directory from the ext4 volume; "About Helix" is static text.
  *
- * What it is not (yet): there is no mouse. Everything is keyboard driven, and the
- * desktop runs in the kernel, not as a ring-3 program.
+ * Mouse: a USB mouse moves an arrow cursor. A left click acts on whatever is under
+ * the pointer: an icon opens its window, Start toggles the menu, a menu item runs,
+ * a title-bar x closes a window, and clicking a window or taskbar button focuses it.
+ * The mouse needs USB (UHCI/EHCI); there is no PS/2 mouse driver.
+ *
+ * What it is not (yet): the desktop runs in the kernel, not as a ring-3 program,
+ * and there is no drag, double-click or right-click.
  *
  * Keys:  Up/Down  move the icon selection (or the Start menu selection)
  *        Enter    open the selected icon or menu item
@@ -24,9 +29,12 @@
 #include "fb.h"
 #include "input.h"
 #include "keyboard.h"
+#include "klog.h"
 #include "kstring.h"
 #include "panic.h"
 #include "time.h"
+#include "usb_host.h"
+#include "usb_hid.h"
 
 /* Win98-style palette, packed for the framebuffer at run time. */
 static uint32_t c_desk, c_face, c_white, c_dark, c_black, c_navy, c_gray;
@@ -53,6 +61,13 @@ static int g_focus = -1;
 static int g_icon_sel;
 static int g_menu_sel;
 static bool g_menu_open;
+
+/* The pointer position in screen pixels, and the left button from the last poll. */
+static int g_mx, g_my;
+static bool g_button_was_down;
+
+/* What a pointer poll asks the main loop to do. */
+enum { PTR_NONE, PTR_REDRAW, PTR_EXIT };
 
 /* Text shown in each application's window, built when the window is opened. */
 static char g_text[APP_COUNT][MAX_LINES][LINE_LEN];
@@ -288,6 +303,45 @@ static void draw_start_menu(uint32_t sh) {
     }
 }
 
+/* The arrow pointer, 12x19. 'X' is the black outline, '.' the white fill, and a
+ * space is transparent (the scene shows through). */
+#define CURSOR_W 12
+#define CURSOR_H 19
+static const char *const g_cursor_rows[CURSOR_H] = {
+    "X           ",
+    "XX          ",
+    "X.X         ",
+    "X..X        ",
+    "X...X       ",
+    "X....X      ",
+    "X.....X     ",
+    "X......X    ",
+    "X.......X   ",
+    "X........X  ",
+    "X.........X ",
+    "X......XXXXX",
+    "X..X..X     ",
+    "X.X X..X    ",
+    "XX  X..X    ",
+    "X    X..X   ",
+    "     X..X   ",
+    "      X..X  ",
+    "      XXXX  ",
+};
+
+static void draw_cursor(void) {
+    for (uint32_t r = 0; r < CURSOR_H; r++) {
+        for (uint32_t c = 0; c < CURSOR_W; c++) {
+            char ch = g_cursor_rows[r][c];
+            if (ch == 'X') {
+                fb_fill_rect((uint32_t)g_mx + c, (uint32_t)g_my + r, 1, 1, c_black);
+            } else if (ch == '.') {
+                fb_fill_rect((uint32_t)g_mx + c, (uint32_t)g_my + r, 1, 1, c_white);
+            }
+        }
+    }
+}
+
 static void redraw(void) {
     uint32_t sw = fb_width(), sh = fb_height();
     fb_fill_rect(0, 0, sw, sh, c_desk);
@@ -299,6 +353,7 @@ static void redraw(void) {
     }
     draw_taskbar(sw, sh);
     if (g_menu_open) draw_start_menu(sh);
+    draw_cursor();
 }
 
 /* ------------------------------------------------------------------ */
@@ -333,26 +388,129 @@ static void open_app(app_t app) {
         g_win[i].h = 250;
         g_focus = i;
         build_content(app);
-        kprintf("[desktop] opened %s\n", g_app_names[app]);
+        klog_note(KLOG_DESKTOP, "[desktop] opened %s\n", g_app_names[app]);
         return;
     }
 }
 
-static void close_focused(void) {
-    if (g_focus < 0) return;
-    kprintf("[desktop] closed %s\n", g_app_names[g_win[g_focus].app]);
-    g_win[g_focus].used = false;
+static void close_window(int i) {
+    if (i < 0 || !g_win[i].used) return;
+    klog_note(KLOG_DESKTOP, "[desktop] closed %s\n", g_app_names[g_win[i].app]);
+    g_win[i].used = false;
     g_focus = -1;
-    for (int i = 0; i < MAX_WIN; i++) {
-        if (g_win[i].used) {
-            g_focus = i;
+    for (int k = 0; k < MAX_WIN; k++) {
+        if (g_win[k].used) {
+            g_focus = k;
             break;
         }
     }
 }
 
+static void close_focused(void) {
+    close_window(g_focus);
+}
+
+static bool inside(int x, int y, uint32_t rx, uint32_t ry, uint32_t rw, uint32_t rh) {
+    return x >= (int)rx && y >= (int)ry && x < (int)(rx + rw) && y < (int)(ry + rh);
+}
+
+/* A left click at (x, y). Returns PTR_EXIT for Shut Down, otherwise PTR_REDRAW. */
+static int handle_click(int x, int y, uint32_t sh) {
+    uint32_t ty = sh - TASK_H;
+
+    if (g_menu_open) {
+        uint32_t mh = MENU_COUNT * 22u + 8u;
+        uint32_t my = sh - TASK_H - mh;
+        for (int i = 0; i < MENU_COUNT; i++) {
+            uint32_t iy = my + 4 + (uint32_t)i * 22u;
+            if (inside(x, y, 28, iy, 152, 20)) {
+                g_menu_open = false;
+                if (i == APP_SHUTDOWN) return PTR_EXIT;
+                open_app((app_t)i);
+                return PTR_REDRAW;
+            }
+        }
+        if (inside(x, y, 2, my, 180, mh)) return PTR_REDRAW;   /* a click on the panel itself */
+        g_menu_open = false;                                   /* any other click closes it */
+    }
+
+    if (inside(x, y, 2, ty + 2, 60, 22)) {                     /* Start button */
+        g_menu_open = !g_menu_open;
+        g_menu_sel = 0;
+        return PTR_REDRAW;
+    }
+
+    uint32_t bx = 70;                                          /* taskbar window buttons */
+    for (int i = 0; i < MAX_WIN; i++) {
+        if (!g_win[i].used) continue;
+        if (inside(x, y, bx, ty + 2, 130, 22)) {
+            g_focus = i;
+            return PTR_REDRAW;
+        }
+        bx += 136;
+    }
+
+    /* Windows: the close box first, then the body (which brings the window forward). */
+    for (int i = MAX_WIN - 1; i >= 0; i--) {
+        if (!g_win[i].used) continue;
+        window_t *w = &g_win[i];
+        if (inside(x, y, w->x + w->w - 21, w->y + 5, 16, 14)) {
+            close_window(i);
+            return PTR_REDRAW;
+        }
+        if (inside(x, y, w->x, w->y, w->w, w->h)) {
+            g_focus = i;
+            return PTR_REDRAW;
+        }
+    }
+
+    for (int i = 0; i < ICON_COUNT; i++) {                     /* desktop icons */
+        uint32_t iy = 16u + (uint32_t)i * 72u;
+        if (inside(x, y, 12, iy, 100, 52)) {
+            g_icon_sel = i;
+            open_app((app_t)i);
+            return PTR_REDRAW;
+        }
+    }
+    return PTR_NONE;
+}
+
+/* Read the mouse. Moves the pointer by the accumulated delta and reports a left
+ * click (button press edge). Safe to call when no mouse is attached. */
+static int poll_pointer(void) {
+    usb_host_poll();
+    usb_hid_mouse_t m;
+    bool moved = usb_hid_get_mouse_event(&m);
+    uint32_t sw = fb_width(), sh = fb_height();
+    int result = PTR_NONE;
+
+    if (moved) {
+        int nx = g_mx + m.dx;
+        int ny = g_my + m.dy;
+        if (nx < 0) nx = 0;
+        if (ny < 0) ny = 0;
+        if (nx > (int)sw - 1) nx = (int)sw - 1;
+        if (ny > (int)sh - 1) ny = (int)sh - 1;
+        klog_event(KLOG_USB, "mouse dx=%d dy=%d buttons=%x -> %d,%d", (int)m.dx, (int)m.dy,
+                   (unsigned)m.buttons, nx, ny);
+        g_mx = nx;
+        g_my = ny;
+        result = PTR_REDRAW;
+    }
+
+    bool down = (m.buttons & 1u) != 0;
+    if (down && !g_button_was_down) {
+        klog_event(KLOG_INPUT, "click at %d,%d", g_mx, g_my);
+        result = handle_click(g_mx, g_my, sh);
+        if (result == PTR_NONE) result = PTR_REDRAW;   /* a click always updates the picture */
+    }
+    g_button_was_down = down;
+    return result;
+}
+
 /* Returns true when the desktop should close. */
 static bool handle_key(int c) {
+    klog_event(KLOG_INPUT, "key %d", c);
     if (g_menu_open) {
         if (c == SHELL_KEY_UP || c == KBD_KEY_UP) {
             g_menu_sel = (g_menu_sel + MENU_COUNT - 1) % MENU_COUNT;
@@ -391,7 +549,7 @@ bool desktop_run(void) {
     if (!fb_ready()) return false;
     uint32_t sw = fb_width(), sh = fb_height();
     if (sw < 640 || sh < 480) {
-        kprintf("[desktop] screen too small (%llux%llu), need 640x480\n",
+        klog_note(KLOG_DESKTOP, "[desktop] screen too small (%llux%llu), need 640x480\n",
                 (unsigned long long)sw, (unsigned long long)sh);
         return false;
     }
@@ -404,6 +562,13 @@ bool desktop_run(void) {
     c_navy  = fb_rgb(0x00, 0x00, 0x80);
     c_gray  = fb_rgb(0x80, 0x80, 0x80);
 
+    g_mx = (int)sw / 2;
+    g_my = (int)sh / 2;
+    usb_host_poll();
+    usb_hid_mouse_t discard;
+    usb_hid_get_mouse_event(&discard);     /* drop motion from before the desktop */
+    g_button_was_down = (discard.buttons & 1u) != 0;
+
     for (int i = 0; i < MAX_WIN; i++) g_win[i].used = false;
     g_focus = -1;
     g_icon_sel = 0;
@@ -411,17 +576,19 @@ bool desktop_run(void) {
     g_menu_open = false;
 
     fb_graphics_begin();   /* the text console stays quiet while the desktop is up */
-    kprintf("[desktop] started (%llux%llu)\n", (unsigned long long)sw, (unsigned long long)sh);
+    klog_note(KLOG_DESKTOP, "[desktop] started (%llux%llu)\n", (unsigned long long)sw, (unsigned long long)sh);
     redraw();
 
     int last_minute = -1;
     for (;;) {
+        int p = poll_pointer();
+        if (p == PTR_EXIT) break;
         int c = input_getchar();
         if (c < 0) {
-            /* Idle: repaint when the clock's minute changes, then wait again. */
+            /* Idle: repaint when the pointer moved or the clock's minute changed. */
             int y, mo, d, h, mi, s, wd;
             time_now_utc(&y, &mo, &d, &h, &mi, &s, &wd);
-            if (mi != last_minute) {
+            if (p == PTR_REDRAW || mi != last_minute) {
                 last_minute = mi;
                 redraw();
             }
@@ -433,6 +600,6 @@ bool desktop_run(void) {
     }
 
     fb_graphics_end();     /* hand the screen back to the text console */
-    kprintf("[desktop] exited\n");
+    klog_note(KLOG_DESKTOP, "[desktop] exited\n");
     return true;
 }
