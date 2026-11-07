@@ -19,3 +19,16 @@ kernel/build/
 
 # Hosted DoneJS test binary, built by donejs-compat/Makefile; never commit it.
 donejs-compat/selftest
+
+# Userspace app binaries, built by runtime/Makefile (userspace-apps); never commit them.
+userspace/apps/dhcp
+userspace/apps/wifi
+userspace/apps/wget
+userspace/apps/wav
+userspace/apps/volume
+userspace/apps/terminal
+userspace/apps/browser
+userspace/apps/cc
+userspace/apps/x11server
+userspace/apps/start-gui
+userspace/apps/boxwm
