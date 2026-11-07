@@ -31,6 +31,26 @@
 /* RFLAGS value for a freshly created thread: interrupts enabled (bit 1 is
  * the architecturally fixed "always 1"). */
 #define THREAD_INITIAL_RFLAGS 0x202ULL
+#define RFLAGS_IF (1ULL << 9)
+
+/* Switches must not be preempted. The timer ISR runs thread_tick, which reads
+ * g_current as "the thread being interrupted". thread_yield and friends move
+ * g_current *before* the register state is saved, so a timer tick in that gap
+ * would save the outgoing thread's state into the incoming thread's context
+ * (and leave the outgoing one with a stale rip). The result is a thread that
+ * later resumes at address 0. Clearing IF for the duration of a switch closes
+ * the window; the caller restores its own IF afterwards. */
+static uint64_t irq_save_disable(void) {
+    uint64_t flags;
+    __asm__ volatile("pushfq; popq %0; cli" : "=r"(flags) : : "memory");
+    return flags;
+}
+
+static void irq_restore(uint64_t flags) {
+    if (flags & RFLAGS_IF) {
+        __asm__ volatile("sti" : : : "memory");
+    }
+}
 
 struct thread {
     uint64_t id;
@@ -121,14 +141,21 @@ thread_t *thread_create(void (*entry)(void)) {
 void thread_yield(void) {
     thread_t *cur = g_current;
     if (cur == NULL) return;
+    uint64_t irq = irq_save_disable();
     thread_t *next = rr_next(g_run_queue, cur);
-    if (next == cur) return;
+    if (next == cur) {
+        irq_restore(irq);
+        return;
+    }
     cur->state = THREAD_READY;
     next->state = THREAD_RUNNING;
     g_current = next; /* the switch never returns here; record who now runs */
     /* Saves cur's callee-saved registers and this call's resume rip/rsp/
-     * rflags into cur->ctx, then loads next's context and jumps into it. */
+     * rflags into cur->ctx, then loads next's context and jumps into it.
+     * When this thread is scheduled again, control returns here and the
+     * restore below runs with this thread's own saved IF bit. */
     thread_switch_to(&cur->ctx, &next->ctx);
+    irq_restore(irq);
 }
 
 void thread_tick(void) {
@@ -181,11 +208,16 @@ void thread_block_current(void) {
      * saved context; the load-only switch lands back here. Such a thread must
      * fall through instead of parking again. */
     if (cur->state == THREAD_READY || cur->state == THREAD_DONE) return;
+    uint64_t irq = irq_save_disable();
     thread_set_state(cur, THREAD_WAITING);
     thread_t *next = rr_next(g_run_queue, cur);
-    if (next == cur) return;
+    if (next == cur) {
+        irq_restore(irq);
+        return;
+    }
     g_current = next;
     thread_switch_load(&next->ctx);
+    irq_restore(irq); /* not reached for a parked thread; kept for symmetry */
 }
 
 void thread_set_state(thread_t *thread, thread_state_t state) {
@@ -193,6 +225,7 @@ void thread_set_state(thread_t *thread, thread_state_t state) {
 }
 
 void thread_resume_context(thread_context_t *ctx, thread_t *thread) {
+    irq_save_disable(); /* the resumed context restores its own IF bit */
     g_current = thread;
     thread_switch_load(ctx);
 }

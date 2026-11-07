@@ -224,6 +224,7 @@ static void kernel_main_continue(void) {
     }
     {
         const char *init_argv[] = { "/bin/init", NULL };
+        usermode_env_reset();
         int64_t init_status = usermode_spawn("/bin/init", 1, init_argv);
         if (init_status < 0) {
             kprintf("[init] could not start /bin/init (status %d)\n", (int)init_status);

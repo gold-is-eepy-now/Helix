@@ -18,7 +18,9 @@ __attribute__((noreturn)) void abort(void);
 long strtol(const char *s, char **end, int base);
 int atoi(const char *s);
 
-/* There is no environment yet: getenv always finds nothing. */
+/* The environment (see libc/env.c). */
 char *getenv(const char *name);
+int setenv(const char *name, const char *value, int overwrite);
+int unsetenv(const char *name);
 
 #endif

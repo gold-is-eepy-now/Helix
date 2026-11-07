@@ -367,16 +367,24 @@ static uint64_t handle_brk(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, u
  * the caller. It starts a child with the given argv and returns the child's exit
  * status, or -1 if the child could not run. argv is a NULL-terminated array of
  * user pointers; a NULL argv gives the child just its path as argv[0]. */
+/* SYS_EXECVE(path, argv, envp): run a program from the root and wait for it.
+ * argv and envp are NULL-terminated arrays of user pointers. A NULL envp means
+ * the child inherits the caller's environment. */
 static uint64_t handle_execve(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
-    (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
+    (void)a4; (void)a5; (void)a6; (void)a7;
     char path[256];
     if (!usermem_copy_str(path, sizeof(path), a1)) return UINT64_MAX;
 
-    char *store = kmalloc(USERMODE_ARG_BYTES);
+    /* One kernel buffer holds the copied argv strings, then the environment. */
+    char *store = kmalloc(USERMODE_ARG_BYTES + USERMODE_ENV_BYTES);
     if (store == NULL) return UINT64_MAX;
+    char *env_store = store + USERMODE_ARG_BYTES;
     const char *argv_k[USERMODE_MAX_ARGS];
+    const char *envp_k[USERMODE_MAX_ENV];
     int argc = 0;
+    int envc = -1;
     size_t used = 0;
+    size_t env_used = 0;
 
     if (a2 != 0) {
         for (;;) {
@@ -396,7 +404,20 @@ static uint64_t handle_execve(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4
         argv_k[argc++] = store;
     }
 
-    int64_t status = usermode_spawn(path, argc, argv_k);
+    if (a3 != 0) {
+        envc = 0;
+        for (;;) {
+            uint64_t p = 0;
+            if (envc == (int)USERMODE_MAX_ENV) goto fail;
+            if (!usermem_copy_in(&p, a3 + (uint64_t)envc * 8u, 8)) goto fail;
+            if (p == 0) break;
+            if (!usermem_copy_str(env_store + env_used, USERMODE_ENV_BYTES - env_used, p)) goto fail;
+            envp_k[envc++] = env_store + env_used;
+            env_used += strlen(env_store + env_used) + 1u;
+        }
+    }
+
+    int64_t status = usermode_spawn_env(path, argc, argv_k, envc, envp_k);
     kfree(store);
     return (uint64_t)status;
 

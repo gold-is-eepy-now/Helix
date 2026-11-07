@@ -6,6 +6,7 @@
  * milestones. The command table is deliberately trivial to extend.
  */
 
+#include "desktop.h"
 #include "commands.h"
 
 #include <stdbool.h>
@@ -735,6 +736,16 @@ static void cmd_init(int argc, char **argv) {
 }
 
 /* exec <path> [args...]: run a program from the root and wait for it. */
+/* desktop: the Windows 98-style graphical desktop. Returns to the text shell when
+ * the user chooses Shut Down (or presses Esc). */
+static void cmd_desktop(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    if (!desktop_run()) {
+        kprintf("desktop: could not start (needs a framebuffer of at least 640x480)\n");
+    }
+}
+
 static void cmd_exec(int argc, char **argv) {
     if (argc < 2) {
         console_write("usage: exec <path> [args...]\n");
@@ -2048,6 +2059,7 @@ const command_t helix_commands[] = {
     {"usershell", "run the userland shell in ring 3 (type exit to return)", cmd_usershell},
     {"init",    "run /bin/init (PID 1) in ring 3; it starts /bin/sh", cmd_init},
     {"exec",    "run a program from the root: exec <path> [args...]", cmd_exec},
+    {"desktop", "start the graphical desktop (Start, My Computer, Esc to leave)", cmd_desktop},
     {"halt",    "halt the machine",                     cmd_halt},
     {"reboot",  "restart the machine",                  cmd_reboot},
     {"fsinfo",  "show filesystem information",          cmd_fsinfo},

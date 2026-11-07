@@ -266,8 +266,41 @@ static unsigned g_spawn_depth;
  * the child's stack. Runs while the child's address space is active, so the
  * addresses written are the ones the child sees. Returns the initial stack
  * pointer, which points at argc (the System V entry layout). */
-static bool build_argv(int argc, const char *const *argv, uint64_t *sp_out) {
+/* The per-process environment: "NAME=value" strings, copied into a block so
+ * the caller's copy can be saved and restored around a child's run. */
+typedef struct {
+    char store[USERMODE_ENV_BYTES];
+    size_t used;
+    int count;
+} env_block_t;
+
+static env_block_t g_env;
+
+static bool env_copy_in(env_block_t *dst, const char *const *envp, int envc) {
+    dst->used = 0;
+    dst->count = 0;
+    if (envc < 0 || envc > (int)USERMODE_MAX_ENV) return false;
+    for (int i = 0; i < envc; i++) {
+        size_t n = strlen(envp[i]) + 1u;
+        if (n > USERMODE_ENV_BYTES - dst->used) return false;
+        memcpy(dst->store + dst->used, envp[i], n);
+        dst->used += n;
+        dst->count++;
+    }
+    return true;
+}
+
+void usermode_env_reset(void) {
+    static const char *const defaults[] = { "PATH=/bin", "HOME=/" };
+    env_copy_in(&g_env, defaults, 2);
+}
+
+/* Lay out the initial stack the way the SysV ABI expects, at the top of the
+ * user stack:  argc, argv[0..argc-1], NULL, envp[0..envc-1], NULL.
+ * The strings sit above the pointer table. */
+static bool build_argv(int argc, const char *const *argv, const env_block_t *env, uint64_t *sp_out) {
     uint64_t ptrs[USERMODE_MAX_ARGS];
+    uint64_t eptrs[USERMODE_MAX_ENV];
     uint64_t cursor = USER_STACK_TOP;
     size_t total = 0;
     for (int i = argc - 1; i >= 0; i--) {
@@ -278,22 +311,54 @@ static bool build_argv(int argc, const char *const *argv, uint64_t *sp_out) {
         memcpy((void *)(uintptr_t)cursor, argv[i], n);
         ptrs[i] = cursor;
     }
+    /* Environment strings: the block holds them back to back. Find each
+     * string's start, then copy from the top down so memory order matches. */
+    size_t starts[USERMODE_MAX_ENV];
+    size_t pos = 0;
+    for (int i = 0; i < env->count; i++) {
+        starts[i] = pos;
+        pos += strlen(env->store + pos) + 1u;
+    }
+    for (int i = env->count - 1; i >= 0; i--) {
+        size_t n = strlen(env->store + starts[i]) + 1u;
+        total += n;
+        if (total > USERMODE_ARG_BYTES + USERMODE_ENV_BYTES) return false;
+        cursor -= n;
+        memcpy((void *)(uintptr_t)cursor, env->store + starts[i], n);
+        eptrs[i] = cursor;
+    }
     cursor &= ~7ULL;
-    uint64_t words = (uint64_t)argc + 2u;   /* argc, argv[], NULL */
+    uint64_t words = (uint64_t)argc + (uint64_t)env->count + 3u;
     uint64_t sp = (cursor - words * 8u) & ~15ULL;
     uint64_t *w = (uint64_t *)(uintptr_t)sp;
     w[0] = (uint64_t)argc;
     for (int i = 0; i < argc; i++) w[1 + i] = ptrs[i];
     w[1 + argc] = 0;
+    for (int i = 0; i < env->count; i++) w[2 + argc + i] = eptrs[i];
+    w[2 + argc + env->count] = 0;
     *sp_out = sp;
     return true;
 }
 
-static int64_t launch(const uint8_t *img, size_t len, int argc, const char *const *argv) {
+static int64_t launch(const uint8_t *img, size_t len, int argc, const char *const *argv,
+                      int envc, const char *const *envp) {
     elf64_ehdr_t eh;
     if (!elf_validate(img, len, &eh)) return -2;
     if (argc < 0 || argc > (int)USERMODE_MAX_ARGS) return -1;
     if (g_spawn_depth >= SPAWN_MAX_DEPTH) return -1;
+    env_block_t *caller_env = kmalloc(sizeof(*caller_env));
+    if (caller_env == NULL) return -1;
+    *caller_env = g_env;
+    if (envc >= 0) {
+        env_block_t *child_env = kmalloc(sizeof(*child_env));
+        bool fit = child_env != NULL && env_copy_in(child_env, envp, envc);
+        if (fit) g_env = *child_env;   /* the child starts with this environment */
+        kfree(child_env);
+        if (!fit) {
+            kfree(caller_env);
+            return -1;
+        }
+    }
 
     /* The caller's state, restored when the child exits. */
     vmm_as_t caller_as = *vmm_current_as();
@@ -307,7 +372,11 @@ static int64_t launch(const uint8_t *img, size_t len, int argc, const char *cons
 
     uint64_t child_save[8];
     vmm_as_t *as = vmm_create_as();
-    if (as == NULL) return -1;
+    if (as == NULL) {
+        g_env = *caller_env;
+        kfree(caller_env);
+        return -1;
+    }
 
     /* Build the child in its own address space: its segments, stack and argv. */
     vmm_switch_as(as);
@@ -320,11 +389,13 @@ static int64_t launch(const uint8_t *img, size_t len, int argc, const char *cons
                            VMM_PRESENT | VMM_WRITE | VMM_USER | VMM_NX, &dst);
     }
     uint64_t sp = 0;
-    ok = ok && build_argv(argc, argv, &sp);
+    ok = ok && build_argv(argc, argv, &g_env, &sp);
     if (!ok) {
         vmm_switch_as(&caller_as);
         free_user_pages(up);
         vmm_destroy_as(as);
+        g_env = *caller_env;
+        kfree(caller_env);
         return -1;
     }
 
@@ -346,6 +417,8 @@ static int64_t launch(const uint8_t *img, size_t len, int argc, const char *cons
     free_user_pages(up);
     vmm_destroy_as(as);
     ufile_restore(&caller_fds);
+    g_env = *caller_env;
+    kfree(caller_env);
     g_proc_pages = caller_pages;
     g_brk = caller_brk;
     g_save = caller_save;
@@ -356,16 +429,21 @@ static int64_t launch(const uint8_t *img, size_t len, int argc, const char *cons
 
 /* Run a static ELF64 image that is already in kernel memory, with no arguments. */
 int64_t usermode_run_elf(const uint8_t *img, size_t len) {
-    return launch(img, len, 0, NULL);
+    return launch(img, len, 0, NULL, -1, NULL);
 }
 
-int64_t usermode_spawn(const char *path, int argc, const char *const *argv) {
+int64_t usermode_spawn_env(const char *path, int argc, const char *const *argv,
+                           int envc, const char *const *envp) {
     uint8_t *img = NULL;
     uint64_t len = 0;
     if (!ufile_load_file(path, &img, &len)) return -1;
-    int64_t status = launch(img, (size_t)len, argc, argv);
+    int64_t status = launch(img, (size_t)len, argc, argv, envc, envp);
     kfree(img);
     return status;
+}
+
+int64_t usermode_spawn(const char *path, int argc, const char *const *argv) {
+    return usermode_spawn_env(path, argc, argv, -1, NULL);
 }
 
 /* The userland shell embedded in the kernel (the `usershell` command). */

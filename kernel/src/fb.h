@@ -39,4 +39,12 @@ void fb_backspace(void);
 /* Report the framebuffer geometry. Returns false if there is no framebuffer. */
 bool fb_get_info(uint64_t *width, uint64_t *height, uint64_t *bpp);
 
+/* Graphics for the desktop. fb_graphics_begin silences the text console; the
+ * caller ends it with fb_graphics_end, which clears the screen for text again. */
+void fb_graphics_begin(void);
+uint32_t fb_width(void);
+uint32_t fb_height(void);
+void fb_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color);
+void fb_draw_text(uint32_t x, uint32_t y, const char *s, uint32_t fg, uint32_t bg, bool opaque);
+
 #endif /* HELIX_FB_H */

@@ -260,3 +260,56 @@ bool fb_get_info(uint64_t *width, uint64_t *height, uint64_t *bpp) {
     }
     return true;
 }
+
+/* ------------------------------------------------------------------ */
+/* Graphics primitives for the desktop (desktop.c).                    */
+/* ------------------------------------------------------------------ */
+
+/* Stop the text console from drawing while a program owns the screen. */
+void fb_graphics_begin(void) {
+    g_graphics_mode = true;
+    g_cursor_drawn = false;
+}
+
+uint32_t fb_width(void) {
+    return fb_ready() ? (uint32_t)g_fb->width : 0;
+}
+
+uint32_t fb_height(void) {
+    return fb_ready() ? (uint32_t)g_fb->height : 0;
+}
+
+void fb_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
+    if (!fb_ready()) {
+        return;
+    }
+    for (uint32_t j = 0; j < h; j++) {
+        for (uint32_t i = 0; i < w; i++) {
+            put_pixel((size_t)x + i, (size_t)y + j, color);
+        }
+    }
+}
+
+/* Draw one 8x8 glyph per character, left to right. With `opaque` false only the
+ * set pixels are drawn, so text can sit on a coloured background. */
+void fb_draw_text(uint32_t x, uint32_t y, const char *s, uint32_t fg, uint32_t bg, bool opaque) {
+    if (!fb_ready()) {
+        return;
+    }
+    for (; *s != '\0'; s++, x += GLYPH_W) {
+        unsigned char glyph = (unsigned char)*s;
+        if (glyph >= 128) {
+            glyph = '?';
+        }
+        for (uint32_t row = 0; row < GLYPH_H; row++) {
+            unsigned char bits = font8x8_basic[glyph][row];
+            for (uint32_t col = 0; col < GLYPH_W; col++) {
+                if (bits & (1u << col)) {
+                    put_pixel((size_t)x + col, (size_t)y + row, fg);
+                } else if (opaque) {
+                    put_pixel((size_t)x + col, (size_t)y + row, bg);
+                }
+            }
+        }
+    }
+}

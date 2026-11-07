@@ -81,7 +81,8 @@ USER_BLOB_DIR := $(BUILD_DIR)/user
 USER_SH_ELF   := $(USER_BLOB_DIR)/sh.elf
 USER_INIT_ELF := $(USER_BLOB_DIR)/init.elf
 USER_ARGS_ELF := $(USER_BLOB_DIR)/args.elf
-USER_ELFS     := $(USER_SH_ELF) $(USER_INIT_ELF) $(USER_ARGS_ELF)
+USER_ENV_ELF  := $(USER_BLOB_DIR)/env.elf
+USER_ELFS     := $(USER_SH_ELF) $(USER_INIT_ELF) $(USER_ARGS_ELF) $(USER_ENV_ELF)
 USER_BLOB_S   := $(USER_BLOB_DIR)/user_blob.S
 USER_BLOB_O   := $(BUILD_DIR)/obj/user_blob.o
 USER_LIB      := $(USER_DIR)/libhelix.c $(USER_DIR)/libhelix.h
@@ -152,6 +153,11 @@ $(USER_ARGS_ELF): $(USER_RT_HDRS) $(USER_RT_SRCS) $(USER_DIR)/bin/args.c
 	$(CC) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $(USER_RT_SRCS) $(USER_DIR)/bin/args.c
 	@echo "[user] built $@"
 
+$(USER_ENV_ELF): $(USER_RT_HDRS) $(USER_RT_SRCS) $(USER_DIR)/bin/env.c
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $(USER_RT_SRCS) $(USER_DIR)/bin/env.c
+	@echo "[user] built $@"
+
 $(USER_BLOB_S): $(USER_ELFS)
 	@mkdir -p $(dir $@)
 	@printf '%s\n' \
@@ -174,6 +180,12 @@ $(USER_BLOB_S): $(USER_ELFS)
 	  '.incbin "$(abspath $(USER_ARGS_ELF))"' \
 	  '.global user_blob_args_end' \
 	  'user_blob_args_end:' \
+	  '.balign 4096' \
+	  '.global user_blob_env_start' \
+	  'user_blob_env_start:' \
+	  '.incbin "$(abspath $(USER_ENV_ELF))"' \
+	  '.global user_blob_env_end' \
+	  'user_blob_env_end:' \
 	  '.section .note.GNU-stack,"",@progbits' > $@
 
 $(USER_BLOB_O): $(USER_BLOB_S)

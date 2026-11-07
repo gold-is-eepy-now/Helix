@@ -143,6 +143,10 @@ __attribute__((noreturn)) void helix_exit(int status);
  * status, or -1 if it could not run. This kernel has no fork: the caller is not
  * replaced, it resumes with the child's status. */
 int64_t helix_spawn(const char *path, char *const argv[]);
+
+/* As helix_spawn, with an explicit environment (envp is NULL-terminated). Passing
+ * NULL for envp gives the child this process's environment, as helix_spawn does. */
+int64_t helix_spawn_env(const char *path, char *const argv[], char *const envp[]);
 void helix_yield(void);
 void *helix_thread_create(void (*entry)(void));
 

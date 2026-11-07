@@ -15,8 +15,9 @@ extern int main(int argc, char **argv);
 
 /* -- Program entry (crt0).
  * The kernel starts a program with rsp pointing at argc, then argv[0..argc-1], a
- * NULL, then the strings (usermode.c build_argv). _start passes that block to
- * helix_crt_main, which calls main and exits with its return value. */
+ * NULL, then envp[...], a NULL, then the strings (usermode.c build_argv). _start
+ * passes that block to helix_crt_main, which records envp in `environ` (libc/env.c),
+ * calls main and exits with its return value. */
 __asm__(
     ".text\n"
     ".global _start\n"
@@ -26,11 +27,14 @@ __asm__(
     "    call helix_crt_main\n"
     "    ud2\n");
 
+extern char **environ;
+
 __attribute__((noreturn))
 void helix_crt_main(uint64_t *sp)
 {
     int argc = (int)sp[0];
     char **argv = (char **)(sp + 1);
+    environ = (char **)(sp + 2 + argc);   /* the NULL after argv is at sp[1+argc] */
     int status = main(argc, argv);
     helix_exit(status);
 }
@@ -230,11 +234,18 @@ uint64_t helix_object_count(void)
 
 /* -- Process control ------------------------------------------------------- */
 
-int64_t helix_spawn(const char *path, char *const argv[])
+int64_t helix_spawn_env(const char *path, char *const argv[], char *const envp[])
 {
     uint64_t r = helix_syscall(SYS_EXECVE, (uint64_t)(uintptr_t)path,
-                               (uint64_t)(uintptr_t)argv, 0, 0, 0, 0, 0);
+                               (uint64_t)(uintptr_t)argv, (uint64_t)(uintptr_t)envp,
+                               0, 0, 0, 0);
     return r == (uint64_t)-1 ? -1 : (int64_t)r;
+}
+
+/* A NULL envp tells the kernel the child inherits this process's environment. */
+int64_t helix_spawn(const char *path, char *const argv[])
+{
+    return helix_spawn_env(path, argv, NULL);
 }
 
 void helix_exit(int status)

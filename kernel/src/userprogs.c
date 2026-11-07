@@ -10,11 +10,14 @@ extern const uint8_t user_blob_init_start[];
 extern const uint8_t user_blob_init_end[];
 extern const uint8_t user_blob_args_start[];
 extern const uint8_t user_blob_args_end[];
+extern const uint8_t user_blob_env_start[];
+extern const uint8_t user_blob_env_end[];
 
 static const userprog_t g_progs[] = {
     { "sh",   "/bin/sh",   user_blob_sh_start,   user_blob_sh_end },
     { "init", "/bin/init", user_blob_init_start, user_blob_init_end },
     { "args", "/bin/args", user_blob_args_start, user_blob_args_end },
+    { "env",  "/bin/env",  user_blob_env_start,  user_blob_env_end },
 };
 
 #define PROG_COUNT (sizeof(g_progs) / sizeof(g_progs[0]))

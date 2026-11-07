@@ -272,6 +272,25 @@ def main():
         check("shell passes argv[2] to the child", "args: argv[2]=two")
         ser.send("nosuchprog\n")
         check("shell reports a program it cannot find", "unknown command: nosuchprog")
+        # M9 environment: envp is built on the stack next to argv. The kernel gives
+        # every program PATH and HOME; export adds a variable that children see;
+        # unset removes it again. Sentinel echo lines bracket the output of env.
+        ser.send("env\n")
+        check("kernel passes the default environment (PATH)", "PATH=/bin")
+        check("kernel passes the default environment (HOME)", "HOME=/")
+        ser.send("export GREET=hello\n")
+        ser.send("env\n")
+        check("export sets a variable the child program sees", "GREET=hello")
+        ser.send("unset GREET\n")
+        ser.send("echo sentinel-u1\n")
+        check("unset: first sentinel printed", "\nsentinel-u1")
+        ser.send("env\n")
+        ser.send("echo sentinel-u2\n")
+        check("unset: second sentinel printed", "\nsentinel-u2")
+        t = ser.text()
+        seg = t[t.rfind("\nsentinel-u1"):t.rfind("\nsentinel-u2")]
+        check_true("unset removes GREET from the child's environment",
+                   "PATH=/bin" in seg and "GREET=" not in seg)
         # M9 file I/O: write creates a file on ext4, cat reads it back through a
         # descriptor, and a missing path is refused.
         ser.send("write /note.txt gold-42\n")

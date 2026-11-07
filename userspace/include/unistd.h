@@ -17,4 +17,8 @@ int close(int fd);
 off_t lseek(int fd, off_t offset, int whence);
 __attribute__((noreturn)) void _exit(int status);
 
+/* The environment: NULL-terminated "NAME=value" strings. The C runtime points it at
+ * the block the kernel built on the stack; setenv/unsetenv move it to the heap. */
+extern char **environ;
+
 #endif

@@ -18,6 +18,10 @@ int64_t usermode_run_elf(const uint8_t *img, size_t len);
 /* Run the userland shell embedded in the kernel (see userspace/shell). */
 int64_t usermode_run_user_shell(void);
 
+/* Limits for the environment passed to a new process (see usermode_spawn_env). */
+#define USERMODE_MAX_ENV 32
+#define USERMODE_ENV_BYTES 2048
+
 /* Limits for argv passed to a new process (see usermode_spawn). */
 #define USERMODE_MAX_ARGS  16
 #define USERMODE_ARG_BYTES 2048
@@ -28,6 +32,15 @@ int64_t usermode_run_user_shell(void);
  * not a loadable executable. May be called from inside a system call (a child
  * process): the caller resumes with the child's status. */
 int64_t usermode_spawn(const char *path, int argc, const char *const *argv);
+
+/* Like usermode_spawn, with an environment for the child. envc < 0 means the
+ * child inherits the caller's environment unchanged. */
+int64_t usermode_spawn_env(const char *path, int argc, const char *const *argv,
+                           int envc, const char *const *envp);
+
+/* Reset the environment that boot-time programs (init, the kernel shell's
+ * `exec`) start with: PATH and HOME. */
+void usermode_env_reset(void);
 
 /* Program break of the running process (see usermode.c). brk(0) queries it.
  * Returns the new break, the old one if the request is refused, or 0 when no

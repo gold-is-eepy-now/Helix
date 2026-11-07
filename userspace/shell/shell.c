@@ -9,9 +9,17 @@
  *                          until a real write path exists);
  *   SYS_EXIT               via helix_exit, when `exit` is typed.
  *
- * Built-ins: echo, cat, write, heap, history, help, exit. Up/Down recall the
- * last 16 lines. */
+ * Built-ins: echo, cat, write, heap, history, export, unset, help, exit. Up/Down
+ * recall the last 16 lines. Any other word runs /bin/<word> with the shell's
+ * environment, so `export` changes what the programs it starts see.
+ *
+ * The environment functions live in libc/env.c; they are declared here rather than
+ * by including the libc headers, which this program does not otherwise use. */
 #include "libhelix.h"
+
+extern char **environ;
+int setenv(const char *name, const char *value, int overwrite);
+int unsetenv(const char *name);
 
 #define SYS_DEBUG_WRITE_NUM 26u
 #define KEY_UP   0x101
@@ -266,12 +274,49 @@ static int run_program(const char *line) {
         path[n] = '\0';
     }
 
-    if (helix_spawn(path, argv) < 0) {
+    if (helix_spawn_env(path, argv, environ) < 0) {
         say("unknown command: ");
         say(argv[0]);
         say("\n");
     }
     return 0;
+}
+
+/* export NAME=VALUE: set a variable for the programs this shell starts. */
+static void cmd_export(const char *arg) {
+    char name[64];
+    size_t n = 0;
+    while (arg[n] != '\0' && arg[n] != '=') {
+        if (n + 1 >= sizeof(name)) break;
+        name[n] = arg[n];
+        n++;
+    }
+    name[n] = '\0';
+    if (arg[n] != '=' || n == 0) {
+        say("export: usage: export NAME=VALUE\n");
+        return;
+    }
+    if (setenv(name, arg + n + 1, 1) != 0) {
+        say("export: could not set ");
+        say(name);
+        say("\n");
+    }
+}
+
+/* unset NAME: remove a variable (the name is the first word). */
+static void cmd_unset(const char *arg) {
+    char name[64];
+    size_t n = 0;
+    while (arg[n] != '\0' && arg[n] != ' ' && n + 1 < sizeof(name)) {
+        name[n] = arg[n];
+        n++;
+    }
+    name[n] = '\0';
+    if (n == 0) {
+        say("unset: usage: unset NAME\n");
+        return;
+    }
+    unsetenv(name);
 }
 
 /* Run one non-empty line. Returns 1 if the shell should exit. */
@@ -283,12 +328,21 @@ static int run_line(const char *line) {
     }
     if (str_eq(line, "help")) {
         say("commands: echo <text>, cat <path>, write <path> <text>,\n");
-        say("          heap, history, help, exit; any other word runs /bin/<word>\n");
+        say("          export NAME=VALUE, unset NAME, heap, history, help, exit;\n");
+        say("          any other word runs /bin/<word> (e.g. env)\n");
         say("Up/Down recall earlier lines.\n");
         return 0;
     }
     if (str_eq(line, "heap")) {
         cmd_heap();
+        return 0;
+    }
+    if (starts_with(line, "export") && line[6] == ' ') {
+        cmd_export(line + 7);
+        return 0;
+    }
+    if (starts_with(line, "unset") && line[5] == ' ') {
+        cmd_unset(line + 6);
         return 0;
     }
     if (starts_with(line, "cat") && line[3] == ' ') {
