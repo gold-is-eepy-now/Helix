@@ -252,11 +252,15 @@ void djs_object_set(djs_runtime_t *rt, djs_object_t *object, const char *name,
     }
     djs_property_t *property = djs_property_get(object, name);
     if (property != NULL && (property->flags & DJS_PROP_SETTER)) {
-        if (property->value.tag == DJS_TAG_OBJECT && property->value.as.object->function != NULL) {
+        if (property->value2.tag == DJS_TAG_OBJECT &&
+            property->value2.as.object->function != NULL) {
             djs_value_t argument = value;
-            djs_call(rt, property->value, djs_object_value(object), &argument, 1);
+            djs_call(rt, property->value2, djs_object_value(object), &argument, 1);
         }
         return;
+    }
+    if (property != NULL && (property->flags & DJS_PROP_GETTER)) {
+        return; /* a getter without a setter ignores writes */
     }
     djs_property_set(rt, object, name, value, 0);
 }
@@ -300,9 +304,11 @@ djs_env_t *djs_env_new(djs_runtime_t *rt, djs_env_t *parent) {
 }
 
 djs_binding_t *djs_env_lookup(djs_env_t *env, const char *name) {
+    if (env == NULL || name == NULL) return NULL;
     for (djs_env_t *scope = env; scope != NULL; scope = scope->parent) {
         for (size_t i = 0; i < scope->count; i++) {
-            if (djs_strcmp(scope->bindings[i].name, name) == 0) {
+            if (scope->bindings[i].name != NULL &&
+                djs_strcmp(scope->bindings[i].name, name) == 0) {
                 return &scope->bindings[i];
             }
         }
@@ -342,8 +348,16 @@ djs_binding_t *djs_env_declare(djs_runtime_t *rt, djs_env_t *env, const char *na
 void djs_env_assign(djs_runtime_t *rt, djs_env_t *env, const char *name, djs_value_t value) {
     djs_binding_t *binding = djs_env_lookup(env, name);
     if (binding != NULL) {
+        if ((binding->flags & 1u) == 0) {
+            djs_throw_type_error(rt, "assignment to constant variable");
+        }
         binding->value = value;
         binding->initialized = true;
+        return;
+    }
+    /* A global property wins over a fresh global binding. */
+    if (rt->global != NULL && djs_property_get(rt->global, name) != NULL) {
+        djs_object_set(rt, rt->global, name, value);
         return;
     }
     /* Undeclared assignment creates a global (sloppy mode). */

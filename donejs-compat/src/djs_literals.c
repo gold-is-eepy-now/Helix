@@ -277,6 +277,7 @@ djs_node_t *djs_parse_primary(djs_parser_t *p) {
             djs_peek_at(p, 1)->type == DJS_TOK_IDENTIFIER &&
             djs_strcmp(djs_peek_at(p, 1)->text, "function") == 0) {
             djs_advance(p);
+            p->pending_async = true;
             return djs_parse_function(p, false);
         }
         if (djs_strcmp(name, "import") == 0) {
@@ -316,15 +317,32 @@ djs_node_t *djs_parse_left_hand_side(djs_parser_t *p) {
     while (true) {
         if (djs_at_punct(p, ".")) {
             djs_advance(p);
-            djs_token_t *token = djs_cur(p);
-            if (token->type != DJS_TOK_IDENTIFIER) {
-                djs_set_error(p, "expected a property name");
-                return NULL;
-            }
             djs_node_t *member = djs_node_new(p, DJS_N_MEMBER);
             if (member == NULL) return NULL;
             member->a = expression;
-            member->b = djs_string_node(p, token->text);
+            if (djs_at_punct(p, "#")) {
+                djs_advance(p);
+                djs_token_t *token = djs_cur(p);
+                if (token->type != DJS_TOK_IDENTIFIER) {
+                    djs_set_error(p, "expected a private name");
+                    return NULL;
+                }
+                char buffer[256];
+                size_t length = 0;
+                buffer[length++] = '#';
+                for (size_t i = 0; token->text[i] != '\0' && length + 1 < sizeof(buffer); i++) {
+                    buffer[length++] = token->text[i];
+                }
+                buffer[length] = '\0';
+                member->b = djs_string_node(p, djs_arena_strdup(p->rt, buffer));
+            } else {
+                djs_token_t *token = djs_cur(p);
+                if (token->type != DJS_TOK_IDENTIFIER) {
+                    djs_set_error(p, "expected a property name");
+                    return NULL;
+                }
+                member->b = djs_string_node(p, token->text);
+            }
             djs_advance(p);
             expression = member;
             continue;

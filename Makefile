@@ -151,6 +151,7 @@ test: image
 	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/usb-hid-unit" tests/usb-hid-unit.c kernel/src/usb_hid.c && "$(BUILD_DIR)/test/usb-hid-unit"
 	@$(MAKE) -C runtime test
 	@$(MAKE) -C mac-darwin-compat test
+	@$(MAKE) -C donejs-compat test
 
 mac-darwin-compat:
 	@$(MAKE) -C mac-darwin-compat all
@@ -162,9 +163,11 @@ test-with-linux-drivers: linux-submodule linux-drivers
 	@BUILD_DIR="$(BUILD_DIR)" python3 tests/shell-test.py "$(IMAGE)"
 	@$(MAKE) -C runtime test
 	@$(MAKE) -C mac-darwin-compat test
+	@$(MAKE) -C donejs-compat test
 
 clean:
 	@$(MAKE) -C kernel BUILD_DIR="$(KERNEL_BUILD_DIR)" clean
 	@$(MAKE) -C runtime clean
 	@$(MAKE) -C mac-darwin-compat clean
+	@$(MAKE) -C donejs-compat clean
 	@rm -rf "$(BUILD_DIR)"

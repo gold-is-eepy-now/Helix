@@ -99,6 +99,26 @@ djs_node_t *djs_parse_unary(djs_parser_t *p) {
             if (node->a == NULL) return NULL;
             return node;
         }
+        if (djs_strcmp(op, "yield") == 0) {
+            djs_advance(p);
+            djs_node_t *node = djs_node_new(p, DJS_N_YIELD);
+            if (node == NULL) return NULL;
+            if (djs_at_punct(p, "*")) {
+                djs_advance(p);
+                node->flags |= DJS_NODE_DELEGATE;
+            }
+            djs_token_t *next = djs_cur(p);
+            bool has_value = next != NULL && next->type != DJS_TOK_EOF && !next->newline_before &&
+                             !(next->type == DJS_TOK_PUNCT &&
+                               (djs_strcmp(next->text, ";") == 0 || djs_strcmp(next->text, "}") == 0 ||
+                                djs_strcmp(next->text, ")") == 0 || djs_strcmp(next->text, "]") == 0 ||
+                                djs_strcmp(next->text, ",") == 0));
+            if (has_value) {
+                node->a = djs_parse_assignment(p);
+                if (node->a == NULL) return NULL;
+            }
+            return node;
+        }
     }
     return djs_parse_postfix(p);
 }

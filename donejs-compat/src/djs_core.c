@@ -40,6 +40,9 @@ void djs_memset(void *destination, int value, size_t count) {
 }
 
 int djs_strcmp(const char *a, const char *b) {
+    if (a == b) return 0;
+    if (a == NULL) return -1;
+    if (b == NULL) return 1;
     while (*a && *a == *b) { a++; b++; }
     return (int)(unsigned char)*a - (int)(unsigned char)*b;
 }
@@ -493,6 +496,70 @@ void djs_number_to_string(double value, char *buffer, size_t buffer_size) {
 
 /* --------------------------------------------------------------- runtime */
 
+/* Create the object graph the builtins are installed into: the prototypes,
+ * the global object and the constructor objects. */
+static void runtime_setup(djs_runtime_t *rt) {
+    rt->object_prototype = djs_object_new(rt, NULL);
+    rt->function_prototype = djs_object_new(rt, rt->object_prototype);
+    rt->array_prototype = djs_object_new(rt, rt->object_prototype);
+    rt->string_prototype = djs_object_new(rt, rt->object_prototype);
+    rt->number_prototype = djs_object_new(rt, rt->object_prototype);
+    rt->boolean_prototype = djs_object_new(rt, rt->object_prototype);
+    rt->error_prototype = djs_object_new(rt, rt->object_prototype);
+    rt->promise_prototype = djs_object_new(rt, rt->object_prototype);
+    rt->map_prototype = djs_object_new(rt, rt->object_prototype);
+    rt->set_prototype = djs_object_new(rt, rt->object_prototype);
+    rt->date_prototype = djs_object_new(rt, rt->object_prototype);
+    rt->regexp_prototype = djs_object_new(rt, rt->object_prototype);
+    rt->global = djs_object_new(rt, rt->object_prototype);
+    rt->global_env = djs_env_new(rt, NULL);
+    if (rt->global_env != NULL) rt->global_env->function_scope = true;
+
+    rt->object_constructor = djs_function_new(rt, NULL, "Object", 1);
+    rt->array_constructor = djs_function_new(rt, NULL, "Array", 1);
+    rt->function_constructor = djs_function_new(rt, NULL, "Function", 1);
+    rt->promise_constructor = djs_function_new(rt, NULL, "Promise", 1);
+    rt->error_constructor = djs_function_new(rt, NULL, "Error", 1);
+    rt->type_error_constructor = djs_function_new(rt, NULL, "TypeError", 1);
+    rt->range_error_constructor = djs_function_new(rt, NULL, "RangeError", 1);
+    rt->syntax_error_constructor = djs_function_new(rt, NULL, "SyntaxError", 1);
+    rt->reference_error_constructor = djs_function_new(rt, NULL, "ReferenceError", 1);
+
+    /* Every constructor points at its prototype, and every prototype points
+     * back at its constructor. */
+    struct { djs_object_t *constructor; djs_object_t *prototype; } pairs[] = {
+        { rt->object_constructor, rt->object_prototype },
+        { rt->array_constructor, rt->array_prototype },
+        { rt->function_constructor, rt->function_prototype },
+        { rt->promise_constructor, rt->promise_prototype },
+        { rt->error_constructor, rt->error_prototype },
+        { rt->type_error_constructor, rt->error_prototype },
+        { rt->range_error_constructor, rt->error_prototype },
+        { rt->syntax_error_constructor, rt->error_prototype },
+        { rt->reference_error_constructor, rt->error_prototype },
+    };
+    for (size_t i = 0; i < sizeof(pairs) / sizeof(pairs[0]); i++) {
+        if (pairs[i].constructor == NULL) continue;
+        djs_property_set(rt, pairs[i].constructor, "prototype",
+                         djs_object_value(pairs[i].prototype), 0);
+        if (pairs[i].prototype != NULL) {
+            djs_property_set(rt, pairs[i].prototype, "constructor",
+                             djs_object_value(pairs[i].constructor), 0);
+        }
+    }
+    /* The error constructors inherit from Error.prototype. */
+    djs_object_t *error_constructors[] = {
+        rt->type_error_constructor, rt->range_error_constructor,
+        rt->syntax_error_constructor, rt->reference_error_constructor
+    };
+    for (size_t i = 0; i < sizeof(error_constructors) / sizeof(error_constructors[0]); i++) {
+        if (error_constructors[i] == NULL) continue;
+        error_constructors[i]->prototype = djs_object_value(rt->error_prototype);
+        djs_property_set(rt, error_constructors[i], "prototype",
+                         djs_object_value(rt->error_prototype), 0);
+    }
+}
+
 const char *djs_version(void) { return "0.1.0-helix"; }
 
 djs_runtime_t *djs_runtime_new(const djs_options_t *options) {
@@ -514,6 +581,22 @@ djs_runtime_t *djs_runtime_new(const djs_options_t *options) {
         rt->version = djs_version();
         rt->exec_path = "donejs";
         rt->cwd = "/";
+    }
+    runtime_setup(rt);
+    /* The root frame: every script runs inside a frame, so `this` is the
+     * global object and a block can open a scope of its own. */
+    djs_frame_t *root = (djs_frame_t *)djs_arena_calloc(rt, 1, sizeof(*root));
+    if (root != NULL) {
+        root->env = rt->global_env;
+        root->this_value = djs_object_value(rt->global);
+        root->new_target = DJS_UNDEFINED;
+        root->super_class = DJS_UNDEFINED;
+        root->home_object = NULL;
+        root->pending_fields = NULL;
+        root->function = NULL;
+        root->arrow = false;
+        root->previous = NULL;
+        rt->frame = root;
     }
     djs_install_globals(rt);
     djs_install_builtins(rt);

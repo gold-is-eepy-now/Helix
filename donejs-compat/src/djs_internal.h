@@ -32,6 +32,7 @@ typedef struct djs_env djs_env_t;
 typedef struct djs_node djs_node_t;
 typedef struct djs_function djs_function_t;
 typedef struct djs_class_def djs_class_def_t;
+typedef struct djs_reaction djs_reaction_t;
 
 typedef struct djs_value {
     uint8_t tag;
@@ -120,6 +121,10 @@ typedef struct djs_function {
     djs_value_t home_object;   /* object the function was defined in (super) */
     djs_value_t super_class;   /* parent constructor of a class method */
     djs_class_def_t *class_def;/* class a constructor belongs to */
+    djs_node_t *class_node;    /* the class node (instance fields) */
+    void *aux;                 /* native-callable scratch pointer */
+    djs_value_t captured_this; /* arrow functions: the lexical this */
+    bool has_captured_this;
     uint32_t flags;
     djs_object_t *owner;       /* the function object that owns this record */
 } djs_function_t;
@@ -136,6 +141,7 @@ struct djs_env {
     size_t count;
     size_t capacity;
     djs_env_t *parent;
+    bool function_scope;   /* var declarations land here */
 };
 
 typedef enum {
@@ -154,6 +160,7 @@ typedef struct djs_map_entry {
 typedef struct djs_property {
     djs_value_t key;
     djs_value_t value;
+    djs_value_t value2;       /* the setter of an accessor pair */
     uint32_t flags;
     struct djs_property *next;
 } djs_property_t;
@@ -163,8 +170,13 @@ typedef struct djs_task {
     djs_value_t callback;
     djs_value_t *args;
     size_t arg_count;
+    void *aux;                  /* a promise reaction, when the task is one */
     struct djs_task *next;
 } djs_task_t;
+
+/* The iteration protocol key. Symbol.iterator is approximated with an
+ * interned marker string, so user code can use it as a plain key. */
+#define DJS_ITERATOR_KEY "@@iterator"
 
 struct djs_object {
     djs_class_t class;
@@ -179,8 +191,8 @@ struct djs_object {
     /* promise */
     int promise_state;
     djs_value_t promise_value;
-    djs_task_t *promise_fulfilled;
-    djs_task_t *promise_rejected;
+    djs_reaction_t *promise_reactions;  /* the reactions waiting on it */
+    bool promise_locked;         /* a thenable was adopted: only it settles */
     /* map / set */
     djs_map_entry_t *map_entries;
     size_t map_count;
@@ -321,11 +333,15 @@ typedef struct {
     uint64_t rbx, rbp, r12, r13, r14, r15, rsp, rip;
 } djs_jmp_buf_t;
 
-int djs_setjmp(djs_jmp_buf_t *buf);
+int djs_setjmp(djs_jmp_buf_t *buf) __attribute__((returns_twice));
 __attribute__((noreturn)) void djs_longjmp(djs_jmp_buf_t *buf, int value);
 void djs_context_switch(djs_jmp_buf_t *save_to, djs_jmp_buf_t *from);
 void djs_coro_enter(djs_jmp_buf_t *save_to, void *stack_top,
                     void (*entry)(void *), void *arg);
+
+/* The jump buffer the "stop the script" path uses: djs_longjmp(NULL, 1)
+ * jumps here. The runtime points it at its own root buffer. */
+extern djs_jmp_buf_t *djs_root_jmp;
 
 typedef enum {
     DJS_CORO_RUNNING = 0,
@@ -333,6 +349,21 @@ typedef enum {
     DJS_CORO_DONE
 } djs_coro_state_t;
 
+typedef struct djs_catch_frame djs_catch_frame_t;
+
+typedef struct djs_coro djs_coro_t;
+typedef struct djs_frame djs_frame_t;
+typedef struct djs_reaction djs_reaction_t;
+
+/* A promise reaction: the handler that runs when the promise settles, and the
+ * derived promise it should settle. `rejection` selects the rejection handler
+ * from a fulfilled/rejected pair. */
+struct djs_reaction {
+    djs_value_t handler;
+    djs_value_t derived;
+    bool rejection;
+    struct djs_reaction *next;
+};
 typedef struct djs_coro {
     djs_runtime_t *rt;
     void *stack;
@@ -343,23 +374,41 @@ typedef struct djs_coro {
     djs_value_t yielded;      /* value yielded out of the coroutine */
     djs_value_t error;        /* pending exception thrown into the coroutine */
     djs_value_t result;       /* final result of the coroutine body */
+    djs_value_t promise;      /* promise returned by an async body */
+    djs_env_t *env;           /* interpreter context of the body */
+    djs_value_t this_value;  /* this of the body frame */
+    djs_value_t new_target;   /* new.target of the body frame */
+    djs_function_t *function; /* the function being executed */
+    djs_value_t *args;        /* the arguments of the call */
+    size_t arg_count;
+    djs_object_t *generator_owner; /* the generator object that owns it */
     bool has_error;
     bool started;
+    bool is_async;
     djs_coro_state_t state;
+    /* The interpreter state of both sides of the switch: the coroutine keeps
+     * its own frame and catch chain, the host keeps its own. */
+    djs_frame_t *own_frame;
+    djs_catch_frame_t *own_catch;
+    djs_frame_t *host_frame;
+    djs_catch_frame_t *host_catch;
+    djs_coro_t *host_coro;
 } djs_coro_t;
 
-typedef struct djs_catch_frame {
+struct djs_catch_frame {
     djs_jmp_buf_t saved;
     struct djs_catch_frame *previous;
     djs_value_t error;
-} djs_catch_frame_t;
+};
 
 typedef struct djs_frame {
     djs_env_t *env;
+    djs_env_t *saved_env;      /* environment to restore when a block ends */
     djs_value_t this_value;
     djs_value_t new_target;
     djs_value_t super_class;
     djs_object_t *home_object;
+    djs_node_t *pending_fields; /* class fields waiting for super() */
     djs_function_t *function;
     bool arrow;
     struct djs_frame *previous;
@@ -370,6 +419,8 @@ typedef struct djs_timer {
     double interval_ms;
     bool repeating;
     djs_value_t callback;
+    djs_value_t *args;
+    size_t arg_count;
     uint64_t id;
     struct djs_timer *next;
 } djs_timer_t;
@@ -404,12 +455,25 @@ struct djs_runtime {
     djs_object_t *reference_error_constructor;
 
     djs_catch_frame_t *catch_frame;
-    djs_task_t *microtasks;         /* queueMicrotask + promise reactions */
+    djs_catch_frame_t root_catch;     /* the top-level handler */
+    djs_jmp_buf_t root_jmp;           /* where djs_longjmp(NULL, 1) lands */
+    djs_coro_t *current_coro;         /* the coroutine being executed */
+    djs_value_t last_value;           /* the value of the last expression */
+    djs_task_t *promise_jobs;         /* promise reactions (run first) */
+    djs_task_t *promise_job_tail;
+    djs_task_t *microtasks;         /* queueMicrotask callbacks */
     djs_task_t *microtask_tail;
     djs_task_t *ticks;               /* process.nextTick */
     djs_task_t *tick_tail;
     djs_timer_t *timers;
     uint64_t next_timer_id;
+
+    /* Statement control. */
+    djs_value_t return_value;        /* the value of the pending return */
+    const char *labels[16];          /* the active label stack */
+    size_t label_depth;
+    const char *break_label;         /* label of the pending break */
+    const char *continue_label;      /* label of the pending continue */
 
     djs_write_fn write_fn;
     void *write_user;
@@ -423,6 +487,7 @@ struct djs_runtime {
     djs_object_t *require_object;
     bool allow_exec;
     double start_time_ms;
+    double timer_now;           /* the virtual clock the timers use (ms) */
     uint64_t random_state;
     int exit_status;
     bool exiting;
@@ -430,10 +495,6 @@ struct djs_runtime {
 };
 
 /* --------------------------------------------------------------- utilities */
-
-/* Host allocator, so the interpreter can allocate coroutine stacks. */
-void *djs_host_alloc(size_t size);
-void djs_host_free(void *ptr);
 
 /* Arena. */
 void *djs_arena_alloc(djs_runtime_t *rt, size_t size);
@@ -599,6 +660,8 @@ bool djs_value_equals(djs_runtime_t *rt, djs_value_t a, djs_value_t b);
 /* Tasks and timers. */
 void djs_queue_microtask(djs_runtime_t *rt, djs_value_t callback, djs_value_t *args,
                           size_t arg_count);
+void djs_queue_promise_job(djs_runtime_t *rt, djs_value_t callback, djs_value_t *args,
+                            size_t arg_count);
 void djs_queue_tick(djs_runtime_t *rt, djs_value_t callback, djs_value_t *args,
                      size_t arg_count);
 djs_value_t djs_promise_new(djs_runtime_t *rt);
@@ -618,5 +681,95 @@ void djs_memset(void *destination, int value, size_t count);
 int djs_memcmp_helper(const void *a, const void *b, size_t count);
 int djs_strcmp(const char *a, const char *b);
 bool djs_str_equal(const char *a, const char *b);
+
+/* ------------------------------------------------------- value convenience */
+
+djs_value_t djs_bool_value(bool value);
+djs_value_t djs_number_value(double value);
+djs_value_t djs_string_value_cstr(djs_runtime_t *rt, const char *text);
+
+/* The string form of a value, owned by the runtime's arena. Numbers and
+ * booleans are converted; objects go through ToString. */
+const char *djs_value_cstr(djs_runtime_t *rt, djs_value_t value);
+
+/* The primitive string form of a value, without touching objects. */
+bool djs_value_as_cstr(djs_runtime_t *rt, djs_value_t value, const char **out);
+
+bool djs_value_is_callable(djs_value_t value);
+bool djs_value_is_array(djs_value_t value);
+bool djs_value_is_function(djs_value_t value);
+
+/* ------------------------------------------------------------- properties */
+
+/* The first own property of an object, for key iteration. */
+djs_property_t *djs_property_first(djs_object_t *object);
+
+/* Define a non-enumerable, non-writable property (class internals). */
+void djs_property_define(djs_runtime_t *rt, djs_object_t *object, const char *name,
+                          djs_value_t value, uint32_t flags);
+
+/* Define an accessor pair; either side may be NULL. */
+void djs_define_accessor(djs_runtime_t *rt, djs_object_t *object, const char *name,
+                         djs_native_fn getter, djs_native_fn setter);
+
+/* The enumerable own keys of an object, in insertion order. The caller owns
+ * the returned array (arena memory). */
+size_t djs_object_keys(djs_runtime_t *rt, djs_object_t *object, char ***out);
+
+/* -------------------------------------------------------------- iteration */
+
+/* The @@iterator method of a value, or NULL when it has none. */
+djs_value_t djs_get_iterator(djs_runtime_t *rt, djs_value_t iterable);
+
+/* Advance an iterator. Returns false when the iterator is exhausted; the
+ * value it produced is stored in *value_out. */
+bool djs_iterator_next(djs_runtime_t *rt, djs_value_t iterator, djs_value_t *value_out);
+
+/* --------------------------------------------------------------- promises */
+
+/* Attach handlers to a promise. Returns the derived promise. */
+djs_value_t djs_promise_then(djs_runtime_t *rt, djs_value_t promise, djs_value_t on_ok,
+                              djs_value_t on_err);
+
+/* ------------------------------------------------------------- generators */
+
+/* A generator object: calling next() resumes the coroutine. */
+djs_value_t djs_make_generator(djs_runtime_t *rt, djs_function_t *function,
+                               djs_env_t *env, djs_value_t this_value);
+
+/* A generator object that starts with the given arguments. */
+djs_value_t djs_make_generator_with_args(djs_runtime_t *rt, djs_function_t *function,
+                                         djs_env_t *env, djs_value_t this_value,
+                                         djs_value_t *args, size_t arg_count);
+
+/* Resume a generator. Returns false when it is done; *value_out holds the
+ * value it yielded (or returned) and *done_out says which. */
+bool djs_generator_next(djs_runtime_t *rt, djs_value_t generator, djs_value_t sent,
+                        djs_value_t *value_out, bool *done_out);
+
+/* --------------------------------------------------------------- coroutine */
+
+void *djs_host_alloc(size_t size);
+void djs_host_free(void *ptr);
+
+/* ----------------------------------------------------------------- timers */
+
+/* Queue a timer. Returns its id; clearTimeout/clearInterval use it. The
+ * timer queue is drained by the event loop (djs_run_event_loop). */
+uint64_t djs_timer_add(djs_runtime_t *rt, djs_value_t callback, double delay_ms,
+                        bool repeating, djs_value_t *args, size_t arg_count);
+void djs_timer_clear(djs_runtime_t *rt, uint64_t id);
+
+/* Wall-clock milliseconds since the epoch, a monotonic millisecond clock and
+ * a pseudo-random number. */
+double djs_host_time_ms(void);
+double djs_host_uptime_ms(void);
+uint64_t djs_host_random(void);
+
+/* True when `text` is a canonical array index ("0", "12"). */
+bool djs_canonical_index(const char *text, size_t *index_out);
+
+/* Math.pow: the implementation lives with the Math builtin. */
+double djs_math_pow(double base, double exponent);
 
 #endif /* DJS_INTERNAL_H */

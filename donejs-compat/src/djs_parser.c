@@ -272,14 +272,17 @@ static djs_node_t *parse_for(djs_parser_t *p) {
     djs_node_t *init = NULL;
     if (djs_at_punct(p, ";")) {
         /* no initialiser */
+        djs_advance(p);
     } else if (djs_at_ident(p, "var") || djs_at_ident(p, "let") || djs_at_ident(p, "const")) {
         init = parse_var_statement(p);
         if (init == NULL) return NULL;
+        /* parse_var_statement already ate the ';' */
     } else {
         p->no_in++;
         init = djs_parse_expression(p);
         p->no_in--;
         if (init == NULL) return NULL;
+        if (!djs_expect_punct(p, ";")) return NULL;
     }
 
     if (djs_at_ident(p, "of") || djs_at_ident(p, "in")) {
@@ -302,7 +305,6 @@ static djs_node_t *parse_for(djs_parser_t *p) {
     djs_node_t *node = djs_node_new(p, DJS_N_FOR);
     if (node == NULL) return NULL;
     node->a = init;
-    if (!djs_expect_punct(p, ";")) return NULL;
     if (!djs_at_punct(p, ";")) {
         node->b = djs_parse_expression(p);
         if (node->b == NULL) return NULL;

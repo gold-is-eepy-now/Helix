@@ -243,6 +243,8 @@ djs_node_t *djs_parse_function(djs_parser_t *p, bool declaration) {
     if (def == NULL) return NULL;
     fn->aux = def;
 
+    /* The "function" keyword; "async" was consumed by the caller. */
+    if (djs_at_ident(p, "function")) djs_advance(p);
     bool generator = djs_eat_punct(p, "*");
     djs_token_t *token = djs_cur(p);
     if (token->type == DJS_TOK_IDENTIFIER && !djs_at_punct(p, "(")) {
@@ -251,9 +253,9 @@ djs_node_t *djs_parse_function(djs_parser_t *p, bool declaration) {
     }
     if (!djs_parse_params_into(p, fn)) return NULL;
     def->flags = generator ? DJS_FN_GENERATOR : 0u;
-    if (p->index > 0 && p->tokens[p->index - 1].type == DJS_TOK_IDENTIFIER &&
-        djs_strcmp(p->tokens[p->index - 1].text, "async") == 0) {
+    if (p->pending_async) {
         def->flags |= DJS_FN_ASYNC;
+        p->pending_async = false;
     }
     def->body = djs_parse_block(p);
     if (def->body == NULL) return NULL;

@@ -78,6 +78,7 @@ helix/
 │   └── Makefile
 ├── drivers/       native driver services (M10)
 ├── mac-darwin-compat/ Mac/Darwin compatibility subsystem (Mach-O, Darwin syscalls, Mac-like FS, X11 AppKit GUI)
+├── donejs-compat/    DoneJS JavaScript runtime port (C11, AST interpreter, Node modules, async loop)
 ├── runtime/       user-space runtimes, incl. future Linux/BSD layers (planned)
 │   ├── optional_drivers/   optional Linux driver adapters (Ethernet, WiFi, Graphics, Sound)
 │   │   ├── transport/      transport adapter headers

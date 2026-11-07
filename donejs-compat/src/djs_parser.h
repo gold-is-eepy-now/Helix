@@ -14,6 +14,7 @@ typedef struct djs_parser {
     const char *filename;
     char *error;
     int no_in;                /* depth of "in" operator suppression */
+    bool pending_async;       /* the next function is an async function */
 } djs_parser_t;
 
 /* Shared helpers (djs_parser.c). */
