@@ -76,7 +76,8 @@ deps:
 linux-submodule:
 	@if [ "$(LINUX_SUBMODULE_INITIALIZED)" != "yes" ]; then \
 		echo "[submodule] Initializing Linux kernel submodule at $(LINUX_SUBMODULE_DIR)..."; \
-		git submodule update --init --recursive $(LINUX_SUBMODULE_DIR); \
+		git submodule update --init --recursive $(LINUX_SUBMODULE_DIR) \
+		  || { echo "[submodule] ERROR: could not initialise $(LINUX_SUBMODULE_DIR)"; exit 1; }; \
 		echo "[submodule] Linux kernel submodule ready."; \
 	else \
 		echo "[submodule] Linux kernel submodule already initialized."; \

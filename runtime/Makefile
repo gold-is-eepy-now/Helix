@@ -29,7 +29,8 @@ VIRTIO_OBJS := $(VIRTIO_SRCS:.c=.o)
 # Native Helix userspace library
 LIBHELIX_DIR := ../userspace
 LIBHELIX_LIB := $(LIBHELIX_DIR)/libhelix.a
-LIBHELIX_SRCS := $(LIBHELIX_DIR)/libhelix.c
+# The libc subset (userspace/libc) is part of the library, as in kernel/Makefile.
+LIBHELIX_SRCS := $(LIBHELIX_DIR)/libhelix.c $(wildcard $(LIBHELIX_DIR)/libc/*.c)
 LIBHELIX_OBJS := $(LIBHELIX_SRCS:.c=.o)
 
 all: $(TARGET) $(LIBHELIX_LIB)
@@ -93,7 +94,7 @@ $(LIBHELIX_LIB): $(LIBHELIX_OBJS) | $(LIBHELIX_DIR)/build
 	@echo "[runtime] Native Helix library built: $@"
 
 $(LIBHELIX_OBJS): $(LIBHELIX_DIR)/%.o: $(LIBHELIX_DIR)/%.c
-	$(CC) $(CFLAGS) -I$(LIBHELIX_DIR) -c $< -o $@
+	$(CC) $(CFLAGS) -I$(LIBHELIX_DIR) -I$(LIBHELIX_DIR)/include -c $< -o $@
 
 # Userspace apps
 USERSpace_APPS_DIR := ../userspace/apps
@@ -102,8 +103,8 @@ USERSpace_APP_BINS := $(addprefix $(USERSpace_APPS_DIR)/,$(USERSpace_APPS))
 
 userspace-apps: $(USERSpace_APP_BINS)
 
-$(USERSpace_APPS_DIR)/%: $(USERSpace_APPS_DIR)/%.c
-	$(CC) $(CFLAGS) -I. -Ioptional_drivers/transport -I$(LIBHELIX_DIR) $< $(LIBHELIX_LIB) -o $@
+$(USERSpace_APPS_DIR)/%: $(USERSpace_APPS_DIR)/%.c $(LIBHELIX_LIB)
+	$(CC) $(CFLAGS) -I. -Ioptional_drivers/transport -I$(LIBHELIX_DIR) -static -no-pie -nostdlib $< $(LIBHELIX_LIB) -o $@
 
 clean:
 	rm -f *.o $(TARGET) runtime_test
