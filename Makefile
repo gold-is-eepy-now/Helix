@@ -76,6 +76,8 @@ deps:
 linux-submodule:
 	@if [ "$(LINUX_SUBMODULE_INITIALIZED)" != "yes" ]; then \
 		echo "[submodule] Initializing Linux kernel submodule at $(LINUX_SUBMODULE_DIR)..."; \
+		git rev-parse --git-dir >/dev/null 2>&1 \
+		  || { echo "[submodule] ERROR: this is not a git checkout (no .git). Submodules need a git clone; a zip or archive cannot be initialised."; exit 1; }; \
 		git submodule update --init --recursive $(LINUX_SUBMODULE_DIR) \
 		  || { echo "[submodule] ERROR: could not initialise $(LINUX_SUBMODULE_DIR)"; exit 1; }; \
 		echo "[submodule] Linux kernel submodule ready."; \
