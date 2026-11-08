@@ -74,7 +74,11 @@ $(OPTIONAL_DRIVERS_DIR)/%.o: $(OPTIONAL_DRIVERS_DIR)/%.c $(OPTIONAL_DRIVERS_DIR)
 	$(CC) $(CFLAGS) -I$(OPTIONAL_DRIVERS_DIR)/transport -c $< -o $@
 
 # KVM driver build targets
-kvm: $(KVM_LIB)
+# The KVM driver is a Linux-host wrapper: it calls glibc ioctl() on /dev/kvm, which
+# only exists on a Linux host. It cannot be built into a Helix program, so this target
+# explains that instead of failing the whole `linux-drivers` run.
+kvm:
+	@echo "[runtime] skipped: the KVM driver is a Linux-host wrapper (glibc ioctl on /dev/kvm) and is not built for Helix."
 
 $(KVM_DIR)/build:
 	mkdir -p $(KVM_DIR)/build
@@ -111,7 +115,7 @@ USERSpace_APP_BINS := $(addprefix $(USERSpace_APPS_DIR)/,$(USERSpace_APPS))
 userspace-apps: $(USERSpace_APP_BINS)
 
 $(USERSpace_APPS_DIR)/%: $(USERSpace_APPS_DIR)/%.c $(LIBHELIX_LIB)
-	$(CC) $(CFLAGS) -I. -Ioptional_drivers/transport -I$(LIBHELIX_DIR) -static -no-pie -nostdlib $< $(LIBHELIX_LIB) -o $@
+	$(CC) $(CFLAGS) -I. -Ioptional_drivers/transport -I$(LIBHELIX_DIR)/include -I$(LIBHELIX_DIR) -static -no-pie -nostdlib $< $(LIBHELIX_LIB) -o $@
 
 clean:
 	rm -f *.o $(TARGET) runtime_test
