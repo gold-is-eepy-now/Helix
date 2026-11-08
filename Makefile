@@ -65,7 +65,10 @@ deps:
 	@if [ ! -f "$(LIMINE_DIR)/BOOTX64.EFI" ]; then \
 		mkdir -p "$(DEPS_DIR)"; \
 		echo "[deps] downloading Limine $(LIMINE_VERSION)"; \
-		curl -fL --silent --show-error -o "$(DEPS_DIR)/limine-binary.tar.gz" "$(LIMINE_URL)"; \
+		curl -fL --silent --show-error --retry 5 --retry-delay 10 --retry-all-errors \
+		  -o "$(DEPS_DIR)/limine-binary.tar.gz" "$(LIMINE_URL)" \
+		  || { rm -f "$(DEPS_DIR)/limine-binary.tar.gz"; \
+		       echo "[deps] Limine download failed (the server may be busy). Re-run make to retry."; exit 1; }; \
 		tar xzf "$(DEPS_DIR)/limine-binary.tar.gz" -C "$(DEPS_DIR)"; \
 	fi
 	@echo "[deps] Limine ready in $(LIMINE_DIR)"
