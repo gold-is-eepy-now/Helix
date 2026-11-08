@@ -80,6 +80,21 @@ static inline uint64_t helix_syscall(uint64_t native_num,
 #define SYS_OPEN               27   /* open(path, flags) */
 #define SYS_CLOSE              28   /* close(fd) */
 #define SYS_LSEEK              29   /* lseek(fd, offset, whence) */
+#define SYS_STAT               30   /* stat(path, struct helix_stat *) */
+#define SYS_LISTDIR            31   /* listdir(path, buf, cap) -> bytes, text lines */
+#define SYS_MKDIR              32   /* mkdir(path) */
+#define SYS_UNLINK             33   /* unlink(path): files only */
+#define SYS_RMDIR              34   /* rmdir(path): empty directories only */
+#define SYS_TRUNCATE           35   /* truncate(path, size) */
+
+/* Result of SYS_STAT. Same layout as kernel/src/syscall_fs.c's user_stat_t. */
+struct helix_stat {
+    uint64_t ino;
+    uint64_t size;
+    uint16_t mode;
+    uint16_t links;
+    uint32_t mtime;
+};
 
 /* Return values / error codes. */
 #define HELIX_SUCCESS          0

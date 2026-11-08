@@ -69,4 +69,22 @@ int64_t ufile_seek(int64_t fd, int64_t offset, int whence);
 /* Release a descriptor. Returns 0, or -1 if it was not open. */
 int64_t ufile_close(int64_t fd);
 
+/* File management on absolute paths, for the user commands (ls, rm, mkdir, ...).
+ * Each returns 0 or -1 unless noted. `listdir` writes one line per entry
+ * ("d" or "-", a tab, the size, a tab, the name, a newline) and returns the length. */
+typedef struct {
+    uint64_t ino;
+    uint64_t size;
+    uint16_t mode;
+    uint16_t links;
+    uint32_t mtime;
+} ufile_stat_t;
+
+int64_t ufile_stat(const char *path, ufile_stat_t *out);
+int64_t ufile_listdir(const char *path, char *buf, uint64_t cap);
+int64_t ufile_mkdir(const char *path);
+int64_t ufile_unlink(const char *path);
+int64_t ufile_rmdir(const char *path);
+int64_t ufile_truncate(const char *path, uint64_t size);
+
 #endif /* HELIX_UFILE_H */

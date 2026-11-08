@@ -106,6 +106,12 @@ void syscall_init(void) {
     syscall_table[SYSCALL_OPEN]          = handle_open;
     syscall_table[SYSCALL_CLOSE]         = handle_fd_close;
     syscall_table[SYSCALL_LSEEK]         = handle_lseek;
+    syscall_table[SYSCALL_STAT]          = sys_stat;
+    syscall_table[SYSCALL_LISTDIR]       = sys_listdir;
+    syscall_table[SYSCALL_MKDIR]         = sys_mkdir;
+    syscall_table[SYSCALL_UNLINK]        = sys_unlink;
+    syscall_table[SYSCALL_RMDIR]         = sys_rmdir;
+    syscall_table[SYSCALL_TRUNCATE]      = sys_truncate;
 }
 
 /* -- Handler implementations ------------------------------------------ */
