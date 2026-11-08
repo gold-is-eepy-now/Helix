@@ -264,8 +264,8 @@ not implemented.
 - 🚧 Network-interface objects (`net_interface.c`). There is no network stack yet: no ARP, IPv4, UDP or TCP.
 - 🚧 Display-surface objects (`display_surface.c`). There is no compositor yet.
 - 🚧 A basic graphical desktop (`desktop` command): teal desktop, My Computer and
-  About windows, taskbar with clock, Start menu, a pointer driven by the USB
-  mouse. Tested in QEMU only (screenshots and the USB mouse emulation); not on
+  About windows, taskbar with clock, Start menu, a pointer driven by a PS/2
+  mouse (QEMU's default pointer; `kernel/src/ps2_mouse.c`) or a USB mouse. Tested in QEMU only (screenshots; PS/2 and USB mouse emulation); not on
   real hardware. Clicking the background does not close windows.
 - ✅ Kernel event log (`log` command): a 512-event ring of scheduler, syscall,
   process, shell, input and exception events, printed automatically on a CPU

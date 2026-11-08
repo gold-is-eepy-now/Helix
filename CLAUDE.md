@@ -163,7 +163,8 @@ Also, in the same change:
   Machine-tested.
 - **Implemented (desktop, basic, QEMU-tested only):** `desktop` command: teal
   desktop, My Computer and About windows, taskbar with clock, Start menu, pointer
-  driven by the USB mouse. No compositor; not tested on real hardware.
+  driven by a PS/2 mouse (QEMU's default) or a USB mouse. No compositor; not
+  tested on real hardware.
 - **Implemented (LC-1, Linux compat):** `compat/include/linux/*` headers (types, slab, spinlock, atomic, mutex, module_init, printk) and a self-test driver run at boot. See docs/08-linux-compat.md.
 - **Implemented (Mac/Darwin compat):** `mac-darwin-compat/` subsystem with 64-bit Mach-O loader, Darwin BSD & Mach trap translation, Darwin process runtime (`darwin_runtime.c`), Darwin `launchd` PID 1 daemon with plist service loading and `launchctl` CLI (`launchd.c`), Mac-like case-insensitive filesystem, extended attributes (xattr), property list (.plist) engine, .app bundle resolution, CLI tools (`sw_vers`, `defaults`, `plutil`, `uname`, `otool`, `open`, `launchctl`), and AppKit/Cocoa GUI translation to Helix X11 server (`Calculator.app`, `TextEdit.app`), machine-tested (157 checks).
 - **Implemented (DoneJS compat):** `donejs-compat/` freestanding C11 JavaScript runtime ported for Helix OS, featuring AST tree-walking interpreter, CommonJS modules (`require`), standard library (`path`, `fs`, `process`, `util`, `assert`, `events`, `buffer`, `os`, `stream`), Promises, microtasks, timers (`setTimeout`), and event loop draining. Machine-tested (hosted suite).

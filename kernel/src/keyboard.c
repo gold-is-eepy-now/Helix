@@ -10,6 +10,7 @@
  * now.
  */
 #include "keyboard.h"
+#include "ps2_mouse.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -66,6 +67,7 @@ static const char keymap_shift[128] = {
 };
 
 void keyboard_init(void) {
+    ps2_mouse_init();   /* the same controller serves the mouse */
     shift_down = false;
     extended = false;
     for (size_t i = 0; i < sizeof(pressed_keys) / sizeof(pressed_keys[0]); i++)
@@ -103,8 +105,10 @@ bool keyboard_read_event(keyboard_event_t *event) {
 
     uint8_t scancode = inb(KBD_DATA);
 
-    /* Bit 5 means the byte came from the mouse, not the keyboard. */
+    /* Bit 5 means the byte came from the mouse, not the keyboard. Hand it to the
+     * PS/2 mouse decoder rather than dropping it. */
     if (status & 0x20) {
+        ps2_mouse_feed(scancode);
         return false;
     }
 

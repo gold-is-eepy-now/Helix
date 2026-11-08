@@ -4,10 +4,9 @@
  * and a clock, and bevelled windows with navy title bars. "My Computer" lists the
  * real root directory from the ext4 volume; "About Helix" is static text.
  *
- * Mouse: a USB mouse moves an arrow cursor. A left click acts on whatever is under
+ * Mouse: a PS/2 or USB mouse moves an arrow cursor. A left click acts on whatever is under
  * the pointer: an icon opens its window, Start toggles the menu, a menu item runs,
  * a title-bar x closes a window, and clicking a window or taskbar button focuses it.
- * The mouse needs USB (UHCI/EHCI); there is no PS/2 mouse driver.
  *
  * What it is not (yet): the desktop runs in the kernel, not as a ring-3 program,
  * and there is no drag, double-click or right-click.
@@ -30,6 +29,7 @@
 #include "input.h"
 #include "keyboard.h"
 #include "klog.h"
+#include "ps2_mouse.h"
 #include "kstring.h"
 #include "panic.h"
 #include "time.h"
@@ -480,7 +480,8 @@ static int handle_click(int x, int y, uint32_t sh) {
 static int poll_pointer(void) {
     usb_host_poll();
     usb_hid_mouse_t m;
-    bool moved = usb_hid_get_mouse_event(&m);
+    /* USB mouse first, then the PS/2 mouse (QEMU's default pointer). */
+    bool moved = usb_hid_get_mouse_event(&m) || ps2_mouse_get_event(&m);
     uint32_t sw = fb_width(), sh = fb_height();
     int result = PTR_NONE;
 
@@ -567,6 +568,7 @@ bool desktop_run(void) {
     usb_host_poll();
     usb_hid_mouse_t discard;
     usb_hid_get_mouse_event(&discard);     /* drop motion from before the desktop */
+    ps2_mouse_get_event(&discard);
     g_button_was_down = (discard.buttons & 1u) != 0;
 
     for (int i = 0; i < MAX_WIN; i++) g_win[i].used = false;
