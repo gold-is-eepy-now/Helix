@@ -36,7 +36,7 @@ else
 KERNEL_BUILD_DIR := $(if $(filter /%,$(BUILD_DIR)),$(BUILD_DIR),../$(BUILD_DIR))
 endif
 
-LIMINE_VERSION := v12.9.3
+LIMINE_VERSION := v12.9.6
 LIMINE_URL     := https://github.com/Limine-Bootloader/Limine/releases/download/$(LIMINE_VERSION)/limine-binary.tar.gz
 DEPS_DIR       := $(BUILD_DIR)/deps
 LIMINE_DIR     := $(DEPS_DIR)/limine-binary
