@@ -1,4 +1,11 @@
-CC := gcc
+# The ring-3 apps are ELF64 programs for Helix. The host compiler (clang on macOS,
+# gcc on Linux) cannot link them, so default to the x86_64 ELF cross compiler, the
+# same one the kernel uses. An explicit CC= on the command line still wins.
+# A host compiler name (from the make default, or CC exported by the shell) means
+# "not chosen", so it is replaced with the cross compiler.
+ifneq (,$(filter cc gcc clang,$(CC)))
+CC := x86_64-elf-gcc
+endif
 CFLAGS := -ffreestanding -nostdlib -fno-pic -fno-pie -fno-stack-protector \
           -fno-stack-check -fno-common -fno-builtin -std=gnu11 -O2 -g
 LDFLAGS := -no-pie

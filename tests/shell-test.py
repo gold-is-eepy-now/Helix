@@ -41,6 +41,8 @@ def _find_ovmf():
          "/opt/homebrew/share/qemu/edk2-i386-vars.fd"),
         ("/usr/local/share/qemu/edk2-x86_64-code.fd",
          "/usr/local/share/qemu/edk2-i386-vars.fd"),
+        ("/opt/local/share/qemu/edk2-x86_64-code.fd",
+         "/opt/local/share/qemu/edk2-i386-vars.fd"),
         ("/usr/share/qemu/edk2-x86_64-code.fd",
          "/usr/share/qemu/edk2-i386-vars.fd"),
         ("/usr/share/edk2/x86_64/OVMF_CODE.fd",
@@ -49,7 +51,11 @@ def _find_ovmf():
     for c, v in candidates:
         if os.path.exists(c) and os.path.exists(v):
             return c, v
-    return code or candidates[0][0], vars_src or candidates[0][1]
+    if code and vars_src:
+        return code, vars_src
+    sys.exit("shell-test: no UEFI firmware found. Set OVMF_CODE and OVMF_VARS_SRC to "
+             "an OVMF/EDK2 code image and vars template (macOS: MacPorts qemu installs "
+             "them under /opt/local/share/qemu; Homebrew under /opt/homebrew/share/qemu).")
 
 
 OVMF_CODE, OVMF_VARS_SRC = _find_ovmf()

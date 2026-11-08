@@ -113,6 +113,15 @@ linux-drivers-sound: linux-submodule
 linux-drivers-kvm: linux-submodule
 	@$(MAKE) -C runtime LIB_SRCDIR="$(LINUX_SUBMODULE_DIR)" kvm
 
+# Colon-named aliases: `make linux-drivers:ethernet` is the spelling in the docs.
+# GNU make needs the colon escaped in a target name.
+linux-drivers\:ethernet: linux-drivers-ethernet
+linux-drivers\:wifi: linux-drivers-wifi
+linux-drivers\:graphics: linux-drivers-graphics
+linux-drivers\:sound: linux-drivers-sound
+linux-drivers\:kvm: linux-drivers-kvm
+linux-drivers\:virtio: linux-drivers-virtio
+
 linux-drivers-virtio: linux-submodule
 	@$(MAKE) -C runtime LIB_SRCDIR="$(LINUX_SUBMODULE_DIR)" virtio
 

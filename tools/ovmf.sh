@@ -35,6 +35,8 @@ if [ -z "$OVMF_CODE" ] || [ -z "$OVMF_VARS_SRC" ]; then
                  /usr/local/share/qemu/edk2-i386-vars.fd \
     || _ovmf_try /usr/share/qemu/edk2-x86_64-code.fd \
                  /usr/share/qemu/edk2-i386-vars.fd \
+    || _ovmf_try /opt/local/share/qemu/edk2-x86_64-code.fd \
+                 /opt/local/share/qemu/edk2-i386-vars.fd \
     || _ovmf_try /usr/share/edk2/x86_64/OVMF_CODE.fd \
                  /usr/share/edk2/x86_64/OVMF_VARS.fd \
     || true
