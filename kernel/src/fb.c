@@ -84,6 +84,23 @@ static void put_pixel(size_t x, size_t y, uint32_t color) {
     }
 }
 
+/* Read a pixel back in the same packing put_pixel writes. Off-screen reads
+ * return 0. The desktop uses this to save what is under the pointer. */
+uint32_t fb_get_pixel(uint32_t x, uint32_t y) {
+    if (!fb_ready() || x >= g_fb->width || y >= g_fb->height) {
+        return 0;
+    }
+    size_t bytes_per_pixel = g_fb->bpp / 8u;
+    const uint8_t *pixel = (const uint8_t *)g_fb->address
+                         + (size_t)y * g_fb->pitch
+                         + (size_t)x * bytes_per_pixel;
+    uint32_t color = 0;
+    for (size_t i = 0; i < bytes_per_pixel; i++) {
+        color |= (uint32_t)pixel[i] << (8u * i);
+    }
+    return color;
+}
+
 void fb_clear(uint32_t color) {
     if (!fb_ready()) {
         return;

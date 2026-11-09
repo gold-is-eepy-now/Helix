@@ -45,6 +45,7 @@ void fb_graphics_begin(void);
 uint32_t fb_width(void);
 uint32_t fb_height(void);
 void fb_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color);
+uint32_t fb_get_pixel(uint32_t x, uint32_t y);
 void fb_draw_text(uint32_t x, uint32_t y, const char *s, uint32_t fg, uint32_t bg, bool opaque);
 
 #endif /* HELIX_FB_H */

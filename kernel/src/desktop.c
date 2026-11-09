@@ -4,12 +4,15 @@
  * and a clock, and bevelled windows with navy title bars. "My Computer" lists the
  * real root directory from the ext4 volume; "About Helix" is static text.
  *
- * Mouse: a PS/2 or USB mouse moves an arrow cursor. A left click acts on whatever is under
- * the pointer: an icon opens its window, Start toggles the menu, a menu item runs,
- * a title-bar x closes a window, and clicking a window or taskbar button focuses it.
+ * Mouse: a PS/2 or USB mouse moves an arrow cursor. Moving it only redraws the
+ * arrow (the pixels under it are saved and restored); the desktop repaints on
+ * window and menu changes. A left click acts on whatever is under the pointer:
+ * an icon opens its window, Start toggles the menu, a menu item runs, a title-bar
+ * x closes a window, clicking a window or taskbar button focuses it, and dragging
+ * a title bar moves the window.
  *
  * What it is not (yet): the desktop runs in the kernel, not as a ring-3 program,
- * and there is no drag, double-click or right-click.
+ * and there is no double-click or right-click.
  *
  * Keys:  Up/Down  move the icon selection (or the Start menu selection)
  *        Enter    open the selected icon or menu item
@@ -65,6 +68,11 @@ static bool g_menu_open;
 /* The pointer position in screen pixels, and the left button from the last poll. */
 static int g_mx, g_my;
 static bool g_button_was_down;
+
+/* A window being dragged by its title bar (-1 when none), and where inside it the
+ * grab happened, so the window keeps the same point under the pointer. */
+static int g_drag = -1;
+static int g_drag_dx, g_drag_dy;
 
 /* What a pointer poll asks the main loop to do. */
 enum { PTR_NONE, PTR_REDRAW, PTR_EXIT };
@@ -329,6 +337,12 @@ static const char *const g_cursor_rows[CURSOR_H] = {
     "      XXXX  ",
 };
 
+/* The pointer is drawn over the picture, so moving it does not repaint the desktop:
+ * the pixels under the arrow are saved first and put back when it moves. */
+static uint32_t g_under[CURSOR_H * CURSOR_W];   /* the picture under the arrow */
+static int g_cur_x, g_cur_y;                    /* where the arrow was drawn */
+static bool g_cur_shown;                        /* is the arrow on screen now */
+
 static void draw_cursor(void) {
     for (uint32_t r = 0; r < CURSOR_H; r++) {
         for (uint32_t c = 0; c < CURSOR_W; c++) {
@@ -342,8 +356,42 @@ static void draw_cursor(void) {
     }
 }
 
+/* Put back the picture under the arrow, if it is on screen. */
+static void cursor_restore(void) {
+    if (!g_cur_shown) return;
+    for (uint32_t r = 0; r < CURSOR_H; r++) {
+        for (uint32_t c = 0; c < CURSOR_W; c++) {
+            fb_fill_rect((uint32_t)g_cur_x + c, (uint32_t)g_cur_y + r, 1, 1,
+                         g_under[r * CURSOR_W + c]);
+        }
+    }
+    g_cur_shown = false;
+}
+
+/* Save the picture under the arrow at (g_mx, g_my), then draw the arrow. */
+static void cursor_show(void) {
+    g_cur_x = g_mx;
+    g_cur_y = g_my;
+    for (uint32_t r = 0; r < CURSOR_H; r++) {
+        for (uint32_t c = 0; c < CURSOR_W; c++) {
+            g_under[r * CURSOR_W + c] = fb_get_pixel((uint32_t)g_mx + c, (uint32_t)g_my + r);
+        }
+    }
+    draw_cursor();
+    g_cur_shown = true;
+}
+
+/* Move the arrow only: a small change to the screen, no repaint. */
+static void cursor_move(int nx, int ny) {
+    cursor_restore();
+    g_mx = nx;
+    g_my = ny;
+    cursor_show();
+}
+
 static void redraw(void) {
     uint32_t sw = fb_width(), sh = fb_height();
+    g_cur_shown = false;                        /* the frame below wipes the old arrow */
     fb_fill_rect(0, 0, sw, sh, c_desk);
     for (int i = 0; i < ICON_COUNT; i++) {
         draw_icon(i, 16, 16u + (uint32_t)i * 72u, i == g_icon_sel && !g_menu_open);
@@ -353,7 +401,7 @@ static void redraw(void) {
     }
     draw_taskbar(sw, sh);
     if (g_menu_open) draw_start_menu(sh);
-    draw_cursor();
+    cursor_show();
 }
 
 /* ------------------------------------------------------------------ */
@@ -458,6 +506,14 @@ static int handle_click(int x, int y, uint32_t sh) {
             close_window(i);
             return PTR_REDRAW;
         }
+        if (inside(x, y, w->x, w->y, w->w, 24)) {          /* title bar: start a drag */
+            g_focus = i;
+            g_drag = i;
+            g_drag_dx = x - (int)w->x;
+            g_drag_dy = y - (int)w->y;
+            klog_event(KLOG_DESKTOP, "drag start %s", g_app_names[w->app]);
+            return PTR_REDRAW;
+        }
         if (inside(x, y, w->x, w->y, w->w, w->h)) {
             g_focus = i;
             return PTR_REDRAW;
@@ -484,6 +540,9 @@ static int poll_pointer(void) {
     bool moved = usb_hid_get_mouse_event(&m) || ps2_mouse_get_event(&m);
     uint32_t sw = fb_width(), sh = fb_height();
     int result = PTR_NONE;
+    /* The button state comes from the packet. With no new packet, m is not written,
+     * so keep the last state rather than reading stale bytes as a release. */
+    bool down = moved ? ((m.buttons & 1u) != 0) : g_button_was_down;
 
     if (moved) {
         int nx = g_mx + m.dx;
@@ -494,12 +553,30 @@ static int poll_pointer(void) {
         if (ny > (int)sh - 1) ny = (int)sh - 1;
         klog_event(KLOG_USB, "mouse dx=%d dy=%d buttons=%x -> %d,%d", (int)m.dx, (int)m.dy,
                    (unsigned)m.buttons, nx, ny);
-        g_mx = nx;
-        g_my = ny;
-        result = PTR_REDRAW;
+        if (g_drag >= 0 && down) {
+            /* Dragging: the window follows the pointer, kept on screen above the taskbar. */
+            window_t *w = &g_win[g_drag];
+            int wx = nx - g_drag_dx;
+            int wy = ny - g_drag_dy;
+            int max_x = (int)sw - (int)w->w;
+            int max_y = (int)sh - (int)TASK_H - (int)w->h;
+            if (wx < 0) wx = 0;
+            if (wy < 0) wy = 0;
+            if (wx > max_x) wx = max_x;
+            if (wy > max_y) wy = max_y;
+            w->x = (uint32_t)wx;
+            w->y = (uint32_t)wy;
+            g_mx = nx;
+            g_my = ny;
+            result = PTR_REDRAW;               /* the window moved: repaint the frame */
+        } else {
+            cursor_move(nx, ny);               /* plain move: only the arrow changes */
+        }
     }
 
-    bool down = (m.buttons & 1u) != 0;
+    if (!down && g_button_was_down) {
+        g_drag = -1;                           /* releasing the button ends a drag */
+    }
     if (down && !g_button_was_down) {
         klog_event(KLOG_INPUT, "click at %d,%d", g_mx, g_my);
         result = handle_click(g_mx, g_my, sh);
@@ -565,6 +642,8 @@ bool desktop_run(void) {
 
     g_mx = (int)sw / 2;
     g_my = (int)sh / 2;
+    g_cur_shown = false;
+    g_drag = -1;
     usb_host_poll();
     usb_hid_mouse_t discard;
     usb_hid_get_mouse_event(&discard);     /* drop motion from before the desktop */
