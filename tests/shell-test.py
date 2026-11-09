@@ -264,6 +264,9 @@ def main():
 
         ser.send("calc 6 * 7\n")
         check("calc 6 * 7 = 42", "= 42")
+        ser.send("calc 9 + 10\n")
+        # The joke is random (1 in 4): either the true sum or the meme answer.
+        check("calc 9 + 10 prints a sum", "9 + 10 = ")
 
         ser.send("usermode\n")
         check("ring 3 program writes through the syscall gate", "hello from ring 3")

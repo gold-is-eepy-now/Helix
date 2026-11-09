@@ -304,7 +304,7 @@ shows it; typing `myprog arg1 arg2` runs it.
 | `usershell` | runs the userland shell in ring 3 (an ELF loaded into its own process); type `exit` to return. Inside it: `cat <path>`, `write <path> <text>` and `heap` (a 64 KiB brk heap check) |
 | `init` | runs `/bin/init` (PID 1) in ring 3; it starts `/bin/sh` |
 | `exec` | `exec <path> [args...]`: runs a program from the root and waits for it |
-| `calc` | `calc <a> <op> <b>` for `+ - * / %` (integers only) |
+| `calc` | `calc <a> <op> <b>` for `+ - * / %` (integers only). A joke: about one time in four, `calc 9 + 10` prints `= 21` and `you stupid` |
 | `clear` | clear the screen |
 | `color` | turn ANSI colour on/off: `color on`, `color off` |
 | `log` | show the kernel event log, oldest first: scheduler, syscalls, process spawn/exit, shell lines, input, USB mouse, exceptions. `log clear` forgets earlier events; `log serial on`/`off` echoes every event to the serial console as it happens. The log is also dumped automatically when a CPU exception is taken |

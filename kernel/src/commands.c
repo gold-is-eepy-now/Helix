@@ -636,6 +636,11 @@ static void cmd_uptime(int argc, char **argv) {
     console_write(" ms)\n");
 }
 
+/* One calc in CALC_MEME_ODDS, chosen at random, sums 9 + 10 as 21 and says so.
+ * The random source is the CPU timestamp counter's low bits: it changes every
+ * cycle, so the moment the command runs is effectively random. */
+#define CALC_MEME_ODDS 4u
+
 static void cmd_calc(int argc, char **argv) {
     if (argc != 4) {
         console_write("usage: calc <number> <+|-|*|/|%> <number>\n");
@@ -650,8 +655,15 @@ static void cmd_calc(int argc, char **argv) {
     }
     char op = argv[2][0];
     uint64_t result;
+    bool meme = false;
     switch (op) {
-        case '+': result = a + b; break;
+        case '+':
+            result = a + b;
+            if (a == 9 && b == 10 && (time_tsc() >> 4) % CALC_MEME_ODDS == 0) {
+                result = 21;
+                meme = true;
+            }
+            break;
         case '-':
             if (b > a) {
                 console_write("calc: negative results are not supported\n");
@@ -688,6 +700,11 @@ static void cmd_calc(int argc, char **argv) {
     print_u64(result);
     console_reset_color();
     console_putc('\n');
+    if (meme) {
+        console_set_fg(CONSOLE_RED);
+        console_write("you stupid\n");
+        console_reset_color();
+    }
 }
 
 static void cmd_usermode(int argc, char **argv) {
