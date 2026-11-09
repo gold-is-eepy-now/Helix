@@ -30,7 +30,14 @@ static inline bool bit_test(uint64_t frame) {
     return (g_bitmap[frame >> 3] >> (frame & 7u)) & 1u;
 }
 
+static uint64_t g_hhdm_offset;
+
+uint64_t pmm_hhdm_offset(void) {
+    return g_hhdm_offset;
+}
+
 void pmm_init(struct limine_memmap_response *memmap, uint64_t hhdm_offset) {
+    g_hhdm_offset = hhdm_offset;
     g_bitmap = NULL;
     g_bitmap_bytes = 0;
     g_bitmap_phys = 0;

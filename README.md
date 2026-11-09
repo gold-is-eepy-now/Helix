@@ -54,7 +54,7 @@ native object model. They are not the foundation.
 | Shell command history (Up/Down, `history`) | ✅ working in the kernel shell; a userland shell still to come |
 | Driver framework | ✅ complete (M10) |
 | Storage and filesystems | ✅ complete (M11) |
-| Networking, display, and input objects | 🚧 objects exist (M12); no network stack or compositor yet |
+| Networking, display, and input objects | 🚧 objects exist (M12); e1000 driver with raw frames and ARP self-test (QEMU only); no network stack or compositor yet |
 | Linux / BSD / POSIX compatibility | 🚧 in progress (runtime subsystem) |
 | Mac / Darwin compatibility | ✅ working, machine-tested (Mach-O loader, Darwin syscalls, Mac-like FS, xattrs, plist/bundle, CLI/GUI via X11) |
 | USB HID support | 🚧 UHCI host, root ports, hubs and HID keyboard/mouse in QEMU; not yet verified on real iMac hardware (see docs/07-usb.md) |

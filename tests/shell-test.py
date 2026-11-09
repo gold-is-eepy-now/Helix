@@ -199,6 +199,9 @@ def main():
         "-chardev", f"socket,id=ser0,path={SERIAL_SOCK},server=on,wait=off",
         "-serial", "chardev:ser0",
         "-monitor", f"unix:{MONITOR_SOCK},server=on,wait=off",
+        # Network card (Intel e1000) with QEMU's user-mode network: a real gateway
+        # answers our ARP request. See docs/10-network.md.
+        "-netdev", "user,id=n0", "-device", "e1000,netdev=n0",
         "-display", "none",
         "-no-reboot",
     ]
@@ -350,6 +353,14 @@ def main():
         check("log records the spawn of the program", "proc] [proc] spawn /bin/args", timeout=40)
         check("log records the exit with its status", "proc] [proc] exit /bin/args status=0")
         check("log ends with its end marker", "[klog] end")
+
+        # Network card: the MAC is QEMU's default, the link is up, and the stage-1
+        # self-test gets an ARP reply from the user-mode gateway 10.0.2.2.
+        ser.send("net\n")
+        check("net prints the card's MAC", "MAC 52:54:00:12:34:56")
+        check("net reports the link up", "link up")
+        ser.send("net test\n")
+        check("net test gets an ARP reply from the gateway", "net test: ARP reply from gateway 10.0.2.2", timeout=40)
 
         # Desktop: start it, open nothing, leave with Esc. This is the path that used
         # to fault when a process had run before it; the event log records the start.

@@ -45,6 +45,7 @@
 #include "usb_hid.h"
 #include "syscall.h"
 #include "usb_host.h"
+#include "e1000.h"
 #include "ext4.h"
 
 /* M11: ext4 root time source (wall-clock seconds since the Unix epoch). */
@@ -214,6 +215,9 @@ static void kernel_main_continue(void) {
     if (!usb_host_init(hhdm_request.response->offset)) {
         console_write("no UHCI controller found or started\n");
     }
+
+    /* The network card (Intel e1000). Absent cards are reported by `net`, not at boot. */
+    e1000_init();
 
     /* M9: install the programs into /bin, then start PID 1 (/bin/init) in ring 3.
      * init starts /bin/sh, so this runs after USB (the keyboard may be on USB) and

@@ -263,6 +263,9 @@ not implemented.
 
 - 🚧 Network-interface objects (`net_interface.c`). There is no network stack yet: no ARP, IPv4, UDP or TCP.
 - 🚧 Display-surface objects (`display_surface.c`). There is no compositor yet.
+- 🚧 Network stack (`docs/10-network.md`): Intel e1000 driver (stage 1, built and
+  QEMU-tested: `net`, `net test` gets an ARP reply from the gateway), then Ethernet,
+  ARP, IPv4, ICMP echo, and a ring-3 `ping`. Later stages are marked there as built.
 - 🚧 A basic graphical desktop (`desktop` command): teal desktop, My Computer and
   About windows, taskbar with clock, Start menu, a pointer driven by a PS/2
   mouse (QEMU's default pointer; `kernel/src/ps2_mouse.c`) or a USB mouse. Tested in QEMU only (screenshots; PS/2 and USB mouse emulation); not on

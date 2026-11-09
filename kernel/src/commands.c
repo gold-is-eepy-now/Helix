@@ -36,6 +36,7 @@
 #include "display_surface.h"
 #include "input_device.h"
 #include "net_interface.h"
+#include "e1000.h"
 #include "ext4.h"
 #include "shell.h"
 #include "usb_host.h"
@@ -742,6 +743,23 @@ static void cmd_init(int argc, char **argv) {
 /* log            print the recent kernel events, oldest first
  * log clear      forget the events recorded so far
  * log serial on|off   echo every event to the serial console as it happens */
+static void cmd_net(int argc, char **argv) {
+    if (!e1000_present()) {
+        kprintf("no network card (QEMU: -netdev user,id=n0 -device e1000,netdev=n0)\n");
+        return;
+    }
+    if (argc >= 2 && str_eq(argv[1], "test")) {
+        kprintf(e1000_selftest() ? "net test: ARP reply from gateway 10.0.2.2\n"
+                                 : "net test: FAILED, no ARP reply from 10.0.2.2\n");
+        return;
+    }
+    uint8_t mac[6];
+    e1000_mac(mac);
+    kprintf("e1000  MAC %02x:%02x:%02x:%02x:%02x:%02x  link %s\n", mac[0], mac[1], mac[2], mac[3],
+            mac[4], mac[5], e1000_link_up() ? "up" : "down");
+    kprintf("frames  rx %u  tx %u\n", e1000_rx_count(), e1000_tx_count());
+}
+
 static void cmd_log(int argc, char **argv) {
     if (argc >= 2 && str_eq(argv[1], "clear")) {
         klog_clear();
@@ -2090,6 +2108,7 @@ const command_t helix_commands[] = {
     {"exec",    "run a program from the root: exec <path> [args...]", cmd_exec},
     {"desktop", "start the graphical desktop (Start, My Computer, Esc to leave)", cmd_desktop},
     {"log",     "show the kernel event log (log clear | log serial on|off)", cmd_log},
+    {"net",     "network card: MAC, link, frame counters (net test: ARP self-test)", cmd_net},
     {"halt",    "halt the machine",                     cmd_halt},
     {"reboot",  "restart the machine",                  cmd_reboot},
     {"fsinfo",  "show filesystem information",          cmd_fsinfo},
