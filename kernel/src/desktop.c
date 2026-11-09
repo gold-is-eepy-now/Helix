@@ -9,7 +9,7 @@
  * window and menu changes. A left click acts on whatever is under the pointer:
  * an icon opens its window, Start toggles the menu, a menu item runs, a title-bar
  * x closes a window, clicking a window or taskbar button focuses it, and dragging
- * a title bar moves the window.
+ * a title bar moves an outline; the window is redrawn on release.
  *
  * What it is not (yet): the desktop runs in the kernel, not as a ring-3 program,
  * and there is no double-click or right-click.
@@ -73,6 +73,14 @@ static bool g_button_was_down;
  * grab happened, so the window keeps the same point under the pointer. */
 static int g_drag = -1;
 static int g_drag_dx, g_drag_dy;
+
+/* While a title bar is dragged, only an outline follows the pointer, as in Windows 98.
+ * The window itself is redrawn once, on release. The outline is drawn by XOR, so
+ * drawing it again at the same place erases it exactly and the picture underneath
+ * is never lost. */
+static int g_out_x, g_out_y;
+static bool g_outline_shown;
+static uint32_t c_outline;
 
 /* What a pointer poll asks the main loop to do. */
 enum { PTR_NONE, PTR_REDRAW, PTR_EXIT };
@@ -389,15 +397,62 @@ static void cursor_move(int nx, int ny) {
     cursor_show();
 }
 
+/* Draw or erase the outline of a w x h box at (x, y). Each pixel is XORed with
+ * the mask, so calling this twice with the same arguments restores the screen. */
+static void outline_xor_px(uint32_t x, uint32_t y) {
+    fb_fill_rect(x, y, 1, 1, fb_get_pixel(x, y) ^ c_outline);
+}
+
+static void outline_xor(int x, int y, uint32_t w, uint32_t h) {
+    if (w < 2 || h < 2) return;
+    for (uint32_t i = 0; i < w; i++) {
+        outline_xor_px((uint32_t)x + i, (uint32_t)y);
+        outline_xor_px((uint32_t)x + i, (uint32_t)y + h - 1);
+    }
+    for (uint32_t j = 1; j + 1 < h; j++) {
+        outline_xor_px((uint32_t)x, (uint32_t)y + j);
+        outline_xor_px((uint32_t)x + w - 1, (uint32_t)y + j);
+    }
+}
+
+/* Move the drag outline so the grab point stays under the pointer at (nx, ny).
+ * The window's own pixels are not touched. */
+static void drag_move(int nx, int ny) {
+    window_t *w = &g_win[g_drag];
+    uint32_t sw = fb_width(), sh = fb_height();
+    cursor_restore();                           /* the arrow's saved pixels must not hold the outline */
+    if (g_outline_shown) outline_xor(g_out_x, g_out_y, w->w, w->h);
+    int wx = nx - g_drag_dx;
+    int wy = ny - g_drag_dy;
+    int max_x = (int)sw - (int)w->w;
+    int max_y = (int)sh - (int)TASK_H - (int)w->h;
+    if (wx < 0) wx = 0;
+    if (wy < 0) wy = 0;
+    if (wx > max_x) wx = max_x;
+    if (wy > max_y) wy = max_y;
+    g_out_x = wx;
+    g_out_y = wy;
+    outline_xor(g_out_x, g_out_y, w->w, w->h);
+    g_outline_shown = true;
+    g_mx = nx;
+    g_my = ny;
+    cursor_show();
+}
+
 static void redraw(void) {
     uint32_t sw = fb_width(), sh = fb_height();
     g_cur_shown = false;                        /* the frame below wipes the old arrow */
+    g_outline_shown = false;
     fb_fill_rect(0, 0, sw, sh, c_desk);
     for (int i = 0; i < ICON_COUNT; i++) {
         draw_icon(i, 16, 16u + (uint32_t)i * 72u, i == g_icon_sel && !g_menu_open);
     }
     for (int i = 0; i < MAX_WIN; i++) {
         if (g_win[i].used) draw_window(&g_win[i], i == g_focus);
+    }
+    if (g_drag >= 0 && g_win[g_drag].used) {   /* a drag in progress: keep its outline */
+        outline_xor(g_out_x, g_out_y, g_win[g_drag].w, g_win[g_drag].h);
+        g_outline_shown = true;
     }
     draw_taskbar(sw, sh);
     if (g_menu_open) draw_start_menu(sh);
@@ -511,6 +566,8 @@ static int handle_click(int x, int y, uint32_t sh) {
             g_drag = i;
             g_drag_dx = x - (int)w->x;
             g_drag_dy = y - (int)w->y;
+            g_out_x = (int)w->x;
+            g_out_y = (int)w->y;
             klog_event(KLOG_DESKTOP, "drag start %s", g_app_names[w->app]);
             return PTR_REDRAW;
         }
@@ -554,28 +611,21 @@ static int poll_pointer(void) {
         klog_event(KLOG_USB, "mouse dx=%d dy=%d buttons=%x -> %d,%d", (int)m.dx, (int)m.dy,
                    (unsigned)m.buttons, nx, ny);
         if (g_drag >= 0 && down) {
-            /* Dragging: the window follows the pointer, kept on screen above the taskbar. */
-            window_t *w = &g_win[g_drag];
-            int wx = nx - g_drag_dx;
-            int wy = ny - g_drag_dy;
-            int max_x = (int)sw - (int)w->w;
-            int max_y = (int)sh - (int)TASK_H - (int)w->h;
-            if (wx < 0) wx = 0;
-            if (wy < 0) wy = 0;
-            if (wx > max_x) wx = max_x;
-            if (wy > max_y) wy = max_y;
-            w->x = (uint32_t)wx;
-            w->y = (uint32_t)wy;
-            g_mx = nx;
-            g_my = ny;
-            result = PTR_REDRAW;               /* the window moved: repaint the frame */
+            drag_move(nx, ny);                 /* only the outline moves; no repaint */
         } else {
             cursor_move(nx, ny);               /* plain move: only the arrow changes */
         }
     }
 
-    if (!down && g_button_was_down) {
-        g_drag = -1;                           /* releasing the button ends a drag */
+    if (!down && g_button_was_down && g_drag >= 0) {
+        /* Release: the window goes where the outline is, and is drawn in full. */
+        if (g_win[g_drag].used) {
+            g_win[g_drag].x = (uint32_t)g_out_x;
+            g_win[g_drag].y = (uint32_t)g_out_y;
+        }
+        g_drag = -1;
+        g_outline_shown = false;
+        result = PTR_REDRAW;
     }
     if (down && !g_button_was_down) {
         klog_event(KLOG_INPUT, "click at %d,%d", g_mx, g_my);
@@ -639,10 +689,12 @@ bool desktop_run(void) {
     c_black = fb_rgb(0x00, 0x00, 0x00);
     c_navy  = fb_rgb(0x00, 0x00, 0x80);
     c_gray  = fb_rgb(0x80, 0x80, 0x80);
+    c_outline = fb_rgb(0xFF, 0xFF, 0xFF);     /* XOR mask for the drag outline */
 
     g_mx = (int)sw / 2;
     g_my = (int)sh / 2;
     g_cur_shown = false;
+    g_outline_shown = false;
     g_drag = -1;
     usb_host_poll();
     usb_hid_mouse_t discard;
