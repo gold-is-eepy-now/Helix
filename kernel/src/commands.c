@@ -126,6 +126,13 @@ static void cmd_clear(int argc, char **argv) {
     console_clear();
 }
 
+/* A joke, after the Backrooms film: the answer to "architect". */
+static void cmd_architect(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    console_write("I am a fucking architect\n");
+}
+
 static void cmd_color(int argc, char **argv) {
     if (argc == 1) {
         console_write("Colour output is ");
@@ -2115,6 +2122,7 @@ const command_t helix_commands[] = {
     {"echo",    "print the arguments back",             cmd_echo},
     {"history", "list the commands typed so far",       cmd_history},
     {"calc",    "integer calculator: calc 2 + 3",       cmd_calc},
+    {"architect", "a joke (the Backrooms)",             cmd_architect},
     {"clear",   "clear the screen",                     cmd_clear},
     {"color",   "turn ANSI colour on/off: color on|off", cmd_color},
     {"version", "show the OS version",                  cmd_version},

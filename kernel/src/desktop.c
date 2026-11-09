@@ -630,6 +630,60 @@ static void redraw(void) {
     cursor_show();
 }
 
+/* Set by handle_key: false when the key was drawn in place and the frame needs no repaint. */
+static bool g_repaint;
+
+static bool rect_hits(int x, int y, int w, int h, const window_t *o) {
+    return x < (int)(o->x + o->w) && x + w > (int)o->x &&
+           y < (int)(o->y + o->h) && y + h > (int)o->y;
+}
+
+/* Typing in the terminal redraws only the cells that changed on the input row,
+ * the way the shell echoes a character, instead of repainting the whole desktop.
+ * It falls back to a full redraw when the row could be covered by another window,
+ * a menu is open, or a drag outline is on screen. */
+static void term_redraw_input(int old_len) {
+    if (g_focus < 0 || !g_win[g_focus].used || g_win[g_focus].app != APP_TERMINAL) {
+        redraw();
+        return;
+    }
+    window_t *w = &g_win[g_focus];
+    uint32_t cx = w->x + 6, cy = w->y + 26, cw = w->w - 12, ch = w->h - 32;
+    int rows = (int)((ch - 8u) / 12u);
+    int total = g_term_n + 1;                      /* the buffer lines, then the input line */
+    int shown = total > rows ? rows : total;
+    int row_y = (int)(cy + 4u) + (shown - 1) * 12;
+
+    int lo = old_len < g_term_in_len ? old_len : g_term_in_len;   /* first cell that changed */
+    int hi = old_len > g_term_in_len ? old_len : g_term_in_len;   /* last input position used */
+    int x0 = (int)(cx + 4u) + (TERM_PROMPT_LEN + lo) * 8;
+    int x1 = (int)(cx + 4u) + (TERM_PROMPT_LEN + hi + 2) * 8;    /* caret and one blank cell */
+    if (x1 > (int)(cx + cw)) x1 = (int)(cx + cw);
+
+    bool covered = g_menu_open || g_drag >= 0;
+    for (int i = g_focus + 1; i < MAX_WIN && !covered; i++) {
+        if (g_win[i].used && rect_hits(x0, row_y, x1 - x0, 12, &g_win[i])) covered = true;
+    }
+    if (covered) {
+        redraw();
+        return;
+    }
+
+    /* The row, as drawn by term_draw: prompt, the typed text, the caret, a blank cell. */
+    char row[TERM_COLS + 4];
+    int k = 0;
+    for (const char *p = TERM_PROMPT; *p != '\0'; p++) row[k++] = *p;
+    for (int i = 0; i < g_term_in_len; i++) row[k++] = g_term_in[i];
+    row[k++] = '_';
+    row[k++] = ' ';
+    row[k] = '\0';
+
+    cursor_restore();                              /* the arrow's saved pixels must not go stale */
+    fb_draw_text((uint32_t)(int)(cx + 4u) + (uint32_t)(lo * 8), (uint32_t)row_y,
+                 row + TERM_PROMPT_LEN + lo, c_white, c_black, true);
+    cursor_show();
+}
+
 /* ------------------------------------------------------------------ */
 /* Windows and input                                                   */
 /* ------------------------------------------------------------------ */
@@ -816,6 +870,7 @@ static int poll_pointer(void) {
 /* Returns true when the desktop should close. */
 static bool handle_key(int c) {
     klog_event(KLOG_INPUT, "key %d", c);
+    g_repaint = true;
     if (g_menu_open) {
         if (c == SHELL_KEY_UP || c == KBD_KEY_UP) {
             g_menu_sel = (g_menu_sel + MENU_COUNT - 1) % MENU_COUNT;
@@ -839,9 +894,19 @@ static bool handle_key(int c) {
         } else if (c == '\n') {
             term_submit();
         } else if (c == 0x08 || c == 0x7f) {
+            int old = g_term_in_len;
             term_backspace();
+            if (old != g_term_in_len) {
+                term_redraw_input(old);
+                g_repaint = false;
+            }
         } else if (c >= 0x20 && c < 0x7f) {
+            int old = g_term_in_len;
             term_key((char)c);
+            if (old != g_term_in_len) {
+                term_redraw_input(old);
+                g_repaint = false;
+            }
         }
         return false;
     }
@@ -925,7 +990,7 @@ bool desktop_run(void) {
             continue;
         }
         if (handle_key(c)) break;
-        redraw();
+        if (g_repaint || p == PTR_REDRAW) redraw();
     }
 
     fb_graphics_end();     /* hand the screen back to the text console */
