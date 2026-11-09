@@ -41,6 +41,9 @@ int shell_execute_parsed(parsed_cmd_t cmd);
 /* Check for built-in command; returns true if handled. */
 bool shell_is_builtin(const char *name);
 
+/* Run one command line (modified in place) with the usual shell semantics. */
+void shell_run_line(char *line);
+
 /* Print the command history, numbered from 1 (oldest first). */
 void shell_history_print(void);
 

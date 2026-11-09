@@ -4,6 +4,9 @@
  * and a clock, and bevelled windows with navy title bars. "My Computer" lists the
  * real root directory from the ext4 volume; "About Helix" is static text.
  *
+ * Terminal icon: a window that runs kernel shell commands (the recovery shell) and
+ * exec <path> for ring-3 programs, with their output shown in the window.
+ *
  * Mouse: a PS/2 or USB mouse moves an arrow cursor. Moving it only redraws the
  * arrow (the pixels under it are saved and restored); the desktop repaints on
  * window and menu changes. A left click acts on whatever is under the pointer:
@@ -27,6 +30,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "console.h"
 #include "ext4.h"
 #include "fb.h"
 #include "input.h"
@@ -35,6 +39,7 @@
 #include "ps2_mouse.h"
 #include "kstring.h"
 #include "panic.h"
+#include "shell.h"
 #include "time.h"
 #include "usb_host.h"
 #include "usb_hid.h"
@@ -42,16 +47,19 @@
 /* Win98-style palette, packed for the framebuffer at run time. */
 static uint32_t c_desk, c_face, c_white, c_dark, c_black, c_navy, c_gray;
 
-typedef enum { APP_MYCOMP, APP_ABOUT, APP_SHUTDOWN, APP_COUNT } app_t;
+typedef enum { APP_MYCOMP, APP_ABOUT, APP_SHUTDOWN, APP_TERMINAL, APP_COUNT } app_t;
 
-static const char *const g_app_names[APP_COUNT] = { "My Computer", "About Helix", "Shut Down" };
+static const char *const g_app_names[APP_COUNT] = { "My Computer", "About Helix", "Shut Down", "Terminal" };
 
-#define ICON_COUNT 2            /* icons on the desktop: My Computer, About Helix */
+#define ICON_COUNT 3            /* icons on the desktop: My Computer, About Helix, Terminal */
 #define MENU_COUNT 3            /* Start menu items, the last one is Shut Down */
 #define MAX_WIN 4
 #define MAX_LINES 16
 #define LINE_LEN 48
 #define TASK_H 28u
+
+/* The app each desktop icon opens (icon i is not app i, since Shut Down is an app too). */
+static const app_t g_icon_app[ICON_COUNT] = { APP_MYCOMP, APP_ABOUT, APP_TERMINAL };
 
 typedef struct {
     bool used;
@@ -210,6 +218,159 @@ static void build_content(app_t app) {
 /* Drawing                                                             */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* Terminal window: the kernel shell (the recovery shell). Command output is */
+/* captured by a console sink and shown here. `exec <path>` runs a program  */
+/* in ring 3 and waits for it, so its output shows up here as well.         */
+/* ------------------------------------------------------------------ */
+
+#define TERM_LINES 64
+#define TERM_COLS  56               /* characters per line; the window is sized for this */
+#define TERM_PROMPT "helix> "
+#define TERM_PROMPT_LEN 7
+
+static char g_term_lines[TERM_LINES][TERM_COLS + 1];
+static int g_term_n;                /* lines in use; the last one is being written */
+static char g_term_in[TERM_COLS + 1];   /* the line being typed */
+static int g_term_in_len;
+static bool g_term_started;
+
+static void term_newline(void) {
+    if (g_term_n == TERM_LINES) {   /* full: scroll everything up one line */
+        for (int i = 1; i < TERM_LINES; i++) {
+            for (int k = 0; k <= TERM_COLS; k++) g_term_lines[i - 1][k] = g_term_lines[i][k];
+        }
+    } else {
+        g_term_n++;
+    }
+    g_term_lines[g_term_n - 1][0] = '\0';
+}
+
+static void term_putc(char c) {
+    if (c == '\r') return;
+    if (c == '\n') {
+        term_newline();
+        return;
+    }
+    if (c < 0x20) c = ' ';              /* tabs and other control bytes show as a space */
+    char *cur = g_term_lines[g_term_n - 1];
+    int len = (int)strlen(cur);
+    if (len >= TERM_COLS) {             /* wrap long lines */
+        term_newline();
+        cur = g_term_lines[g_term_n - 1];
+        len = 0;
+    }
+    cur[len] = c;
+    cur[len + 1] = '\0';
+}
+
+static void term_puts(const char *s) {
+    for (; *s != '\0'; s++) term_putc(*s);
+}
+
+/* The console sink while a command runs: its output goes into the window. */
+static void term_sink(const char *data, size_t len) {
+    for (size_t i = 0; i < len; i++) term_putc(data[i]);
+}
+
+static void term_welcome(void) {
+    term_puts("Helix terminal: kernel shell commands, and exec <path>.\n");
+    term_puts("Programs that need the keyboard are not run here:\n");
+    term_puts("desktop, usershell, exit, clear, /bin/sh, /bin/init.\n");
+}
+
+static void term_key(char c) {
+    if (g_term_in_len < TERM_COLS - TERM_PROMPT_LEN) {
+        g_term_in[g_term_in_len++] = c;
+        g_term_in[g_term_in_len] = '\0';
+    }
+}
+
+static void term_backspace(void) {
+    if (g_term_in_len > 0) {
+        g_term_in[--g_term_in_len] = '\0';
+    }
+}
+
+static bool word_eq(const char *a, const char *b) {
+    while (*a != '\0' && *a == *b) {
+        a++;
+        b++;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+/* Copy the next space-separated word from p into out; returns the rest of the line. */
+static const char *copy_word(const char *p, char *out, size_t cap) {
+    while (*p == ' ') p++;
+    size_t n = 0;
+    while (*p != '\0' && *p != ' ') {
+        if (n + 1 < cap) out[n++] = *p;
+        p++;
+    }
+    out[n] = '\0';
+    return p;
+}
+
+/* Commands that need the keyboard or would take over the desktop. */
+static bool term_blocked(const char *line) {
+    char first[16], second[32];
+    const char *rest = copy_word(line, first, sizeof first);
+    copy_word(rest, second, sizeof second);
+    static const char *const blocked[] = { "desktop", "usershell", "exit", "clear" };
+    for (size_t i = 0; i < sizeof blocked / sizeof blocked[0]; i++) {
+        if (word_eq(first, blocked[i])) return true;
+    }
+    return word_eq(first, "exec") && (word_eq(second, "/bin/sh") || word_eq(second, "/bin/init"));
+}
+
+/* Enter: echo the line, then run it with its output captured into the window. */
+static void term_submit(void) {
+    char line[TERM_COLS + 1];
+    for (int k = 0; k <= g_term_in_len; k++) line[k] = g_term_in[k];
+    g_term_in_len = 0;
+    g_term_in[0] = '\0';
+    term_puts(TERM_PROMPT);
+    term_puts(line);
+    term_putc('\n');
+    if (line[0] == '\0') return;
+
+    klog_event(KLOG_DESKTOP, "terminal: %s", line);
+    if (term_blocked(line)) {
+        term_puts("not run here: it needs the keyboard or is the desktop\n");
+        return;
+    }
+    char work[TERM_COLS + 1];           /* the shell edits its line in place */
+    for (int k = 0; k <= g_term_in_len + (int)strlen(line); k++) work[k] = line[k];
+    console_sink_fn previous = console_get_sink();
+    console_set_sink(term_sink);
+    shell_run_line(work);
+    console_set_sink(previous);
+}
+
+/* The text area: the newest lines, bottom-aligned, with the line being typed last. */
+static void term_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
+    fb_fill_rect(cx, cy, cw, ch, c_black);
+    int rows = (int)((ch - 8u) / 12u);
+    int total = g_term_n + 1;           /* the buffer lines, then the input line */
+    int first = total > rows ? total - rows : 0;
+    for (int r = 0; r < rows && first + r < total; r++) {
+        int idx = first + r;
+        uint32_t y = cy + 4u + (uint32_t)r * 12u;
+        if (idx < g_term_n) {
+            fb_draw_text(cx + 4, y, g_term_lines[idx], c_white, 0, false);
+        } else {
+            char row[TERM_COLS + 2];
+            int k = 0;
+            for (const char *p = TERM_PROMPT; *p != '\0'; p++) row[k++] = *p;
+            for (int i = 0; i < g_term_in_len; i++) row[k++] = g_term_in[i];
+            row[k++] = '_';
+            row[k] = '\0';
+            fb_draw_text(cx + 4, y, row, c_white, 0, false);
+        }
+    }
+}
+
 static void draw_window(const window_t *w, bool focused) {
     fb_fill_rect(w->x, w->y, w->w, w->h, c_face);
     bevel(w->x, w->y, w->w, w->h, true);
@@ -230,6 +391,10 @@ static void draw_window(const window_t *w, bool focused) {
     uint32_t cw = w->w - 12, ch = w->h - 32;
     fb_fill_rect(cx, cy, cw, ch, c_white);
     bevel(cx, cy, cw, ch, false);
+    if (w->app == APP_TERMINAL) {
+        term_draw(cx, cy, cw, ch);
+        return;
+    }
     uint32_t cols = chars_in(cw - 8);
     for (int i = 0; i < g_nlines[w->app]; i++) {
         uint32_t row_y = cy + 6 + (uint32_t)i * 12u;
@@ -242,20 +407,26 @@ static void draw_window(const window_t *w, bool focused) {
 }
 
 static void draw_icon(int idx, uint32_t x, uint32_t y, bool selected) {
-    /* A 32x32 picture: a monitor for My Computer, a page for About Helix. */
-    if (idx == APP_MYCOMP) {
+    /* A 32x32 picture per icon: a monitor, a page, a terminal. idx is the icon, see g_icon_app. */
+    if (idx == 0) {
         fb_fill_rect(x + 4, y + 2, 24, 18, c_gray);
         fb_fill_rect(x + 7, y + 5, 18, 12, c_navy);
         fb_fill_rect(x + 12, y + 22, 8, 4, c_gray);
         fb_fill_rect(x + 8, y + 26, 16, 3, c_gray);
-    } else {
+    } else if (idx == 1) {
         fb_fill_rect(x + 8, y + 2, 18, 26, c_white);
         bevel(x + 8, y + 2, 18, 26, false);
         fb_fill_rect(x + 13, y + 10, 8, 2, c_navy);
         fb_fill_rect(x + 13, y + 15, 8, 2, c_navy);
         fb_fill_rect(x + 13, y + 20, 6, 2, c_navy);
+    } else {
+        fb_fill_rect(x + 4, y + 2, 24, 20, c_gray);
+        fb_fill_rect(x + 7, y + 5, 18, 14, c_black);
+        fb_draw_text(x + 8, y + 8, ">_", c_white, 0, false);
+        fb_fill_rect(x + 10, y + 24, 12, 3, c_gray);
+        fb_fill_rect(x + 7, y + 27, 18, 3, c_gray);
     }
-    const char *name = g_app_names[idx];
+    const char *name = g_app_names[g_icon_app[idx]];
     uint32_t label_x = x + 4;
     uint32_t label_w = (uint32_t)strlen(name) * 8u + 4u;
     if (selected) {
@@ -487,10 +658,16 @@ static void open_app(app_t app) {
         g_win[i].app = app;
         g_win[i].x = 120u + n * 28u;
         g_win[i].y = 40u + n * 28u;
-        g_win[i].w = 380;
-        g_win[i].h = 250;
+        g_win[i].w = app == APP_TERMINAL ? 480 : 380;
+        g_win[i].h = app == APP_TERMINAL ? 330 : 250;
         g_focus = i;
         build_content(app);
+        if (app == APP_TERMINAL && !g_term_started) {
+            g_term_started = true;
+            g_term_n = 1;
+            g_term_lines[0][0] = '\0';
+            term_welcome();
+        }
         klog_note(KLOG_DESKTOP, "[desktop] opened %s\n", g_app_names[app]);
         return;
     }
@@ -581,7 +758,7 @@ static int handle_click(int x, int y, uint32_t sh) {
         uint32_t iy = 16u + (uint32_t)i * 72u;
         if (inside(x, y, 12, iy, 100, 52)) {
             g_icon_sel = i;
-            open_app((app_t)i);
+            open_app(g_icon_app[i]);
             return PTR_REDRAW;
         }
     }
@@ -654,12 +831,27 @@ static bool handle_key(int c) {
         return false;
     }
 
+    if (g_focus >= 0 && g_win[g_focus].used && g_win[g_focus].app == APP_TERMINAL) {
+        /* The focused window is the terminal: keys type into it. Esc still leaves the desktop. */
+        if (c == 0x1b) return true;
+        if (c == '\t') {
+            focus_next();
+        } else if (c == '\n') {
+            term_submit();
+        } else if (c == 0x08 || c == 0x7f) {
+            term_backspace();
+        } else if (c >= 0x20 && c < 0x7f) {
+            term_key((char)c);
+        }
+        return false;
+    }
+
     if (c == SHELL_KEY_UP || c == KBD_KEY_UP) {
         g_icon_sel = (g_icon_sel + ICON_COUNT - 1) % ICON_COUNT;
     } else if (c == SHELL_KEY_DOWN || c == KBD_KEY_DOWN) {
         g_icon_sel = (g_icon_sel + 1) % ICON_COUNT;
     } else if (c == '\n') {
-        open_app((app_t)g_icon_sel);
+        open_app(g_icon_app[g_icon_sel]);
     } else if (c == 's' || c == 'S') {
         g_menu_open = true;
         g_menu_sel = 0;
@@ -703,6 +895,10 @@ bool desktop_run(void) {
     g_button_was_down = (discard.buttons & 1u) != 0;
 
     for (int i = 0; i < MAX_WIN; i++) g_win[i].used = false;
+    g_term_started = false;
+    g_term_n = 0;
+    g_term_in_len = 0;
+    g_term_in[0] = '\0';
     g_focus = -1;
     g_icon_sel = 0;
     g_menu_sel = 0;

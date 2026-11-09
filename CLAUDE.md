@@ -162,7 +162,9 @@ Also, in the same change:
   shell, input and exception events; `log` command; dumped on CPU exceptions.
   Machine-tested.
 - **Implemented (desktop, basic, QEMU-tested only):** `desktop` command: teal
-  desktop, My Computer and About windows, taskbar with clock, Start menu, pointer
+  desktop, My Computer, About and Terminal windows (the Terminal runs kernel shell
+  commands and `exec <path>`, output shown in the window; keyboard-only programs
+  are refused), taskbar with clock, Start menu, pointer
   driven by a PS/2 mouse (QEMU's default) or a USB mouse; dragging a title bar moves an outline and redraws the window on release; pointer moves redraw only the arrow. No compositor; not
   tested on real hardware.
 - **Implemented (network, stage 1, QEMU-tested only):** Intel e1000 driver

@@ -57,6 +57,7 @@ void console_putc(char c);
  * redirection and for pipes. Pass NULL to restore normal output. */
 typedef void (*console_sink_fn)(const char *data, size_t len);
 void console_set_sink(console_sink_fn fn);
+console_sink_fn console_get_sink(void);
 
 /* Rub out the previous character on every backend. */
 void console_backspace(void);

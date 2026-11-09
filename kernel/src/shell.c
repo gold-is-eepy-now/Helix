@@ -99,14 +99,19 @@ static void capture_sink(const char *data, size_t len) {
     }
 }
 
+/* The sink that was in place before the capture. Restored afterwards, so a
+ * capture inside another capturer (the desktop terminal) leaves that one working. */
+static console_sink_fn g_prev_sink;
+
 static void start_output_capture(void) {
     g_out_len = 0;
     g_out_buf[0] = '\0';
+    g_prev_sink = console_get_sink();
     console_set_sink(capture_sink);
 }
 
 static const char *stop_output_capture(void) {
-    console_set_sink(NULL);
+    console_set_sink(g_prev_sink);
     g_out_buf[g_out_len] = '\0';
     return g_out_buf;
 }
@@ -535,4 +540,10 @@ void shell_run(void) {
         history_add(line);
         execute(line);
     }
+}
+
+/* Run one command line as the kernel shell would (pipes, redirection, the command
+ * table). The line is modified in place. Used by the desktop terminal window. */
+void shell_run_line(char *line) {
+    execute(line);
 }
