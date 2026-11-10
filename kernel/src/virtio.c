@@ -234,7 +234,10 @@ bool virtio_submit(virtq_t *q, const void *req, uint32_t req_len, void *resp, ui
 
     uint64_t start = time_uptime_ms();
     while (*used_idx == q->last_used) {
-        if (time_uptime_ms() - start > 2000) return false;
+        if (time_uptime_ms() - start > 2000) {
+            klog_note(KLOG_DESKTOP, "[virtio] request timed out (queue %u)\n", q->index);
+            return false;
+        }
         __asm__ volatile("pause");
     }
     q->last_used++;

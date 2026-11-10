@@ -13,6 +13,7 @@
 #include <limine.h>
 
 #include "font8x8.h" /* public-domain 8x8 font, const unsigned char [128][8] */
+#include "virtio_gpu.h"
 
 #define GLYPH_W 8u
 #define GLYPH_H 8u
@@ -20,7 +21,11 @@
 #define MARGIN_X 16u
 #define MARGIN_Y 16u
 
-static struct limine_framebuffer *g_fb;
+static struct limine_framebuffer *g_fb;     /* where drawing goes: the firmware framebuffer or g_virt */
+static struct limine_framebuffer g_virt;    /* the virtio-gpu backing memory, described like a framebuffer */
+static bool g_on_virtio;
+static bool g_dirty;                        /* something changed since the last fb_present */
+static size_t g_dx0, g_dy0, g_dx1, g_dy1;   /* the changed rectangle: [x0,x1) x [y0,y1) */
 static size_t g_cursor_x;
 static size_t g_cursor_y;
 static uint32_t g_fg;
@@ -71,10 +76,26 @@ uint32_t fb_rgb(uint8_t r, uint8_t g, uint8_t b) {
          | scale_channel(b, g_fb->blue_mask_size, g_fb->blue_mask_shift);
 }
 
+static void mark_dirty(size_t x, size_t y) {
+    if (!g_dirty) {
+        g_dx0 = x;
+        g_dy0 = y;
+        g_dx1 = x + 1;
+        g_dy1 = y + 1;
+        g_dirty = true;
+        return;
+    }
+    if (x < g_dx0) g_dx0 = x;
+    if (y < g_dy0) g_dy0 = y;
+    if (x + 1 > g_dx1) g_dx1 = x + 1;
+    if (y + 1 > g_dy1) g_dy1 = y + 1;
+}
+
 static void put_pixel(size_t x, size_t y, uint32_t color) {
     if (x >= g_fb->width || y >= g_fb->height) {
         return;
     }
+    if (g_on_virtio) mark_dirty(x, y);
     size_t bytes_per_pixel = g_fb->bpp / 8u;
     uint8_t *pixel = (uint8_t *)g_fb->address
                    + y * g_fb->pitch
@@ -105,6 +126,7 @@ void fb_clear(uint32_t color) {
     if (!fb_ready()) {
         return;
     }
+    if (g_on_virtio) { mark_dirty(0, 0); g_dx1 = g_fb->width; g_dy1 = g_fb->height; }
     for (size_t y = 0; y < g_fb->height; y++) {
         for (size_t x = 0; x < g_fb->width; x++) {
             put_pixel(x, y, color);
@@ -169,6 +191,59 @@ static void scroll_up(void) {
     for (size_t i = total - shift; i < total; i++) {
         base[i] = 0;
     }
+    if (g_on_virtio) {                    /* the whole screen moved */
+        mark_dirty(0, 0);
+        g_dx1 = g_fb->width;
+        g_dy1 = g_fb->height;
+    }
+}
+
+bool fb_use_virtio(void *pixels, uint32_t width, uint32_t height) {
+    if (!fb_ready() || pixels == NULL || width == 0 || height == 0) return false;
+    /* The backing uses 32-bit B8G8R8X8. Colours are already packed for the firmware
+     * framebuffer, so the layouts must agree or every colour would change. */
+    if (g_fb->bpp != 32 || g_fb->red_mask_size != 8 || g_fb->red_mask_shift != 16 ||
+        g_fb->green_mask_size != 8 || g_fb->green_mask_shift != 8 ||
+        g_fb->blue_mask_size != 8 || g_fb->blue_mask_shift != 0) {
+        return false;
+    }
+    size_t cw = width < g_fb->width ? width : g_fb->width;
+    size_t ch = height < g_fb->height ? height : g_fb->height;
+    g_virt = *g_fb;
+    g_virt.address = pixels;
+    g_virt.width = width;
+    g_virt.height = height;
+    g_virt.pitch = (uint64_t)width * 4u;
+    /* Keep what is on screen: copy the firmware framebuffer's rows across. */
+    for (size_t y = 0; y < ch; y++) {
+        const uint8_t *src = (const uint8_t *)g_fb->address + y * g_fb->pitch;
+        uint8_t *dst = (uint8_t *)pixels + y * g_virt.pitch;
+        for (size_t i = 0; i < cw * 4u; i++) dst[i] = src[i];
+    }
+    g_fb = &g_virt;
+    g_on_virtio = true;
+    g_dirty = true;
+    g_dx0 = 0;
+    g_dy0 = 0;
+    g_dx1 = width;
+    g_dy1 = height;
+    return true;
+}
+
+void fb_present(void) {
+    /* Never re-enter: logging from here would draw text, which would present again. */
+    static bool in_present;
+    if (in_present || !g_on_virtio || !g_dirty) return;
+    in_present = true;
+    size_t x1 = g_dx1 > g_fb->width ? g_fb->width : g_dx1;
+    size_t y1 = g_dy1 > g_fb->height ? g_fb->height : g_dy1;
+    g_dirty = false;
+    if (x1 > g_dx0 && y1 > g_dy0) {
+        /* A failed flush leaves the rest of the picture as it was; the next change retries. */
+        (void)virtio_gpu_present((uint32_t)g_dx0, (uint32_t)g_dy0,
+                                 (uint32_t)(x1 - g_dx0), (uint32_t)(y1 - g_dy0));
+    }
+    in_present = false;
 }
 
 static void draw_cursor(void) {
@@ -203,7 +278,7 @@ static void newline(void) {
     }
 }
 
-void fb_putchar(char c) {
+static void putchar_raw(char c) {
     if (!fb_ready() || g_graphics_mode) {
         return;
     }
@@ -237,6 +312,11 @@ void fb_putchar(char c) {
     }
     g_cursor_x += GLYPH_W;
     draw_cursor();
+}
+
+void fb_putchar(char c) {
+    putchar_raw(c);
+    fb_present();                   /* the shell echoes each key: show it now */
 }
 
 void fb_write(const char *s) {

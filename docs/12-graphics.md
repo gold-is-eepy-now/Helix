@@ -1,29 +1,16 @@
 # 12. Graphics
 
-Status: **step 1 of 4 built and QEMU-tested.** The desktop still draws straight into the
-framebuffer that Limine's UEFI GOP handoff provides. Nothing below changes that yet.
-
-## Why a display layer
-
-`kernel/src/fb.c` draws into one fixed framebuffer chosen at boot. That works on every
-UEFI machine, but the mode cannot change and nothing is accelerated. There is no single
-driver that every graphics card understands, so the plan is one display interface with
-interchangeable backends:
-
-1. **UEFI GOP framebuffer** (what `fb.c` already uses): the universal fallback.
-2. **virtio-gpu** (QEMU's `-device virtio-gpu-pci`): real mode setting and rectangle
-   flushes, through a standard interface. This is the first backend that can change the
-   screen's contents from the kernel, and it is testable here.
-3. **Vendor GPUs** (for example the iMac 11,2's Radeon): one driver each, register-level.
-   Not planned until the first two are solid.
+Status: **steps 1–3 built and QEMU-tested.** When virtio-gpu is present, the kernel copies the
+GOP screen into a 1280x800 backing buffer, scans it out through virtio-gpu, and flushes only the
+changed rectangle after each draw. Without virtio-gpu the GOP framebuffer is used as before.
 
 ## Steps
 
 | Step | What | Status |
 | --- | --- | --- |
 | 1 | virtio 1.0 PCI transport (`virtio.c`): capabilities, 64-bit BARs, feature negotiation, split virtqueue; virtio-gpu `GET_DISPLAY_INFO` (`virtio_gpu.c`); shell command `gpu` | built, QEMU-tested |
-| 2 | virtio-gpu 2D resource: `RESOURCE_CREATE_2D`, `RESOURCE_ATTACH_BACKING`, `SET_SCANOUT` | not started |
-| 3 | `TRANSFER_TO_HOST_2D` and `RESOURCE_FLUSH`: draw into a resource, flush the changed rectangle to the screen; a display interface above GOP and virtio | not started |
+| 2 | virtio-gpu 2D resource: `RESOURCE_CREATE_2D`, `RESOURCE_ATTACH_BACKING`, `SET_SCANOUT` | built, QEMU-tested |
+| 3 | `TRANSFER_TO_HOST_2D` and `RESOURCE_FLUSH`: draw into a resource, flush the changed rectangle to the screen; a display interface above GOP and virtio | built, QEMU-tested (`fb.c` dirty rectangle, `fb_present`) |
 | 4 | Desktop drawing through the new interface, with double buffering | not started |
 
 ## Step 1: how the transport works
@@ -53,4 +40,4 @@ interchangeable backends:
 
 - One request at a time, polled, with a two-second timeout. No interrupts.
 - Only the control queue is set up. The cursor queue is not used yet.
-- Nothing is drawn through virtio yet; the screen is still the GOP framebuffer.
+- Drawing goes through virtio only when virtio-gpu is present and the GOP format is 32-bit B8G8R8X8.

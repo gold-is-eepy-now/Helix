@@ -1426,6 +1426,7 @@ bool desktop_run(void) {
 
     int last_minute = -1;
     for (;;) {
+        fb_present();                   /* show what the last event drew */
         int p = poll_pointer();
         if (p == PTR_EXIT) break;
         int c = input_getchar();

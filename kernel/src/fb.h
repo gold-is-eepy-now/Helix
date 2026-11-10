@@ -29,6 +29,15 @@ void fb_clear(uint32_t color);
 bool fb_present_rgb(const uint32_t *pixels, uint32_t width, uint32_t height);
 void fb_graphics_end(void);
 
+/* Draw into the virtio-gpu backing memory (pixels, width x height, 32-bit) instead of the
+ * firmware framebuffer. The current contents are copied across. False when the firmware
+ * framebuffer is not in the 32-bit B8G8R8 layout the backing uses. */
+bool fb_use_virtio(void *pixels, uint32_t width, uint32_t height);
+
+/* Send the changed part of the drawing to the screen. Does nothing unless fb_use_virtio
+ * is in effect or nothing changed. Called after each batch of drawing. */
+void fb_present(void);
+
 /* Draw a NUL-terminated string / one character at the cursor. */
 void fb_write(const char *s);
 void fb_putchar(char c);
