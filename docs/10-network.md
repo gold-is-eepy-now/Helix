@@ -1,6 +1,6 @@
 # 10 — Network stack
 
-Status: **in progress** (M12). Stage 1 is built and tested. Stages below are marked as they are built and
+Status: **in progress** (M12). Stages 1–3 are built and QEMU-tested. Stages below are marked as they are built and
 tested. Nothing here is implemented until its stage says so.
 
 ## Goal
@@ -56,16 +56,27 @@ attribute, but real hardware does, so the cache-disable bit is set deliberately.
    MAC comes back". QEMU's user-mode network does not loop frames back, so the test
    uses a real reply from the gateway instead. It proves transmit, receive and DMA
    end to end.)
-2. **Ethernet and ARP.** Resolve `10.0.2.2` to a MAC by ARP. Test: the ARP
-   reply from the gateway is in the cache.
-3. **IPv4 and ICMP echo.** Build and checksum echo requests, match replies.
-   Test: `ping 10.0.2.2` gets replies.
+2. **Ethernet and ARP — built and QEMU-tested.** Code: `net.c`, `net_ethernet.c`, `net_arp.c`.
+   The frame builder fills the Ethernet header. ARP answers requests for our address and
+   learns every sender into a 16-entry round-robin cache. `net_arp_resolve` broadcasts a
+   request, re-asks every 250 ms, and polls until a reply arrives or the timeout passes.
+   Test: `net test` (stage 1) gets the gateway's reply, and the reply is learned into the
+   cache; the ping in stage 3 resolves the gateway through the cache.
+3. **IPv4 and ICMP echo — built and QEMU-tested.** Code: `net_ip.c`, `net_icmp.c`.
+   IPv4 builds a 20-byte header (Don't Fragment, TTL 64), checks the checksum on receive,
+   drops fragments, and routes to the next hop: the destination on our subnet, else the
+   gateway. ICMP answers echo requests with a copy of the payload, and `net_ping` matches
+   replies on identifier, sequence and sender. Test: `ping 10.0.2.2` gets replies
+   (`tests/shell-test.py`: `reply from 10.0.2.2: seq=1`). A dead address (`10.0.2.99`)
+   times out. The RTT is whole milliseconds, because the clock has no finer unit.
 4. **Ring-3 `ping`.** `SYS_NET_PING(ip, seq, timeout_ms)` returns the round-trip
    time in microseconds, or -1 on timeout. A ring-3 `/bin/ping` prints each
    reply and a summary. Test: `ping 10.0.2.2` from the ring-3 shell.
 5. **Internet addresses.** Ping `8.8.8.8` through the gateway. This depends on the
    host: QEMU's user network answers ICMP only if the host permits unprivileged
-   ICMP. If it does not, the test reports timeouts, not success.
+   ICMP. **Checked here: the host has `ping_group_range` 1 0, so unprivileged ICMP is
+   disabled and `ping 8.8.8.8` times out.** That is the host's policy, not a stack
+   result; a host that allows unprivileged ICMP would need a fresh run to confirm.
 6. **UDP and DNS.** UDP send/receive, then name resolution through `10.0.2.3`.
 7. **DHCP.** Replace the static address with a lease.
 8. **TCP.** Out of scope for this plan; separate document when started.

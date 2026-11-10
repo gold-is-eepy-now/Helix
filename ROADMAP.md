@@ -264,8 +264,11 @@ not implemented.
 - 🚧 Network-interface objects (`net_interface.c`). There is no network stack yet: no ARP, IPv4, UDP or TCP.
 - 🚧 Display-surface objects (`display_surface.c`). There is no compositor yet.
 - 🚧 Network stack (`docs/10-network.md`): Intel e1000 driver (stage 1, built and
-  QEMU-tested: `net`, `net test` gets an ARP reply from the gateway), then Ethernet,
-  ARP, IPv4, ICMP echo, and a ring-3 `ping`. Later stages are marked there as built.
+  QEMU-tested: `net`, `net test` gets an ARP reply from the gateway); Ethernet and
+  ARP with a cache (stage 2); IPv4 and ICMP echo, where kernel-shell `ping 10.0.2.2`
+  gets replies (stage 3). Built and QEMU-tested only. Still to do: a ring-3 `ping`
+  (stage 4), internet addresses (stage 5, blocked here by the host's ICMP policy),
+  UDP/DNS, DHCP.
 - 🚧 A basic graphical desktop (`desktop` command): teal desktop, My Computer and
   About windows, taskbar with clock, Start menu, a pointer driven by a PS/2
   mouse (QEMU's default pointer; `kernel/src/ps2_mouse.c`) or a USB mouse. A Terminal icon opens a window that runs kernel shell commands (the recovery shell) and `exec <path>` for ring-3 programs, with output shown in the window. Moving the pointer redraws only the arrow; typing in the Text Editor window (`note.txt` in the root, arrows, Home, End, Delete, a Save button) redraws only that window; dragging a title bar moves an outline and redraws the window on release. Tested in QEMU only (screenshots; PS/2 and USB mouse emulation); not on

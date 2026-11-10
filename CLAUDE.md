@@ -171,8 +171,12 @@ Also, in the same change:
 - **Implemented (network, stage 1, QEMU-tested only):** Intel e1000 driver
   (`kernel/src/e1000.c`): PCI discovery, MMIO, descriptor rings, raw frame
   send/receive. The `net` command shows the MAC, link and counters; `net test`
-  gets an ARP reply from QEMU's gateway. No ARP cache, IP, or ping yet. See
-  docs/10-network.md.
+  gets an ARP reply from QEMU's gateway. See docs/10-network.md.
+- **Implemented (network, stages 2–3, QEMU-tested only):** Ethernet framing, ARP with
+  a 16-entry cache, IPv4 send/receive with checksum and subnet routing, ICMP echo.
+  The kernel-shell `ping <a.b.c.d>` gets replies from the QEMU gateway 10.0.2.2. Not
+  verified to the internet: this host's ICMP policy stops QEMU's user network from
+  forwarding echo requests. No ring-3 ping, UDP, DNS or DHCP yet.
 - **Implemented (LC-1, Linux compat):** `compat/include/linux/*` headers (types, slab, spinlock, atomic, mutex, module_init, printk) and a self-test driver run at boot. See docs/08-linux-compat.md.
 - **Implemented (Mac/Darwin compat):** `mac-darwin-compat/` subsystem with 64-bit Mach-O loader, Darwin BSD & Mach trap translation, Darwin process runtime (`darwin_runtime.c`), Darwin `launchd` PID 1 daemon with plist service loading and `launchctl` CLI (`launchd.c`), Mac-like case-insensitive filesystem, extended attributes (xattr), property list (.plist) engine, .app bundle resolution, CLI tools (`sw_vers`, `defaults`, `plutil`, `uname`, `otool`, `open`, `launchctl`), and AppKit/Cocoa GUI translation to Helix X11 server (`Calculator.app`, `TextEdit.app`), machine-tested (157 checks).
 - **Implemented (DoneJS compat):** `donejs-compat/` freestanding C11 JavaScript runtime ported for Helix OS, featuring AST tree-walking interpreter, CommonJS modules (`require`), standard library (`path`, `fs`, `process`, `util`, `assert`, `events`, `buffer`, `os`, `stream`), Promises, microtasks, timers (`setTimeout`), and event loop draining. Machine-tested (hosted suite).
@@ -180,7 +184,7 @@ Also, in the same change:
   `userspace/libc`: string, stdlib, stdio, unistd, errno; there is no `fork`;
   the M9 exit gate is not yet passed), the `installer` / live install
   environment (needs a disk driver and partitioning), isolated driver services,
-  a network stack above raw e1000 frames (IP, ping, sockets), a real graphics stack (the desktop is a basic framebuffer demo
+  a network stack above IPv4 echo (UDP, DNS, DHCP, sockets), a real graphics stack (the desktop is a basic framebuffer demo
   with no compositor), POSIX translation layer.
 
 Do not write documentation or commit messages that imply unimplemented systems

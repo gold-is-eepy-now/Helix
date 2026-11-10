@@ -399,6 +399,8 @@ def main():
         check("net reports the link up", "link up")
         ser.send("net test\n")
         check("net test gets an ARP reply from the gateway", "net test: ARP reply from gateway 10.0.2.2", timeout=40)
+        ser.send("ping 10.0.2.2\n")
+        check("ping gets an echo reply from the gateway", "reply from 10.0.2.2: seq=1", timeout=60)
 
         # Desktop: start it, open nothing, leave with Esc. This is the path that used
         # to fault when a process had run before it; the event log records the start.
@@ -481,7 +483,9 @@ def main():
 
         ser.send("ticks\n")
         check("PIT timer is ticking", "PIT timer")
-        ser.read_until("ms\n")  # wait for the whole line, not just its prefix
+        # Wait for the PIT line itself. Ping output also ends in "ms\n", so waiting for that
+        # would match an earlier line and read the count before it is written.
+        ser.read_until("ticks, ")
         m = re.search(r"PIT timer: \d+ Hz, (\d+) ticks", ser.text())
         check_true("PIT tick count is actually advancing",
                    m is not None and int(m.group(1)) > 0)

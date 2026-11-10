@@ -35,6 +35,8 @@
 #include "filesystem.h"
 #include "display_surface.h"
 #include "input_device.h"
+#include "net.h"
+#include "net_icmp.h"
 #include "net_interface.h"
 #include "e1000.h"
 #include "ext4.h"
@@ -767,6 +769,36 @@ static void cmd_init(int argc, char **argv) {
 /* log            print the recent kernel events, oldest first
  * log clear      forget the events recorded so far
  * log serial on|off   echo every event to the serial console as it happens */
+/* ping a.b.c.d: four echo requests, one second each. The round-trip time is in whole
+ * milliseconds because the clock we have is the 100 Hz tick. */
+static void cmd_ping(int argc, char **argv) {
+    if (argc < 2) {
+        kprintf("usage: ping <a.b.c.d>\n");
+        return;
+    }
+    uint8_t ip[4];
+    if (!net_parse_ip(argv[1], ip)) {
+        kprintf("ping: not an IPv4 address: %s\n", argv[1]);
+        return;
+    }
+    if (!net_ready()) {
+        kprintf("ping: no network card (QEMU: -netdev user,id=n0 -device e1000,netdev=n0)\n");
+        return;
+    }
+    kprintf("PING %u.%u.%u.%u: 32 data bytes\n", ip[0], ip[1], ip[2], ip[3]);
+    int received = 0;
+    for (uint16_t seq = 1; seq <= 4; seq++) {
+        uint32_t rtt = 0;
+        if (net_ping(ip, seq, 1000, &rtt)) {
+            received++;
+            kprintf("reply from %u.%u.%u.%u: seq=%u time=%u ms\n", ip[0], ip[1], ip[2], ip[3], seq, rtt);
+        } else {
+            kprintf("request timed out: seq=%u\n", seq);
+        }
+    }
+    kprintf("4 sent, %d received\n", received);
+}
+
 static void cmd_net(int argc, char **argv) {
     if (!e1000_present()) {
         kprintf("no network card (QEMU: -netdev user,id=n0 -device e1000,netdev=n0)\n");
@@ -2134,6 +2166,7 @@ const command_t helix_commands[] = {
     {"desktop", "start the graphical desktop (Start, My Computer, Esc to leave)", cmd_desktop},
     {"log",     "show the kernel event log (log clear | log serial on|off)", cmd_log},
     {"net",     "network card: MAC, link, frame counters (net test: ARP self-test)", cmd_net},
+    {"ping",    "ping an IPv4 address: ping <a.b.c.d> (four echo requests)", cmd_ping},
     {"halt",    "halt the machine",                     cmd_halt},
     {"reboot",  "restart the machine",                  cmd_reboot},
     {"fsinfo",  "show filesystem information",          cmd_fsinfo},
