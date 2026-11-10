@@ -162,11 +162,12 @@ Also, in the same change:
   shell, input and exception events; `log` command; dumped on CPU exceptions.
   Machine-tested.
 - **Implemented (desktop, basic, QEMU-tested only):** `desktop` command: teal
-  desktop, My Computer, About and Terminal windows (the Terminal runs kernel shell
+  desktop, My Computer, About, Terminal and Text Editor windows (the Terminal runs kernel shell
   commands and `exec <path>`, output shown in the window; keyboard-only programs
   are refused), taskbar with clock, Start menu, pointer
-  driven by a PS/2 mouse (QEMU's default) or a USB mouse; dragging a title bar moves an outline and redraws the window on release; pointer moves redraw only the arrow. No compositor; not
+  driven by a PS/2 mouse (QEMU's default) or a USB mouse; dragging a title bar moves an outline and redraws the window on release; pointer moves redraw only the arrow; typing in the Text Editor redraws only its window. No compositor; not
   tested on real hardware.
+- **Implemented (userland line editor, QEMU-tested only):** `/bin/edit FILE`, a ring-3 line editor (add, insert, replace, delete, print, save, quit) that reads and writes the file through the ordinary file calls.
 - **Implemented (network, stage 1, QEMU-tested only):** Intel e1000 driver
   (`kernel/src/e1000.c`): PCI discovery, MMIO, descriptor rings, raw frame
   send/receive. The `net` command shows the MAC, link and counters; `net test`

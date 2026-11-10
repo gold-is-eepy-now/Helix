@@ -14,9 +14,10 @@ static bool serial_wait(void) {
     return false;
 }
 
-/* Read one serial key. ESC [ A and ESC [ B (up and down arrows, the VT100/xterm
- * sequences) become SHELL_KEY_UP and SHELL_KEY_DOWN, the same codes the PS/2 path
- * uses. Other escape sequences are dropped (-1); a lone ESC is returned as 0x1b. */
+/* Read one serial key. The VT100/xterm sequences become the same SHELL_KEY_*
+ * codes the PS/2 path produces: ESC [ A/B/C/D are the arrows, ESC [ H and ESC [ F
+ * are Home and End, and ESC [ 3 ~ is Delete. Other sequences are dropped (-1); a
+ * lone ESC is returned as 0x1b. */
 static int serial_key(void) {
     int c = serial_read();
     if (c != 0x1b) return c;
@@ -26,6 +27,14 @@ static int serial_key(void) {
     int final = serial_read();
     if (final == 'A') return SHELL_KEY_UP;
     if (final == 'B') return SHELL_KEY_DOWN;
+    if (final == 'C') return SHELL_KEY_RIGHT;
+    if (final == 'D') return SHELL_KEY_LEFT;
+    if (final == 'H') return SHELL_KEY_HOME;
+    if (final == 'F') return SHELL_KEY_END;
+    if (final == '3') {                  /* ESC [ 3 ~: the '~' follows, so take it too */
+        if (serial_wait()) serial_read();
+        return SHELL_KEY_DELETE;
+    }
     return -1;
 }
 

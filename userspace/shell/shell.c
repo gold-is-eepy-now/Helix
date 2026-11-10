@@ -9,7 +9,7 @@
  *                          until a real write path exists);
  *   SYS_EXIT               via helix_exit, when `exit` is typed.
  *
- * Built-ins: echo, cat, write, heap, history, export, unset, help, exit. Up/Down
+ * Built-ins: write, heap, history, export, unset, help, exit. Up/Down
  * recall the last 16 lines. Any other word runs /bin/<word> with the shell's
  * environment, so `export` changes what the programs it starts see.
  *
@@ -155,23 +155,6 @@ static void cmd_history(void) {
         say(hist_entry(i));
         say("\n");
     }
-}
-
-/* cat PATH: print the file's bytes exactly. */
-static void cmd_cat(const char *path) {
-    int fd = helix_open(path, HELIX_O_RDONLY);
-    if (fd < 0) {
-        say("cat: cannot open ");
-        say(path);
-        say("\n");
-        return;
-    }
-    char buf[128];
-    int64_t n;
-    while ((n = helix_read(fd, buf, sizeof(buf))) > 0) {
-        out(buf, (size_t)n);
-    }
-    helix_close(fd);
 }
 
 /* write PATH TEXT: create or replace PATH with TEXT (no newline added). */
@@ -327,9 +310,9 @@ static int run_line(const char *line) {
         return 0;
     }
     if (str_eq(line, "help")) {
-        say("commands: echo <text>, cat <path>, write <path> <text>,\n");
+        say("commands: write <path> <text>,\n");
         say("          export NAME=VALUE, unset NAME, heap, history, help, exit;\n");
-        say("          any other word runs /bin/<word> (e.g. env)\n");
+        say("          any other word runs /bin/<word> (echo, cat, ls, env, ...)\n");
         say("Up/Down recall earlier lines.\n");
         return 0;
     }
@@ -345,10 +328,6 @@ static int run_line(const char *line) {
         cmd_unset(line + 6);
         return 0;
     }
-    if (starts_with(line, "cat") && line[3] == ' ') {
-        cmd_cat(line + 4);
-        return 0;
-    }
     if (starts_with(line, "write") && line[5] == ' ') {
         /* The path is the next word; the text is the rest of the line. */
         char path[128];
@@ -361,13 +340,6 @@ static int run_line(const char *line) {
         path[n] = '\0';
         const char *text = p[n] == ' ' ? p + n + 1 : p + n;
         cmd_write(path, text);
-        return 0;
-    }
-    /* `echo` alone prints an empty line; `echo text` prints text. */
-    if (starts_with(line, "echo") && (line[4] == '\0' || line[4] == ' ')) {
-        const char *rest = line[4] == ' ' ? line + 5 : line + 4;
-        say(rest);
-        say("\n");
         return 0;
     }
     return run_program(line);

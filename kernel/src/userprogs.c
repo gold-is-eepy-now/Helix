@@ -12,12 +12,48 @@ extern const uint8_t user_blob_args_start[];
 extern const uint8_t user_blob_args_end[];
 extern const uint8_t user_blob_env_start[];
 extern const uint8_t user_blob_env_end[];
+extern const uint8_t user_blob_echo_start[];
+extern const uint8_t user_blob_echo_end[];
+extern const uint8_t user_blob_true_start[];
+extern const uint8_t user_blob_true_end[];
+extern const uint8_t user_blob_false_start[];
+extern const uint8_t user_blob_false_end[];
+extern const uint8_t user_blob_cat_start[];
+extern const uint8_t user_blob_cat_end[];
+extern const uint8_t user_blob_ls_start[];
+extern const uint8_t user_blob_ls_end[];
+extern const uint8_t user_blob_mkdir_start[];
+extern const uint8_t user_blob_mkdir_end[];
+extern const uint8_t user_blob_rmdir_start[];
+extern const uint8_t user_blob_rmdir_end[];
+extern const uint8_t user_blob_rm_start[];
+extern const uint8_t user_blob_rm_end[];
+extern const uint8_t user_blob_touch_start[];
+extern const uint8_t user_blob_touch_end[];
+extern const uint8_t user_blob_cp_start[];
+extern const uint8_t user_blob_cp_end[];
+extern const uint8_t user_blob_find_start[];
+extern const uint8_t user_blob_find_end[];
+extern const uint8_t user_blob_edit_start[];
+extern const uint8_t user_blob_edit_end[];
 
 static const userprog_t g_progs[] = {
     { "sh",   "/bin/sh",   user_blob_sh_start,   user_blob_sh_end },
     { "init", "/bin/init", user_blob_init_start, user_blob_init_end },
     { "args", "/bin/args", user_blob_args_start, user_blob_args_end },
-    { "env",  "/bin/env",  user_blob_env_start,  user_blob_env_end },
+    { "env", "/bin/env", user_blob_env_start, user_blob_env_end },
+    { "echo", "/bin/echo", user_blob_echo_start, user_blob_echo_end },
+    { "true", "/bin/true", user_blob_true_start, user_blob_true_end },
+    { "false", "/bin/false", user_blob_false_start, user_blob_false_end },
+    { "cat", "/bin/cat", user_blob_cat_start, user_blob_cat_end },
+    { "ls", "/bin/ls", user_blob_ls_start, user_blob_ls_end },
+    { "mkdir", "/bin/mkdir", user_blob_mkdir_start, user_blob_mkdir_end },
+    { "rmdir", "/bin/rmdir", user_blob_rmdir_start, user_blob_rmdir_end },
+    { "rm", "/bin/rm", user_blob_rm_start, user_blob_rm_end },
+    { "touch", "/bin/touch", user_blob_touch_start, user_blob_touch_end },
+    { "cp", "/bin/cp", user_blob_cp_start, user_blob_cp_end },
+    { "find", "/bin/find", user_blob_find_start, user_blob_find_end },
+    { "edit", "/bin/edit", user_blob_edit_start, user_blob_edit_end },
 };
 
 #define PROG_COUNT (sizeof(g_progs) / sizeof(g_progs[0]))

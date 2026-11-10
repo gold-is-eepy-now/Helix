@@ -433,3 +433,14 @@ To stay inside "Never pretend it works", these are still absent:
   same command table can be backed by `helix/programs/`.
 - **History and completion.** We deliberately skipped up-arrow history to keep
   the line editor honest; it is a small follow-up.
+
+## Text editors
+
+- **Text Editor window** (desktop): opens `note.txt` in the root directory. Type
+  with the keyboard; arrows, Home, End, Delete and Backspace move and erase.
+  Click the Save button to write the file; Esc closes the window (the text is kept
+  until the desktop exits). Typing redraws only the editor window.
+- **`/bin/edit FILE`** (ring 3): a line editor. Each line you type is a command:
+  `p` prints the file with numbers, `a TEXT` appends a line, `i N TEXT` inserts
+  before line N, `r N TEXT` replaces it, `d N` deletes it, `w` saves, `q` quits
+  (refused with unsaved changes; `q!` quits anyway), `h` lists these.

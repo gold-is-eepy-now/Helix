@@ -124,6 +124,16 @@ struct helix_stat {
 #define HELIX_SEEK_CUR 1
 #define HELIX_SEEK_END 2
 int helix_open(const char *path, int flags);
+
+/* File-system calls (SYS_STAT .. SYS_TRUNCATE above). Each returns 0 on success
+ * and -1 on failure, except helix_listdir, which returns the bytes written to buf
+ * ("kind\tsize\tname\n" per entry, kind is 'd' or '-'), or -1. */
+int helix_stat(const char *path, struct helix_stat *out);
+int64_t helix_listdir(const char *path, char *buf, size_t cap);
+int helix_mkdir(const char *path);
+int helix_unlink(const char *path);
+int helix_rmdir(const char *path);
+int helix_truncate(const char *path, uint64_t size);
 int64_t helix_read(int fd, void *buf, size_t count);
 int64_t helix_write(int fd, const void *buf, size_t count);
 int helix_close(int fd);

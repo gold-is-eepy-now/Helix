@@ -161,5 +161,10 @@ int keyboard_read(void) {
     if (event.key == '\t') return '\t';
     if (event.key == KBD_KEY_UP) return SHELL_KEY_UP;
     if (event.key == KBD_KEY_DOWN) return SHELL_KEY_DOWN;
+    if (event.key == KBD_KEY_LEFT) return SHELL_KEY_LEFT;
+    if (event.key == KBD_KEY_RIGHT) return SHELL_KEY_RIGHT;
+    if (event.key == KBD_KEY_HOME) return SHELL_KEY_HOME;
+    if (event.key == KBD_KEY_END) return SHELL_KEY_END;
+    if (event.key == KBD_KEY_DELETE) return SHELL_KEY_DELETE;
     return -1;
 }

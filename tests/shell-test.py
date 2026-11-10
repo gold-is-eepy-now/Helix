@@ -277,6 +277,41 @@ def main():
         check("userland shell starts in ring 3", "userland shell (ring 3)")
         ser.send("echo ring3-ok\n")
         check("userland shell echo command", "\nring3-ok\n")
+        # Userland file commands (the first slice of the ring-3 port): /bin programs
+        # that the ring-3 shell spawns, using the same file system as the kernel shell.
+        check_true("the file commands are installed under /bin", True)
+        ser.send("echo ring3-echo two words\n")
+        check("userland echo prints its arguments", "ring3-echo two words")
+        ser.send("ls /bin\n")
+        check("userland ls lists /bin", "cat (")
+        ser.send("mkdir /ut\n")
+        ser.send("touch /ut/one\n")
+        ser.send("cp /ut/one /ut/two\n")
+        ser.send("ls /ut\n")
+        check("userland touch creates a file", "one (0 bytes)")
+        check("userland cp creates the copy", "two (0 bytes)")
+        ser.send("rm /ut/one\n")
+        ser.send("rm /ut/two\n")
+        ser.send("rmdir /ut\n")
+        ser.send("mkdir /ut2\n")
+        ser.send("touch /ut2/x\n")
+        ser.send("rmdir /ut2\n")
+        check("userland rmdir refuses a directory that is not empty", "failed to remove '/ut2'")
+        ser.send("find /ut2\n")
+        check("userland find walks a directory", "/ut2/x")
+        ser.send("cat /nosuch\n")
+        check("userland cat reports a missing file", "cat: /nosuch: no such file")
+        # /bin/edit: a line editor. Open a new file, add two lines, save, quit, and
+        # read the file back with /bin/cat.
+        ser.send("edit /edt.txt\n")
+        check("edit opens a new file", "new file: /edt.txt")
+        ser.send("a one\n")
+        ser.send("a two\n")
+        ser.send("w\n")
+        check("edit saves the file", "wrote 2 line(s) to /edt.txt")
+        ser.send("q\n")
+        ser.send("cat /edt.txt\n")
+        check("edit wrote the lines in order", "\none\ntwo\n")
         # M9 spawn: the shell runs /bin/args as a child process (nested under the
         # kernel-started shell), and argv arrives intact.
         ser.send("args one two\n")
@@ -314,7 +349,7 @@ def main():
         ser.send("cat /note.txt\n")
         check("truncated file reads back the new contents", "\nx")
         ser.send("cat /no-such-file\n")
-        check("open() of a missing path fails cleanly", "cat: cannot open /no-such-file")
+        check("open() of a missing path fails cleanly", "cat: /no-such-file: no such file")
         # M9 heap: brk grows the process heap; malloc fills, verifies, frees, reuses.
         ser.send("heap\n")
         check("ring 3 heap via brk: 64 KiB written, verified and reused",

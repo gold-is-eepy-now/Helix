@@ -268,7 +268,7 @@ not implemented.
   ARP, IPv4, ICMP echo, and a ring-3 `ping`. Later stages are marked there as built.
 - 🚧 A basic graphical desktop (`desktop` command): teal desktop, My Computer and
   About windows, taskbar with clock, Start menu, a pointer driven by a PS/2
-  mouse (QEMU's default pointer; `kernel/src/ps2_mouse.c`) or a USB mouse. A Terminal icon opens a window that runs kernel shell commands (the recovery shell) and `exec <path>` for ring-3 programs, with output shown in the window. Moving the pointer redraws only the arrow; dragging a title bar moves an outline and redraws the window on release. Tested in QEMU only (screenshots; PS/2 and USB mouse emulation); not on
+  mouse (QEMU's default pointer; `kernel/src/ps2_mouse.c`) or a USB mouse. A Terminal icon opens a window that runs kernel shell commands (the recovery shell) and `exec <path>` for ring-3 programs, with output shown in the window. Moving the pointer redraws only the arrow; typing in the Text Editor window (`note.txt` in the root, arrows, Home, End, Delete, a Save button) redraws only that window; dragging a title bar moves an outline and redraws the window on release. Tested in QEMU only (screenshots; PS/2 and USB mouse emulation); not on
   real hardware. Clicking the background does not close windows.
 - ✅ Kernel event log (`log` command): a 512-event ring of scheduler, syscall,
   process, shell, input and exception events, printed automatically on a CPU

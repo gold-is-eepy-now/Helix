@@ -43,6 +43,44 @@ void helix_crt_main(uint64_t *sp)
 
 /* -- Files ----------------------------------------------------------------- */
 
+static int fs_result(uint64_t r)
+{
+    return r == UINT64_MAX ? -1 : 0;
+}
+
+int helix_stat(const char *path, struct helix_stat *out)
+{
+    return fs_result(helix_syscall(SYS_STAT, (uint64_t)(uintptr_t)path,
+                                   (uint64_t)(uintptr_t)out, 0, 0, 0, 0, 0));
+}
+
+int64_t helix_listdir(const char *path, char *buf, size_t cap)
+{
+    uint64_t r = helix_syscall(SYS_LISTDIR, (uint64_t)(uintptr_t)path,
+                               (uint64_t)(uintptr_t)buf, cap, 0, 0, 0, 0);
+    return r == UINT64_MAX ? -1 : (int64_t)r;
+}
+
+int helix_mkdir(const char *path)
+{
+    return fs_result(helix_syscall(SYS_MKDIR, (uint64_t)(uintptr_t)path, 0, 0, 0, 0, 0, 0));
+}
+
+int helix_unlink(const char *path)
+{
+    return fs_result(helix_syscall(SYS_UNLINK, (uint64_t)(uintptr_t)path, 0, 0, 0, 0, 0, 0));
+}
+
+int helix_rmdir(const char *path)
+{
+    return fs_result(helix_syscall(SYS_RMDIR, (uint64_t)(uintptr_t)path, 0, 0, 0, 0, 0, 0));
+}
+
+int helix_truncate(const char *path, uint64_t size)
+{
+    return fs_result(helix_syscall(SYS_TRUNCATE, (uint64_t)(uintptr_t)path, size, 0, 0, 0, 0, 0));
+}
+
 int helix_open(const char *path, int flags)
 {
     uint64_t r = helix_syscall(SYS_OPEN, (uint64_t)(uintptr_t)path, (uint64_t)flags, 0, 0, 0, 0, 0);

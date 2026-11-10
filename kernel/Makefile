@@ -80,9 +80,11 @@ USER_DIR      := ../userspace
 USER_BLOB_DIR := $(BUILD_DIR)/user
 USER_SH_ELF   := $(USER_BLOB_DIR)/sh.elf
 USER_INIT_ELF := $(USER_BLOB_DIR)/init.elf
-USER_ARGS_ELF := $(USER_BLOB_DIR)/args.elf
-USER_ENV_ELF  := $(USER_BLOB_DIR)/env.elf
-USER_ELFS     := $(USER_SH_ELF) $(USER_INIT_ELF) $(USER_ARGS_ELF) $(USER_ENV_ELF)
+# Every userspace/bin/<name>.c becomes /bin/<name>. Add the name here and the .c
+# file there: the rule, the embedded blob and the program table follow from it.
+USER_BIN_NAMES := args env echo true false cat ls mkdir rmdir rm touch cp find edit
+USER_BIN_ELFS  := $(foreach n,$(USER_BIN_NAMES),$(USER_BLOB_DIR)/$(n).elf)
+USER_ELFS      := $(USER_SH_ELF) $(USER_INIT_ELF) $(USER_BIN_ELFS)
 USER_BLOB_S   := $(USER_BLOB_DIR)/user_blob.S
 USER_BLOB_O   := $(BUILD_DIR)/obj/user_blob.o
 USER_LIB      := $(USER_DIR)/libhelix.c $(USER_DIR)/libhelix.h
@@ -148,15 +150,13 @@ $(USER_INIT_ELF): $(USER_RT_HDRS) $(USER_RT_SRCS) $(USER_DIR)/init.c
 	$(CC) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $(USER_RT_SRCS) $(USER_DIR)/init.c
 	@echo "[user] built $@"
 
-$(USER_ARGS_ELF): $(USER_RT_HDRS) $(USER_RT_SRCS) $(USER_DIR)/bin/args.c
-	@mkdir -p $(dir $@)
-	$(CC) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $(USER_RT_SRCS) $(USER_DIR)/bin/args.c
-	@echo "[user] built $@"
-
-$(USER_ENV_ELF): $(USER_RT_HDRS) $(USER_RT_SRCS) $(USER_DIR)/bin/env.c
-	@mkdir -p $(dir $@)
-	$(CC) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $(USER_RT_SRCS) $(USER_DIR)/bin/env.c
-	@echo "[user] built $@"
+define USER_BIN_RULE
+$$(USER_BLOB_DIR)/$(1).elf: $$(USER_RT_HDRS) $$(USER_RT_SRCS) $$(USER_DIR)/bin/$(1).c
+	@mkdir -p $$(dir $$@)
+	$$(CC) $$(USER_CFLAGS) $$(USER_LDFLAGS) -o $$@ $$(USER_RT_SRCS) $$(USER_DIR)/bin/$(1).c
+	@echo "[user] built $$@"
+endef
+$(foreach n,$(USER_BIN_NAMES),$(eval $(call USER_BIN_RULE,$(n))))
 
 $(USER_BLOB_S): $(USER_ELFS)
 	@mkdir -p $(dir $@)
@@ -174,19 +174,11 @@ $(USER_BLOB_S): $(USER_ELFS)
 	  '.incbin "$(abspath $(USER_INIT_ELF))"' \
 	  '.global user_blob_init_end' \
 	  'user_blob_init_end:' \
-	  '.balign 4096' \
-	  '.global user_blob_args_start' \
-	  'user_blob_args_start:' \
-	  '.incbin "$(abspath $(USER_ARGS_ELF))"' \
-	  '.global user_blob_args_end' \
-	  'user_blob_args_end:' \
-	  '.balign 4096' \
-	  '.global user_blob_env_start' \
-	  'user_blob_env_start:' \
-	  '.incbin "$(abspath $(USER_ENV_ELF))"' \
-	  '.global user_blob_env_end' \
-	  'user_blob_env_end:' \
-	  '.section .note.GNU-stack,"",@progbits' > $@
+	  '.section .rodata' > $@
+	@for n in $(USER_BIN_NAMES); do \
+	  printf '%s\n' '.balign 4096' ".global user_blob_$${n}_start" "user_blob_$${n}_start:" ".incbin \"$(abspath $(USER_BLOB_DIR))/$${n}.elf\"" ".global user_blob_$${n}_end" "user_blob_$${n}_end:" >> $@; \
+	done
+	@printf '%s\n' '.section .note.GNU-stack,"",@progbits' >> $@
 
 $(USER_BLOB_O): $(USER_BLOB_S)
 	@mkdir -p $(dir $@)

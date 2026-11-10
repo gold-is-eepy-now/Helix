@@ -31,6 +31,7 @@
 #include <stdint.h>
 
 #include "console.h"
+#include "editor.h"
 #include "ext4.h"
 #include "fb.h"
 #include "input.h"
@@ -47,11 +48,11 @@
 /* Win98-style palette, packed for the framebuffer at run time. */
 static uint32_t c_desk, c_face, c_white, c_dark, c_black, c_navy, c_gray;
 
-typedef enum { APP_MYCOMP, APP_ABOUT, APP_SHUTDOWN, APP_TERMINAL, APP_COUNT } app_t;
+typedef enum { APP_MYCOMP, APP_ABOUT, APP_SHUTDOWN, APP_TERMINAL, APP_EDITOR, APP_COUNT } app_t;
 
-static const char *const g_app_names[APP_COUNT] = { "My Computer", "About Helix", "Shut Down", "Terminal" };
+static const char *const g_app_names[APP_COUNT] = { "My Computer", "About Helix", "Shut Down", "Terminal", "Text Editor" };
 
-#define ICON_COUNT 3            /* icons on the desktop: My Computer, About Helix, Terminal */
+#define ICON_COUNT 4            /* icons on the desktop: My Computer, About Helix, Terminal, Text Editor */
 #define MENU_COUNT 3            /* Start menu items, the last one is Shut Down */
 #define MAX_WIN 4
 #define MAX_LINES 16
@@ -59,7 +60,7 @@ static const char *const g_app_names[APP_COUNT] = { "My Computer", "About Helix"
 #define TASK_H 28u
 
 /* The app each desktop icon opens (icon i is not app i, since Shut Down is an app too). */
-static const app_t g_icon_app[ICON_COUNT] = { APP_MYCOMP, APP_ABOUT, APP_TERMINAL };
+static const app_t g_icon_app[ICON_COUNT] = { APP_MYCOMP, APP_ABOUT, APP_TERMINAL, APP_EDITOR };
 
 typedef struct {
     bool used;
@@ -68,6 +69,7 @@ typedef struct {
 } window_t;
 
 static window_t g_win[MAX_WIN];
+static editor_t g_ed;          /* the text the Text Editor window shows; one editor, one window */
 static int g_focus = -1;
 static int g_icon_sel;
 static int g_menu_sel;
@@ -371,6 +373,52 @@ static void term_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
     }
 }
 
+/* Text Editor layout inside its window: the text area is above a strip that
+ * holds the status text and the Save button. */
+#define ED_STRIP_H 22u
+#define ED_SAVE_W  56u
+
+static uint32_t ed_rows(uint32_t ch) {
+    return (ch - ED_STRIP_H - 4u) / 12u;      /* 12 px per line, 4 px top margin */
+}
+
+/* Paint the editor's client area: the visible lines, the caret, the status strip. */
+static void draw_editor(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
+    uint32_t rows = ed_rows(ch);
+    editor_scroll_to_cursor(&g_ed, rows);
+    uint32_t cols = (cw - 8u) / 8u;
+    if (cols > 96u) cols = 96u;
+    uint32_t cur_line = editor_line_of(&g_ed, g_ed.pos);
+    fb_fill_rect(cx, cy, cw, ch - ED_STRIP_H, c_white);
+
+    uint32_t off = editor_offset_of_line(&g_ed, g_ed.top);
+    for (uint32_t r = 0; r < rows && off <= g_ed.len; r++) {
+        uint32_t line = g_ed.top + r;
+        uint32_t end = editor_line_end(&g_ed, off);
+        char row[97];
+        uint32_t n = 0;
+        for (uint32_t i = off; i < end && n < cols; i++) row[n++] = g_ed.text[i];
+        row[n] = '\0';
+        uint32_t y = cy + 4u + r * 12u;
+        fb_draw_text(cx + 4, y, row, c_black, 0, false);
+        if (line == cur_line) {
+            uint32_t px = cx + 4u + (g_ed.pos - off) * 8u;
+            if (px < cx + cw - 4u) fb_fill_rect(px, y, 1, 10, c_black);   /* the caret */
+        }
+        if (end >= g_ed.len) break;
+        off = end + 1;
+    }
+
+    uint32_t sy = cy + ch - ED_STRIP_H;
+    fb_fill_rect(cx, sy, cw, ED_STRIP_H, c_face);
+    fb_draw_text(cx + 4, sy + 7, EDITOR_NAME, c_black, 0, false);
+    fb_draw_text(cx + 4 + (uint32_t)strlen(EDITOR_NAME) * 8u + 16u, sy + 7, g_ed.msg, c_black, 0, false);
+    uint32_t bx = cx + cw - ED_SAVE_W - 4u, by = sy + 3u;
+    fb_fill_rect(bx, by, ED_SAVE_W, 16, c_face);
+    bevel(bx, by, ED_SAVE_W, 16, true);
+    fb_draw_text(bx + 12, by + 4, "Save", c_black, 0, false);
+}
+
 static void draw_window(const window_t *w, bool focused) {
     fb_fill_rect(w->x, w->y, w->w, w->h, c_face);
     bevel(w->x, w->y, w->w, w->h, true);
@@ -393,6 +441,10 @@ static void draw_window(const window_t *w, bool focused) {
     bevel(cx, cy, cw, ch, false);
     if (w->app == APP_TERMINAL) {
         term_draw(cx, cy, cw, ch);
+        return;
+    }
+    if (w->app == APP_EDITOR) {
+        draw_editor(cx, cy, cw, ch);
         return;
     }
     uint32_t cols = chars_in(cw - 8);
@@ -419,12 +471,19 @@ static void draw_icon(int idx, uint32_t x, uint32_t y, bool selected) {
         fb_fill_rect(x + 13, y + 10, 8, 2, c_navy);
         fb_fill_rect(x + 13, y + 15, 8, 2, c_navy);
         fb_fill_rect(x + 13, y + 20, 6, 2, c_navy);
-    } else {
+    } else if (idx == 2) {
         fb_fill_rect(x + 4, y + 2, 24, 20, c_gray);
         fb_fill_rect(x + 7, y + 5, 18, 14, c_black);
         fb_draw_text(x + 8, y + 8, ">_", c_white, 0, false);
         fb_fill_rect(x + 10, y + 24, 12, 3, c_gray);
         fb_fill_rect(x + 7, y + 27, 18, 3, c_gray);
+    } else {
+        /* a page with a few lines of text */
+        fb_fill_rect(x + 8, y + 2, 18, 26, c_white);
+        bevel(x + 8, y + 2, 18, 26, false);
+        fb_fill_rect(x + 11, y + 8, 12, 2, c_navy);
+        fb_fill_rect(x + 11, y + 14, 12, 2, c_navy);
+        fb_fill_rect(x + 11, y + 20, 8, 2, c_navy);
     }
     const char *name = g_app_names[g_icon_app[idx]];
     uint32_t label_x = x + 4;
@@ -656,7 +715,7 @@ static void term_redraw_input(int old_len) {
 
     int lo = old_len < g_term_in_len ? old_len : g_term_in_len;   /* first cell that changed */
     int hi = old_len > g_term_in_len ? old_len : g_term_in_len;   /* last input position used */
-    int x0 = (int)(cx + 4u) + (TERM_PROMPT_LEN + lo) * 8;
+    int x0 = (int)(cx + 4u) + (TERM_PROMPT_LEN + lo) * 8;   /* where the first changed cell is drawn */
     int x1 = (int)(cx + 4u) + (TERM_PROMPT_LEN + hi + 2) * 8;    /* caret and one blank cell */
     if (x1 > (int)(cx + cw)) x1 = (int)(cx + cw);
 
@@ -679,8 +738,8 @@ static void term_redraw_input(int old_len) {
     row[k] = '\0';
 
     cursor_restore();                              /* the arrow's saved pixels must not go stale */
-    fb_draw_text((uint32_t)(int)(cx + 4u) + (uint32_t)(lo * 8), (uint32_t)row_y,
-                 row + TERM_PROMPT_LEN + lo, c_white, c_black, true);
+    /* Start the draw at column prompt + lo, the same cell term_draw puts that character in. */
+    fb_draw_text((uint32_t)(x0), (uint32_t)row_y, row + TERM_PROMPT_LEN + lo, c_white, c_black, true);
     cursor_show();
 }
 
@@ -712,10 +771,11 @@ static void open_app(app_t app) {
         g_win[i].app = app;
         g_win[i].x = 120u + n * 28u;
         g_win[i].y = 40u + n * 28u;
-        g_win[i].w = app == APP_TERMINAL ? 480 : 380;
-        g_win[i].h = app == APP_TERMINAL ? 330 : 250;
+        g_win[i].w = app == APP_TERMINAL ? 480 : app == APP_EDITOR ? 420 : 380;
+        g_win[i].h = app == APP_TERMINAL ? 330 : app == APP_EDITOR ? 280 : 250;
         g_focus = i;
         build_content(app);
+        if (app == APP_EDITOR) editor_load_file(&g_ed);   /* once; the text survives reopening */
         if (app == APP_TERMINAL && !g_term_started) {
             g_term_started = true;
             g_term_n = 1;
@@ -749,6 +809,21 @@ static bool inside(int x, int y, uint32_t rx, uint32_t ry, uint32_t rw, uint32_t
 }
 
 /* A left click at (x, y). Returns PTR_EXIT for Shut Down, otherwise PTR_REDRAW. */
+/* A click inside the editor: the Save button saves, a click in the text moves the caret. */
+static void editor_click(const window_t *w, int x, int y) {
+    uint32_t cx = w->x + 6u, cy = w->y + 26u, cw = w->w - 12u, ch = w->h - 32u;
+    uint32_t sy = cy + ch - ED_STRIP_H;
+    if (inside(x, y, cx + cw - ED_SAVE_W - 4u, sy + 3u, ED_SAVE_W, 16)) {
+        editor_save(&g_ed);
+        return;
+    }
+    if (y < (int)(cy + 4u) || y >= (int)sy) return;
+    uint32_t row = ((uint32_t)y - cy - 4u) / 12u;
+    int px = x - (int)cx - 4 + 4;             /* +4 rounds to the nearest character */
+    if (px < 0) px = 0;
+    editor_goto(&g_ed, g_ed.top + row, (uint32_t)px / 8u);
+}
+
 static int handle_click(int x, int y, uint32_t sh) {
     uint32_t ty = sh - TASK_H;
 
@@ -804,6 +879,7 @@ static int handle_click(int x, int y, uint32_t sh) {
         }
         if (inside(x, y, w->x, w->y, w->w, w->h)) {
             g_focus = i;
+            if (w->app == APP_EDITOR) editor_click(w, x, y);
             return PTR_REDRAW;
         }
     }
@@ -867,14 +943,81 @@ static int poll_pointer(void) {
     return result;
 }
 
+/* Redraw only the editor window after its text changed. The desktop, icons and
+ * taskbar stay as they are. Falls back to the full redraw when another window
+ * is on top of the editor, a menu or drag is up, or the window reaches the taskbar. */
+static void editor_redraw(void) {
+    int i = g_focus;
+    if (i < 0 || !g_win[i].used || g_win[i].app != APP_EDITOR || g_menu_open || g_drag >= 0 ||
+        g_win[i].y + g_win[i].h > fb_height() - TASK_H) {
+        g_repaint = true;
+        return;
+    }
+    window_t *w = &g_win[i];
+    for (int k = i + 1; k < MAX_WIN; k++) {
+        if (g_win[k].used && rect_hits((int)w->x, (int)w->y, (int)w->w, (int)w->h, &g_win[k])) {
+            g_repaint = true;
+            return;
+        }
+    }
+    cursor_restore();
+    draw_window(w, true);
+    cursor_show();
+    g_repaint = false;
+}
+
+/* Keys typed into the focused editor. Esc closes the editor (it does not leave the
+ * desktop, so a stray Esc cannot discard the window); Tab moves focus as elsewhere. */
+static void editor_key(int c) {
+    bool changed = false;
+    if (c == 0x1b) {
+        close_window(g_focus);
+        return;
+    }
+    if (c == '\t') {
+        focus_next();
+        return;
+    }
+    if (c == '\n') {
+        editor_insert(&g_ed, '\n');
+        changed = true;
+    } else if (c == 0x08 || c == 0x7f) {
+        editor_backspace(&g_ed);
+        changed = true;
+    } else if (c == SHELL_KEY_DELETE) {
+        editor_delete(&g_ed);
+        changed = true;
+    } else if (c >= 0x20 && c < 0x7f) {
+        editor_insert(&g_ed, (char)c);
+        changed = true;
+    } else if (c == SHELL_KEY_LEFT) {
+        changed = editor_move(&g_ed, ED_LEFT);
+    } else if (c == SHELL_KEY_RIGHT) {
+        changed = editor_move(&g_ed, ED_RIGHT);
+    } else if (c == SHELL_KEY_UP) {
+        changed = editor_move(&g_ed, ED_UP);
+    } else if (c == SHELL_KEY_DOWN) {
+        changed = editor_move(&g_ed, ED_DOWN);
+    } else if (c == SHELL_KEY_HOME) {
+        changed = editor_move(&g_ed, ED_HOME);
+    } else if (c == SHELL_KEY_END) {
+        changed = editor_move(&g_ed, ED_END);
+    }
+    if (!changed) {
+        g_repaint = false;          /* a key the editor does not use needs no repaint */
+        return;
+    }
+    editor_redraw();
+}
+
 /* Returns true when the desktop should close. */
 static bool handle_key(int c) {
     klog_event(KLOG_INPUT, "key %d", c);
     g_repaint = true;
     if (g_menu_open) {
-        if (c == SHELL_KEY_UP || c == KBD_KEY_UP) {
+        if (c == SHELL_KEY_UP) {
             g_menu_sel = (g_menu_sel + MENU_COUNT - 1) % MENU_COUNT;
-        } else if (c == SHELL_KEY_DOWN || c == KBD_KEY_DOWN) {
+        } else if (c == SHELL_KEY_DOWN) {
             g_menu_sel = (g_menu_sel + 1) % MENU_COUNT;
         } else if (c == '\n') {
             g_menu_open = false;
@@ -911,9 +1054,14 @@ static bool handle_key(int c) {
         return false;
     }
 
-    if (c == SHELL_KEY_UP || c == KBD_KEY_UP) {
+    if (g_focus >= 0 && g_win[g_focus].used && g_win[g_focus].app == APP_EDITOR) {
+        editor_key(c);
+        return false;
+    }
+
+    if (c == SHELL_KEY_UP) {
         g_icon_sel = (g_icon_sel + ICON_COUNT - 1) % ICON_COUNT;
-    } else if (c == SHELL_KEY_DOWN || c == KBD_KEY_DOWN) {
+    } else if (c == SHELL_KEY_DOWN) {
         g_icon_sel = (g_icon_sel + 1) % ICON_COUNT;
     } else if (c == '\n') {
         open_app(g_icon_app[g_icon_sel]);
