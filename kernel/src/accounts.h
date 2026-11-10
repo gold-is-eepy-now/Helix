@@ -21,8 +21,13 @@
 #define ACCT_FIRST_UID  1000u
 
 /* Load /etc/users from the mounted root filesystem, creating /etc if needed.
- * Call after ext4 is mounted. Returns false if the file could not be read. */
+ * Call after ext4 is mounted. Returns false if there is no usable disk; accounts
+ * then work in memory only (see accounts_persistent). A save that was cut off is
+ * recovered from /etc/users.new. */
 bool accounts_init(void);
+
+/* False when accounts live only in memory (no disk to save them to). */
+bool accounts_persistent(void);
 
 uint32_t accounts_count(void);
 const char *accounts_name(uint32_t index);

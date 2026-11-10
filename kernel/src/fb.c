@@ -126,12 +126,7 @@ void fb_clear(uint32_t color) {
     if (!fb_ready()) {
         return;
     }
-    if (g_on_virtio) { mark_dirty(0, 0); g_dx1 = g_fb->width; g_dy1 = g_fb->height; }
-    for (size_t y = 0; y < g_fb->height; y++) {
-        for (size_t x = 0; x < g_fb->width; x++) {
-            put_pixel(x, y, color);
-        }
-    }
+    fb_fill_rect(0, 0, (uint32_t)g_fb->width, (uint32_t)g_fb->height, color);
     g_cursor_x = MARGIN_X;
     g_cursor_y = MARGIN_Y;
     g_cursor_drawn = false;
@@ -295,6 +290,15 @@ static void putchar_raw(char c) {
         draw_cursor();
         return;
     }
+    if (c == '\b') {
+        /* Like a terminal: move left, erase nothing. Programs that want to
+         * delete a character send "\b \b", and the space does the erasing. */
+        if (g_cursor_x > MARGIN_X) {
+            g_cursor_x -= GLYPH_W;
+        }
+        draw_cursor();
+        return;
+    }
 
     if (g_cursor_x + GLYPH_W > g_fb->width) {
         newline();
@@ -326,7 +330,7 @@ void fb_write(const char *s) {
 }
 
 void fb_backspace(void) {
-    if (!fb_ready()) {
+    if (!fb_ready() || g_graphics_mode) {
         return;
     }
     erase_cursor();
@@ -340,6 +344,7 @@ void fb_backspace(void) {
         }
     }
     draw_cursor();
+    fb_present();                   /* like fb_putchar: show the change now */
 }
 
 bool fb_get_info(uint64_t *width, uint64_t *height, uint64_t *bpp) {
@@ -380,9 +385,31 @@ void fb_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color
     if (!fb_ready()) {
         return;
     }
-    for (uint32_t j = 0; j < h; j++) {
-        for (uint32_t i = 0; i < w; i++) {
-            put_pixel((size_t)x + i, (size_t)y + j, color);
+    size_t fw = g_fb->width, fh = g_fb->height;
+    if (x >= fw || y >= fh || w == 0 || h == 0) {
+        return;
+    }
+    size_t x1 = (size_t)x + w;
+    size_t y1 = (size_t)y + h;
+    if (x1 > fw) x1 = fw;
+    if (y1 > fh) y1 = fh;
+    if (g_on_virtio) {                  /* one rectangle, not one update per pixel */
+        mark_dirty(x, y);
+        mark_dirty(x1 - 1, y1 - 1);
+    }
+    size_t bytes_per_pixel = g_fb->bpp / 8u;
+    for (size_t j = y; j < y1; j++) {
+        uint8_t *row = (uint8_t *)g_fb->address + j * g_fb->pitch + (size_t)x * bytes_per_pixel;
+        if (bytes_per_pixel == 4) {
+            for (size_t i = x; i < x1; i++, row += 4) {
+                __builtin_memcpy(row, &color, 4);
+            }
+        } else {
+            for (size_t i = x; i < x1; i++) {
+                for (size_t b = 0; b < bytes_per_pixel; b++) {
+                    *row++ = (uint8_t)(color >> (8u * b));
+                }
+            }
         }
     }
 }

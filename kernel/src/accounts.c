@@ -10,7 +10,10 @@
 #include "kstring.h"
 #include "sha256.h"
 
-#define ACCT_FILE       "etc/users"
+#define ACCT_FILE       "users"       /* in ACCT_DIR */
+#define ACCT_NEW_FILE   "users.new"   /* a finished copy, kept while users is rewritten */
+#define ACCT_MARK       "#ok\n"       /* last line of a finished users.new */
+#define ACCT_MARK_LEN   4u
 #define ACCT_DIR        "etc"
 #define ACCT_ITER       4096u
 #define ACCT_SALT_LEN   16u
@@ -28,6 +31,7 @@ typedef struct {
 static account_t g_acct[ACCT_MAX];
 static uint32_t g_count;
 static bool g_loaded;
+static bool g_persist;      /* the table is saved to /etc/users; false means memory only */
 static char g_session[ACCT_NAME_MAX + 1] = ACCT_ROOT_NAME;
 static uint32_t g_session_uid;
 
@@ -86,8 +90,15 @@ void accounts_random(uint8_t *buf, size_t n, bool *used_rdrand) {
             uint8_t digest[SHA256_DIGEST_LEN];
             sha256(pool, sizeof pool, digest);
             memcpy(pool, digest, sizeof pool);
+            /* The digest is the next pool state, so hand out a hash of it, never
+             * the state itself: otherwise one salt would reveal the next. */
+            uint8_t tmp[SHA256_DIGEST_LEN + 1];
+            uint8_t out[SHA256_DIGEST_LEN];
+            memcpy(tmp, digest, SHA256_DIGEST_LEN);
+            tmp[SHA256_DIGEST_LEN] = 0x01;
+            sha256(tmp, sizeof tmp, out);
             size_t take = n - done < SHA256_DIGEST_LEN ? n - done : SHA256_DIGEST_LEN;
-            memcpy(buf + done, digest, take);
+            memcpy(buf + done, out, take);
             done += take;
         }
     }
@@ -190,8 +201,8 @@ static bool parse_table(const char *text, size_t len) {
 
         const char *salt_start = p;
         while (p < end_line && *p != ':') p++;
-        if (p >= end_line || !from_hex(salt_start, (size_t)(p - salt_start), a->salt)) continue;
-        if ((size_t)(p - salt_start) != 2u * ACCT_SALT_LEN) continue;
+        if (p >= end_line || (size_t)(p - salt_start) != 2u * ACCT_SALT_LEN) continue;
+        if (!from_hex(salt_start, (size_t)(p - salt_start), a->salt)) continue;
         p++;
 
         size_t hash_len = (size_t)(end_line - p);
@@ -202,12 +213,36 @@ static bool parse_table(const char *text, size_t len) {
     return true;
 }
 
+/* Replace a file's contents and read them back to be sure they landed. */
+static bool write_file(ext4_fs_t *fs, uint64_t dir, const char *name,
+                       const char *data, size_t len) {
+    static char check[ACCT_FILE_MAX + 8];
+    if (len > sizeof check) return false;
+    ext4_stat_t st;
+    uint64_t ino = 0;
+    if (ext4_lookup(fs, dir, name, &st)) {
+        ino = st.ino;
+        if (!ext4_truncate(fs, ino, 0)) return false;
+    } else if (!ext4_create(fs, dir, name, EXT4_S_IFREG | 0600, &ino)) {
+        return false;
+    }
+    if (len == 0) return true;
+    if (ext4_write(fs, ino, 0, data, len) != len) return false;
+    if (ext4_read(fs, ino, 0, check, len) != len) return false;
+    return memcmp(check, data, len) == 0;
+}
+
+/* Saving is two steps so a failure or a power cut never loses every account:
+ *   1. write the whole table to etc/users.new, ending in a "#ok" line;
+ *   2. rewrite etc/users, check it, then delete users.new.
+ * accounts_init() uses a users.new that ends in "#ok" over etc/users. */
 static bool save_table(void) {
+    if (!g_persist) return true;            /* no disk: the table lives in memory */
     ext4_fs_t *fs = ext4_get_current();
     if (!fs) return false;
 
     /* Build the text in one buffer, then rewrite the file in one go. */
-    static char text[ACCT_FILE_MAX];
+    static char text[ACCT_FILE_MAX + 8];
     size_t len = 0;
     for (uint32_t i = 0; i < g_count; i++) {
         const account_t *a = &g_acct[i];
@@ -233,7 +268,7 @@ static bool save_table(void) {
         const char *parts[] = { a->name, ":", uid_text, ":", iter_text, ":", salt_hex, ":", hash_hex, "\n" };
         for (size_t j = 0; j < sizeof parts / sizeof parts[0]; j++) {
             size_t n = strlen(parts[j]);
-            if (len + n >= sizeof text) return false;
+            if (len + n >= ACCT_FILE_MAX) return false;
             memcpy(text + len, parts[j], n);
             len += n;
         }
@@ -241,15 +276,12 @@ static bool save_table(void) {
 
     uint64_t dir = lookup_dir(fs);
     if (!dir) return false;
-    ext4_stat_t st;
-    uint64_t ino = 0;
-    if (ext4_lookup(fs, dir, "users", &st)) {
-        ino = st.ino;
-        if (!ext4_truncate(fs, ino, 0)) return false;
-    } else {
-        if (!ext4_create(fs, dir, "users", EXT4_S_IFREG | 0600, &ino)) return false;
-    }
-    return ext4_write(fs, ino, 0, text, len) == len;
+
+    memcpy(text + len, ACCT_MARK, ACCT_MARK_LEN);
+    if (!write_file(fs, dir, ACCT_NEW_FILE, text, len + ACCT_MARK_LEN)) return false;
+    if (!write_file(fs, dir, ACCT_FILE, text, len)) return false;
+    (void)ext4_unlink(fs, dir, ACCT_NEW_FILE, false);
+    return true;
 }
 
 static bool sha256_self_test(void) {
@@ -262,33 +294,58 @@ static bool sha256_self_test(void) {
     return memcmp(got, want, sizeof got) == 0;
 }
 
+/* Read a table file into the shared buffer. Returns the bytes read; 0 if it is missing. */
+static char g_text[ACCT_FILE_MAX + 8];
+
+static size_t read_table_file(ext4_fs_t *fs, uint64_t dir, const char *name) {
+    ext4_stat_t st;
+    if (!dir || !ext4_lookup(fs, dir, name, &st)) return 0;
+    uint64_t size = st.size < sizeof g_text ? st.size : sizeof g_text;
+    return size ? (size_t)ext4_read(fs, st.ino, 0, g_text, size) : 0;
+}
+
 bool accounts_init(void) {
     if (sha256_self_test()) {
         console_write("[crypto] sha256 self-test passed\n");
     } else {
         console_write("[crypto] sha256 self-test FAILED\n");
     }
-    ext4_fs_t *fs = ext4_get_current();
-    if (!fs) return false;
 
-    if (!lookup_dir(fs)) {
-        uint64_t made;
-        if (!ext4_mkdir(fs, EXT4_ROOT_INO, ACCT_DIR, EXT4_S_IFDIR | 0755, &made)) return false;
-    }
-
+    /* From here accounts work even without a disk: they just are not saved. */
     g_loaded = true;
+    g_persist = false;
     g_count = 0;
 
-    uint64_t dir = lookup_dir(fs);
-    ext4_stat_t st;
-    if (!dir || !ext4_lookup(fs, dir, "users", &st)) {
-        console_write("[accounts] no account table yet\n");
-        return true;
+    ext4_fs_t *fs = ext4_get_current();
+    if (!fs) {
+        console_write("[accounts] no filesystem: accounts will not be saved\n");
+        return false;
     }
-    static char text[ACCT_FILE_MAX];
-    uint64_t size = st.size < sizeof text ? st.size : sizeof text;
-    uint64_t got = size ? ext4_read(fs, st.ino, 0, text, size) : 0;
-    parse_table(text, (size_t)got);
+    if (!lookup_dir(fs)) {
+        uint64_t made;
+        if (!ext4_mkdir(fs, EXT4_ROOT_INO, ACCT_DIR, EXT4_S_IFDIR | 0755, &made)) {
+            console_write("[accounts] cannot create /etc: accounts will not be saved\n");
+            return false;
+        }
+    }
+    g_persist = true;
+
+    uint64_t dir = lookup_dir(fs);
+
+    /* A finished users.new means a save was cut off after step 1: it is the newest table. */
+    size_t n = read_table_file(fs, dir, ACCT_NEW_FILE);
+    if (n >= ACCT_MARK_LEN && memcmp(g_text + n - ACCT_MARK_LEN, ACCT_MARK, ACCT_MARK_LEN) == 0) {
+        parse_table(g_text, n);
+        console_write("[accounts] recovered the account table from an interrupted save\n");
+        (void)save_table();
+    } else {
+        n = read_table_file(fs, dir, ACCT_FILE);
+        if (n == 0) {
+            console_write("[accounts] no account table yet\n");
+            return true;
+        }
+        parse_table(g_text, n);
+    }
 
     console_write("[accounts] ");
     console_write_dec(g_count);
@@ -300,8 +357,26 @@ bool accounts_init(void) {
 /* Public API                                                          */
 /* ------------------------------------------------------------------ */
 
+/* With no filesystem (the helixfs fallback) accounts_init is never called; accounts
+ * still work, in memory only, so the sign-in screen cannot dead-end. */
+static void ensure_ready(void) {
+    if (!g_loaded && ext4_get_current() == NULL) g_loaded = true;
+}
+
+bool accounts_persistent(void) {
+    return g_loaded && g_persist;
+}
+
 uint32_t accounts_count(void) {
     return g_count;
+}
+
+static uint32_t next_uid(void) {
+    uint32_t uid = ACCT_FIRST_UID;
+    for (uint32_t i = 0; i < g_count; i++) {
+        if (g_acct[i].uid >= uid) uid = g_acct[i].uid + 1u;
+    }
+    return uid;
 }
 
 const char *accounts_name(uint32_t index) {
@@ -332,6 +407,7 @@ static bool password_ok(const char *password) {
 }
 
 bool accounts_create(const char *name, const char *password, uint32_t *uid_out) {
+    ensure_ready();
     if (!g_loaded || !accounts_name_valid(name) || !password_ok(password)) return false;
     if (strcmp(name, ACCT_ROOT_NAME) == 0 || find(name) >= 0) return false;
     if (g_count >= ACCT_MAX) return false;
@@ -339,7 +415,7 @@ bool accounts_create(const char *name, const char *password, uint32_t *uid_out) 
     account_t *a = &g_acct[g_count];
     memset(a, 0, sizeof *a);
     strcpy(a->name, name);
-    a->uid = ACCT_FIRST_UID + g_count;
+    a->uid = next_uid();
     a->iterations = ACCT_ITER;
     accounts_random(a->salt, sizeof a->salt, NULL);
     hash_password(a, password, a->hash);
@@ -347,6 +423,7 @@ bool accounts_create(const char *name, const char *password, uint32_t *uid_out) 
 
     if (!save_table()) {
         g_count--;
+        (void)save_table();     /* put the files back as they were, if we can */
         return false;
     }
     if (uid_out) *uid_out = a->uid;
@@ -354,6 +431,7 @@ bool accounts_create(const char *name, const char *password, uint32_t *uid_out) 
 }
 
 bool accounts_verify(const char *name, const char *password, uint32_t *uid_out) {
+    ensure_ready();
     if (!g_loaded || !name || !password) return false;
     if (strcmp(name, ACCT_ROOT_NAME) == 0) return false;   /* root is the console, not a password login */
     int i = find(name);
@@ -374,14 +452,21 @@ bool accounts_verify(const char *name, const char *password, uint32_t *uid_out) 
 }
 
 bool accounts_set_password(const char *name, const char *password) {
+    ensure_ready();
     if (!g_loaded || !password_ok(password)) return false;
     int i = find(name);
     if (i < 0) return false;
     account_t *a = &g_acct[i];
+    account_t before = *a;
     accounts_random(a->salt, sizeof a->salt, NULL);
     a->iterations = ACCT_ITER;
     hash_password(a, password, a->hash);
-    return save_table();
+    if (!save_table()) {
+        *a = before;            /* keep memory and disk telling the same story */
+        (void)save_table();
+        return false;
+    }
+    return true;
 }
 
 const char *accounts_session(void) {

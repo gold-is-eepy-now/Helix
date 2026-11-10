@@ -10,6 +10,7 @@
 #include "input.h"
 #include "keyboard.h"
 #include "kstring.h"
+#include "time.h"
 
 #define PANEL_W   440u
 #define PANEL_H   272u
@@ -28,6 +29,8 @@ typedef struct {
     field_t active;
     const char *message;
     bool create;          /* no accounts yet: this screen creates the first one */
+    bool no_disk;         /* accounts are kept in memory only */
+    bool penalty;         /* the last attempt was a wrong guess */
 } login_state_t;
 
 /* Colours, packed for the framebuffer when login_run starts. */
@@ -45,6 +48,17 @@ static void load_colors(void) {
     c_hint  = fb_rgb(0xDD, 0xE8, 0xF5);
 }
 
+/* Offset that centres `inner` in `outer`, or 0 if it does not fit. */
+static uint32_t center(uint32_t outer, uint32_t inner) {
+    return outer > inner ? (outer - inner) / 2u : 0u;
+}
+
+/* Clear memory in a way the compiler may not drop as a dead store. */
+static void secure_zero(void *p, size_t n) {
+    volatile uint8_t *b = (volatile uint8_t *)p;
+    while (n--) *b++ = 0;
+}
+
 static void draw_border(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
     fb_fill_rect(x, y, w, 1, color);
     fb_fill_rect(x, y + h - 1, w, 1, color);
@@ -58,9 +72,12 @@ static void draw_field(uint32_t x, uint32_t y, const char *text, size_t len,
     draw_border(x, y, FIELD_W, FIELD_H, active ? c_title : c_dark);
     if (active) draw_border(x + 1, y + 1, FIELD_W - 2, FIELD_H - 2, c_title);
 
+    /* Show only the last characters that fit, so long entries stay inside the box. */
+    size_t room = (FIELD_W - 16u) / 8u - 1u;    /* one cell is kept for the caret */
+    size_t start = len > room ? len - room : 0;
     char shown[ACCT_PASS_MAX + 2];
     size_t n = 0;
-    for (size_t i = 0; i < len && n < sizeof shown - 2; i++) {
+    for (size_t i = start; i < len && n < room; i++) {
         shown[n++] = masked ? '*' : text[i];
     }
     if (active) shown[n++] = '_';           /* a plain caret */
@@ -75,10 +92,10 @@ static void draw_button(uint32_t x, uint32_t y, const char *label, bool primary)
     fb_draw_text(tx, y + 9, label, c_text, c_face, true);
 }
 
-static void draw_screen(const login_state_t *st) {
+/* Blue gradient backdrop, one 8-pixel band at a time. Drawn once: repainting it
+ * under the panel on every pass is what made the screen flicker. */
+static void draw_backdrop(void) {
     uint32_t sw = fb_width(), sh = fb_height();
-
-    /* Blue gradient backdrop, one 8-pixel band at a time. */
     for (uint32_t y = 0; y < sh; y += 8) {
         uint32_t t = y * 255u / sh;
         uint8_t r = (uint8_t)(0x1B + ((0x4F - 0x1B) * t) / 255u);
@@ -88,8 +105,16 @@ static void draw_screen(const login_state_t *st) {
         fb_fill_rect(0, y, sw, h, fb_rgb(r, g, b));
     }
 
-    uint32_t px = (sw - PANEL_W) / 2u;
-    uint32_t py = (sh - PANEL_H) / 2u;
+    const char *hint = "Tab: next field    Enter: sign in    Esc: cancel";
+    uint32_t hx = center(sw, (uint32_t)strlen(hint) * 8u);
+    fb_draw_text(hx, sh > 28u ? sh - 28u : 0u, hint, c_hint, 0, false);
+}
+
+/* The panel only: redrawn when the state changes. */
+static void draw_panel(const login_state_t *st) {
+    uint32_t sw = fb_width(), sh = fb_height();
+    uint32_t px = center(sw, PANEL_W);
+    uint32_t py = center(sh, PANEL_H);
     fb_fill_rect(px, py, PANEL_W, PANEL_H, c_face);
     draw_border(px, py, PANEL_W, PANEL_H, c_dark);
 
@@ -114,17 +139,18 @@ static void draw_screen(const login_state_t *st) {
         fb_draw_text(px + 24, py + 168, st->message, c_error, c_face, true);
     }
 
+    if (st->no_disk) {
+        fb_draw_text(px + 24, py + 196, "No disk found: accounts last until shutdown.",
+                     c_dark, c_face, true);
+    }
+
     draw_button(px + PANEL_W - BTN_W - 24u, py + PANEL_H - BTN_H - 20u,
                 st->create ? "Create" : "Sign in", true);
     draw_button(px + PANEL_W - 2u * BTN_W - 36u, py + PANEL_H - BTN_H - 20u, "Cancel", false);
-
-    const char *hint = "Tab: next field    Enter: sign in    Esc: cancel";
-    uint32_t hx = (sw - (uint32_t)strlen(hint) * 8u) / 2u;
-    fb_draw_text(hx, sh - 28u, hint, c_hint, 0, false);
 }
 
 static void wipe(login_state_t *st) {
-    memset(st->pass, 0, sizeof st->pass);
+    secure_zero(st->pass, sizeof st->pass);
     st->plen = 0;
 }
 
@@ -156,13 +182,25 @@ static bool submit(login_state_t *st) {
     if (!accounts_verify(st->user, st->pass, &uid)) {
         wipe(st);
         st->message = "The user name or password is not correct.";
-        /* A short pause after each wrong guess slows down guessing. */
-        for (volatile uint32_t i = 0; i < 40000000u; i++) {
-        }
+        st->penalty = true;     /* login_run pauses after showing the message */
         return false;
     }
     accounts_set_session(st->user, uid);
     return true;
+}
+
+/* A pause after each wrong guess slows down guessing. Uses the real clock when
+ * it is calibrated; otherwise a rough spin. */
+static void guess_delay(void) {
+    if (time_available()) {
+        uint64_t until = time_uptime_ms() + 1000u;
+        while (time_uptime_ms() < until) {
+            __asm__ volatile("pause");
+        }
+        return;
+    }
+    for (volatile uint32_t i = 0; i < 40000000u; i++) {
+    }
 }
 
 bool login_run(void) {
@@ -173,29 +211,55 @@ bool login_run(void) {
     memset(&st, 0, sizeof st);
     st.active = FIELD_USER;
     st.create = accounts_count() == 0;
+    st.no_disk = !accounts_persistent();
     st.message = "";
 
+    draw_backdrop();
+    bool redraw = true;
+    int prev = 0;
+
     for (;;) {
-        draw_screen(&st);
-        fb_present();
+        if (redraw) {
+            draw_panel(&st);
+            fb_present();
+            redraw = false;
+        }
 
         int c = input_getchar();
         if (c < 0) {
             __asm__ volatile("pause");
+            continue;               /* idle: nothing changed, so draw nothing */
+        }
+        if (c == '\n' && prev == '\r') {      /* the second half of a CR LF pair */
+            prev = 0;
             continue;
         }
-        if (c == 27 || c == KBD_KEY_ESCAPE) return false;
+        prev = c;
+        redraw = true;
+        if (c == 27 || c == KBD_KEY_ESCAPE) {
+            secure_zero(&st, sizeof st);
+            return false;
+        }
 
         if (c == '\t') {
             st.active = st.active == FIELD_USER ? FIELD_PASS : FIELD_USER;
             st.message = "";
             continue;
         }
-        if (c == '\n') {
-            if (submit(&st)) return true;
+        if (c == '\n' || c == '\r') {          /* serial consoles send CR for Enter */
+            if (submit(&st)) {
+                secure_zero(&st, sizeof st);        /* do not leave the password on the stack */
+                return true;
+            }
+            if (st.penalty) {
+                st.penalty = false;
+                draw_panel(&st);                    /* show the message, then make them wait */
+                fb_present();
+                guess_delay();
+            }
             continue;
         }
-        if (c == 0x7F) {
+        if (c == 0x7F || c == 0x08) {            /* serial consoles often send BS, not DEL */
             st.message = "";
             if (st.active == FIELD_USER && st.ulen > 0) st.user[--st.ulen] = '\0';
             if (st.active == FIELD_PASS && st.plen > 0) st.pass[--st.plen] = '\0';

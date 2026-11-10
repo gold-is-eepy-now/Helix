@@ -452,33 +452,67 @@ static uint32_t ed_rows(uint32_t ch) {
     return (ch - ED_STRIP_H - 4u) / 12u;      /* 12 px per line, 4 px top margin */
 }
 
-/* Paint the editor's client area: the visible lines, the caret, the status strip. */
-static void draw_editor(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
+#define ED_MAX_ROWS 32u
+#define ED_MAX_COLS 96u
+
+/* What the editor's client area currently shows, kept so a keystroke can repaint just
+ * the rows that changed instead of the whole window. Valid only after draw_editor ran. */
+static struct {
+    bool valid;
+    uint32_t cx, cy, cw, ch;                  /* the client area it was drawn into */
+    char rows[ED_MAX_ROWS][ED_MAX_COLS + 1];  /* the text drawn on each row */
+    int caret_row;                            /* -1: no caret shown */
+    uint32_t caret_off;                       /* caret column within that row */
+    char msg[sizeof g_ed.msg];                /* the status text in the strip */
+} g_ed_shown;
+
+static uint32_t ed_row_count(uint32_t ch) {
     uint32_t rows = ed_rows(ch);
-    editor_scroll_to_cursor(&g_ed, rows);
+    return rows > ED_MAX_ROWS ? ED_MAX_ROWS : rows;
+}
+
+static uint32_t ed_col_count(uint32_t cw) {
     uint32_t cols = (cw - 8u) / 8u;
-    if (cols > 96u) cols = 96u;
+    return cols > ED_MAX_COLS ? ED_MAX_COLS : cols;
+}
+
+/* Work out the text of each visible row, and which row and column hold the caret. */
+static void ed_layout(uint32_t rows, uint32_t cols, char (*out)[ED_MAX_COLS + 1],
+                      int *caret_row, uint32_t *caret_off) {
     uint32_t cur_line = editor_line_of(&g_ed, g_ed.pos);
-    fb_fill_rect(cx, cy, cw, ch - ED_STRIP_H, c_white);
+    *caret_row = -1;
+    *caret_off = 0;
+    for (uint32_t r = 0; r < rows; r++) out[r][0] = '\0';
 
     uint32_t off = editor_offset_of_line(&g_ed, g_ed.top);
     for (uint32_t r = 0; r < rows && off <= g_ed.len; r++) {
         uint32_t line = g_ed.top + r;
         uint32_t end = editor_line_end(&g_ed, off);
-        char row[97];
         uint32_t n = 0;
-        for (uint32_t i = off; i < end && n < cols; i++) row[n++] = g_ed.text[i];
-        row[n] = '\0';
-        uint32_t y = cy + 4u + r * 12u;
-        fb_draw_text(cx + 4, y, row, c_black, 0, false);
+        for (uint32_t i = off; i < end && n < cols; i++) out[r][n++] = g_ed.text[i];
+        out[r][n] = '\0';
         if (line == cur_line) {
-            uint32_t px = cx + 4u + (g_ed.pos - off) * 8u;
-            if (px < cx + cw - 4u) fb_fill_rect(px, y, 1, 10, c_black);   /* the caret */
+            *caret_row = (int)r;
+            *caret_off = g_ed.pos - off;
         }
         if (end >= g_ed.len) break;
         off = end + 1;
     }
+}
 
+/* Draw one row's text and, if it holds the caret, the caret. The background is the caller's. */
+static void ed_paint_row(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t r, const char *text,
+                         bool has_caret, uint32_t caret_off) {
+    uint32_t y = cy + 4u + r * 12u;
+    fb_draw_text(cx + 4, y, text, c_black, 0, false);
+    if (has_caret) {
+        uint32_t px = cx + 4u + caret_off * 8u;
+        if (px < cx + cw - 4u) fb_fill_rect(px, y, 1, 10, c_black);   /* the caret */
+    }
+}
+
+/* The strip under the text: file name, status text, and the Save button. */
+static void ed_draw_strip(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
     uint32_t sy = cy + ch - ED_STRIP_H;
     fb_fill_rect(cx, sy, cw, ED_STRIP_H, c_face);
     fb_draw_text(cx + 4, sy + 7, EDITOR_NAME, c_black, 0, false);
@@ -487,6 +521,29 @@ static void draw_editor(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
     fb_fill_rect(bx, by, ED_SAVE_W, 16, c_face);
     bevel(bx, by, ED_SAVE_W, 16, true);
     fb_draw_text(bx + 12, by + 4, "Save", c_black, 0, false);
+}
+
+/* Paint the editor's client area: the visible lines, the caret, the status strip. */
+static void draw_editor(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
+    uint32_t rows = ed_row_count(ch);
+    editor_scroll_to_cursor(&g_ed, rows);
+    uint32_t cols = ed_col_count(cw);
+    fb_fill_rect(cx, cy, cw, ch - ED_STRIP_H, c_white);
+
+    uint32_t caret_off;
+    ed_layout(rows, cols, g_ed_shown.rows, &g_ed_shown.caret_row, &caret_off);
+    for (uint32_t r = 0; r < rows; r++) {
+        ed_paint_row(cx, cy, cw, r, g_ed_shown.rows[r], (int)r == g_ed_shown.caret_row, caret_off);
+    }
+    ed_draw_strip(cx, cy, cw, ch);
+
+    g_ed_shown.caret_off = caret_off;
+    g_ed_shown.cx = cx;
+    g_ed_shown.cy = cy;
+    g_ed_shown.cw = cw;
+    g_ed_shown.ch = ch;
+    memcpy(g_ed_shown.msg, g_ed.msg, sizeof g_ed_shown.msg);
+    g_ed_shown.valid = true;
 }
 
 /* ---- Browser window ----
@@ -1033,8 +1090,14 @@ static void editor_click(const window_t *w, int x, int y) {
     editor_goto(&g_ed, g_ed.top + row, (uint32_t)px / 8u);
 }
 
+static void editor_redraw(void);
+
+/* A click at (x, y). Returns PTR_EXIT for Shut Down, PTR_REDRAW when the picture
+ * needs a full repaint, and PTR_NONE when nothing visible changed (or it was
+ * already repainted in place). */
 static int handle_click(int x, int y, uint32_t sh) {
     uint32_t ty = sh - TASK_H;
+    bool menu_was_open = g_menu_open;
 
     if (g_menu_open) {
         uint32_t mh = MENU_COUNT * 22u + 8u;
@@ -1048,7 +1111,7 @@ static int handle_click(int x, int y, uint32_t sh) {
                 return PTR_REDRAW;
             }
         }
-        if (inside(x, y, 2, my, 180, mh)) return PTR_REDRAW;   /* a click on the panel itself */
+        if (inside(x, y, 2, my, 180, mh)) return PTR_NONE;     /* a click on the panel itself: no change */
         g_menu_open = false;                                   /* any other click closes it */
     }
 
@@ -1087,9 +1150,17 @@ static int handle_click(int x, int y, uint32_t sh) {
             return PTR_REDRAW;
         }
         if (inside(x, y, w->x, w->y, w->w, w->h)) {
+            bool refocus = g_focus != i;
             g_focus = i;
             if (w->app == APP_EDITOR) editor_click(w, x, y);
-            return PTR_REDRAW;
+            if (refocus || menu_was_open) return PTR_REDRAW;   /* title colours or the menu changed */
+            if (w->app == APP_EDITOR) {                        /* caret moved or Save pressed */
+                editor_redraw();
+                bool full = g_repaint;
+                g_repaint = false;
+                return full ? PTR_REDRAW : PTR_NONE;
+            }
+            return PTR_NONE;                                   /* body of the focused window: nothing to do */
         }
     }
 
@@ -1101,7 +1172,7 @@ static int handle_click(int x, int y, uint32_t sh) {
             return PTR_REDRAW;
         }
     }
-    return PTR_NONE;
+    return menu_was_open ? PTR_REDRAW : PTR_NONE;              /* only closing the menu changed anything */
 }
 
 /* Read the mouse. Moves the pointer by the accumulated delta and reports a left
@@ -1146,10 +1217,47 @@ static int poll_pointer(void) {
     if (down && !g_button_was_down) {
         klog_event(KLOG_INPUT, "click at %d,%d", g_mx, g_my);
         result = handle_click(g_mx, g_my, sh);
-        if (result == PTR_NONE) result = PTR_REDRAW;   /* a click always updates the picture */
     }
     g_button_was_down = down;
     return result;
+}
+
+/* Repaint only the editor rows whose text or caret changed since the last paint, and the
+ * status strip if its text changed. Nothing else is touched, so typing does not flash the
+ * frame, title bar or the rest of the text. Returns false when the picture on screen does
+ * not match what was last drawn (first paint, or the window moved): the caller then
+ * repaints the whole window. The arrow must already be restored. */
+static bool editor_update_rows(const window_t *w) {
+    uint32_t cx = w->x + 6u, cy = w->y + 26u, cw = w->w - 12u, ch = w->h - 32u;
+    if (!g_ed_shown.valid || cx != g_ed_shown.cx || cy != g_ed_shown.cy ||
+        cw != g_ed_shown.cw || ch != g_ed_shown.ch) {
+        return false;
+    }
+    uint32_t rows = ed_row_count(ch);
+    editor_scroll_to_cursor(&g_ed, rows);       /* may scroll; the row comparison catches that */
+
+    static char now[ED_MAX_ROWS][ED_MAX_COLS + 1];
+    int caret_row;
+    uint32_t caret_off;
+    ed_layout(rows, ed_col_count(cw), now, &caret_row, &caret_off);
+
+    bool caret_moved = caret_row != g_ed_shown.caret_row || caret_off != g_ed_shown.caret_off;
+    for (uint32_t r = 0; r < rows; r++) {
+        bool text_changed = strcmp(now[r], g_ed_shown.rows[r]) != 0;
+        bool caret_here = (int)r == caret_row || (int)r == g_ed_shown.caret_row;
+        if (!text_changed && !(caret_moved && caret_here)) continue;
+        fb_fill_rect(cx, cy + 4u + r * 12u, cw, 12u, c_white);      /* just this row's band */
+        ed_paint_row(cx, cy, cw, r, now[r], (int)r == caret_row, caret_off);
+        memcpy(g_ed_shown.rows[r], now[r], sizeof now[r]);
+    }
+    g_ed_shown.caret_row = caret_row;
+    g_ed_shown.caret_off = caret_off;
+
+    if (strcmp(g_ed.msg, g_ed_shown.msg) != 0) {
+        ed_draw_strip(cx, cy, cw, ch);
+        memcpy(g_ed_shown.msg, g_ed.msg, sizeof g_ed_shown.msg);
+    }
+    return true;
 }
 
 /* Redraw only the editor window after its text changed. The desktop, icons and
@@ -1170,7 +1278,7 @@ static void editor_redraw(void) {
         }
     }
     cursor_restore();
-    draw_window(w, true);
+    if (!editor_update_rows(w)) draw_window(w, true);
     cursor_show();
     g_repaint = false;
 }
@@ -1512,9 +1620,14 @@ bool desktop_run(void) {
             /* Idle: repaint when the pointer moved or the clock's minute changed. */
             int y, mo, d, h, mi, s, wd;
             time_now_utc(&y, &mo, &d, &h, &mi, &s, &wd);
-            if (p == PTR_REDRAW || mi != last_minute) {
+            if (p == PTR_REDRAW) {
                 last_minute = mi;
                 redraw();
+            } else if (mi != last_minute) {
+                last_minute = mi;               /* only the clock changed: repaint the taskbar */
+                cursor_restore();
+                draw_taskbar(sw, sh);
+                cursor_show();
             }
             __asm__ volatile("pause");
             continue;
