@@ -313,6 +313,7 @@ shows it; typing `myprog arg1 arg2` runs it.
 | `ping <a.b.c.d \| name>` | four ICMP echo requests, one second each; prints each reply's round-trip time in microseconds, then a count. `ping 10.0.2.2` gets replies under QEMU. A dead address times out. A host name is resolved first |
 | `nslookup <name>` | resolve a name to an IPv4 address with the DNS server (10.0.2.3 under QEMU). Prints "not found" for a name that does not exist |
 | `tcpget <a.b.c.d> <port> <path>` | open a TCP connection, send `GET <path>` (HTTP/1.0), and print the byte count and the status line. Example: `tcpget 10.0.2.2 8765 /` against a host web server |
+| `fetch <http://host[:port]/path>` | HTTP/1.1 GET: prints the status, body length and content type, and the redirect target if there is one. Only `http://`; `https://` is refused for now. Example: `fetch http://10.0.2.2:8766/index.html` |
 | `dhcp` | get an address, mask, router and DNS server from a DHCP server, replacing the static configuration. Runs when asked, not at boot |
 
 The ring-3 `/bin/ping <a.b.c.d>` does the same through `SYS_NET_PING` (syscall 36): the kernel sends and times each echo, and the program prints the results. `/bin/nslookup <name>` asks the kernel to resolve a name (`SYS_NET_RESOLVE`, syscall 37).
@@ -442,6 +443,7 @@ To stay inside "Never pretend it works", these are still absent:
 
 ## Text editors
 
+- **Browser window** (desktop, last icon): type an address and press Enter (`http://` is added if missing). The page is fetched over HTTP and shown as plain text: tags are dropped, scripts and styles are skipped, lines wrap at word breaks. Up and Down scroll; Esc closes the window. The fetch blocks the desktop until the response arrives or times out (5 seconds per step). Redirects (301, 302, 303, 307, 308) are followed up to three times. Only `http://` works; `https://` shows an error.
 - **Text Editor window** (desktop): opens `note.txt` in the root directory. Type
   with the keyboard; arrows, Home, End, Delete and Backspace move and erase.
   Click the Save button to write the file; Esc closes the window (the text is kept

@@ -38,6 +38,7 @@
 #include "net.h"
 #include "net_dhcp.h"
 #include "net_dns.h"
+#include "net_http.h"
 #include "net_tcp.h"
 #include "net_icmp.h"
 #include "net_interface.h"
@@ -812,6 +813,28 @@ static void cmd_dhcp(int argc, char **argv) {
             l.ip[0], l.ip[1], l.ip[2], l.ip[3], l.mask[0], l.mask[1], l.mask[2], l.mask[3],
             l.router[0], l.router[1], l.router[2], l.router[3], l.dns[0], l.dns[1], l.dns[2], l.dns[3],
             l.server[0], l.server[1], l.server[2], l.server[3], l.lease_seconds);
+}
+
+/* fetch http://host[:port]/path: an HTTP GET that prints the status, the body length and
+ * the content type. The Browser window uses the same client. */
+static void cmd_fetch(int argc, char **argv) {
+    static uint8_t buf[64u * 1024u];
+    if (argc < 2) {
+        kprintf("usage: fetch <http://host[:port]/path>\n");
+        return;
+    }
+    if (!net_ready()) {
+        kprintf("fetch: no network card (QEMU: -netdev user,id=n0 -device e1000,netdev=n0)\n");
+        return;
+    }
+    net_http_result_t r;
+    if (!net_http_get(argv[1], buf, sizeof buf, &r)) {
+        kprintf("fetch: %s\n", r.error);
+        return;
+    }
+    kprintf("fetch: HTTP %d, %u byte(s), type %s\n", r.status, r.body_len,
+            r.content_type[0] != '\0' ? r.content_type : "(none)");
+    if (r.location[0] != '\0') kprintf("fetch: redirect to %s\n", r.location);
 }
 
 /* tcpget a.b.c.d PORT PATH: connect over TCP, send a GET, print the first line of the
@@ -2281,6 +2304,7 @@ const command_t helix_commands[] = {
     {"ping",    "ping an address or host name: ping <a.b.c.d | name> (four echo requests)", cmd_ping},
     {"nslookup", "resolve a host name with the DNS server: nslookup <name>", cmd_nslookup},
     {"tcpget", "fetch a path over TCP: tcpget <a.b.c.d> <port> <path>", cmd_tcpget},
+    {"fetch", "HTTP GET of an http:// address: fetch <http://host[:port]/path>", cmd_fetch},
     {"dhcp",    "get a network address from a DHCP server (replaces the static address)", cmd_dhcp},
     {"halt",    "halt the machine",                     cmd_halt},
     {"reboot",  "restart the machine",                  cmd_reboot},

@@ -49,13 +49,13 @@ native object model. They are not the foundation.
 | Scheduler, threads, IPC | ✅ threads/scheduler working, machine-tested (M7); ✅ IPC rendezvous channels working, machine-tested (M8) |
 | User space / ELF / syscalls | 🚧 ring-3 entry, syscall gate, console input, ELF64 loader, file I/O on the root, brk heap, nested `execve` with argv and environment, `/bin` installed at boot and `/bin/init` starting `/bin/sh`, machine-tested (M9); libc-style runtime still partial |
 | Userland shell (`usershell`) | 🚧 ring-3 program with its own line editor, history, built-ins and `/bin` programs, machine-tested; runtime is minimal (not a libc) |
-| Graphical desktop (`desktop`) | 🚧 basic Windows-98-style desktop: My Computer, About, Terminal, Text Editor (window-only redraw while typing, Save button), taskbar with clock, Start menu, PS/2 or USB mouse pointer; QEMU-tested only |
+| Graphical desktop (`desktop`) | 🚧 basic Windows-98-style desktop: My Computer, About, Terminal, Text Editor (window-only redraw while typing, Save button), Browser (plain http:// pages as text), taskbar with clock, Start menu, PS/2 or USB mouse pointer; QEMU-tested only |
 | Line editor (`/bin/edit FILE`) | 🚧 ring-3 program: type commands (`a`, `i`, `r`, `d`, `p`, `w`, `q`); QEMU-tested only |
 | Kernel event log (`log`) | ✅ 512-event ring of kernel activity, dumped automatically on a CPU exception; machine-tested |
 | Shell command history (Up/Down, `history`) | ✅ working in the kernel shell; a userland shell still to come |
 | Driver framework | ✅ complete (M10) |
 | Storage and filesystems | ✅ complete (M11) |
-| Networking, display, and input objects | 🚧 objects exist (M12); e1000 driver, Ethernet/ARP, IPv4, ICMP echo, UDP, DNS, DHCP, TCP client (QEMU only; ICMP to internet addresses blocked on the test host); no HTTP, browser, or compositor yet |
+| Networking, display, and input objects | 🚧 objects exist (M12); e1000 driver, Ethernet/ARP, IPv4, ICMP echo, UDP, DNS, DHCP, TCP client, HTTP/1.1 client (QEMU only; ICMP to internet addresses blocked on the test host); no HTTPS or compositor yet |
 | Linux / BSD / POSIX compatibility | 🚧 in progress (runtime subsystem) |
 | Mac / Darwin compatibility | ✅ working, machine-tested (Mach-O loader, Darwin syscalls, Mac-like FS, xattrs, plist/bundle, CLI/GUI via X11) |
 | USB HID support | 🚧 UHCI host, root ports, hubs and HID keyboard/mouse in QEMU; not yet verified on real iMac hardware (see docs/07-usb.md) |

@@ -162,7 +162,7 @@ Also, in the same change:
   shell, input and exception events; `log` command; dumped on CPU exceptions.
   Machine-tested.
 - **Implemented (desktop, basic, QEMU-tested only):** `desktop` command: teal
-  desktop, My Computer, About, Terminal and Text Editor windows (the Terminal runs kernel shell
+  desktop, My Computer, About, Terminal, Text Editor and Browser windows (the Browser loads plain http:// pages and shows them as text; the Terminal runs kernel shell
   commands and `exec <path>`, output shown in the window; keyboard-only programs
   are refused), taskbar with clock, Start menu, pointer
   driven by a PS/2 mouse (QEMU's default) or a USB mouse; dragging a title bar moves an outline and redraws the window on release; pointer moves redraw only the arrow; typing in the Text Editor redraws only its window. No compositor; not
@@ -184,8 +184,11 @@ Also, in the same change:
   is checked by hand (`github.com` resolves). No DHCP at boot or renewal.
 - **Implemented (network, stage 8, QEMU-tested only):** TCP client (`kernel/src/net_tcp.c`):
   connect, in-order receive with a window, go-back-N send, close. Kernel `tcpget`
-  fetched a 16 KB page from a host web server under QEMU. No listening sockets, no HTTP
-  client yet.
+  fetched a 16 KB page from a host web server under QEMU. No listening sockets.
+- **Implemented (network, stages 9–10, QEMU-tested only):** HTTP/1.1 GET client
+  (`kernel/src/net_http.c`: Content-Length, chunked, redirects reported) with kernel
+  `fetch`, and a desktop Browser window that shows plain http:// pages as text (checked
+  with QEMU screenshots, not by the suite). No HTTPS yet.
 - **Implemented (LC-1, Linux compat):** `compat/include/linux/*` headers (types, slab, spinlock, atomic, mutex, module_init, printk) and a self-test driver run at boot. See docs/08-linux-compat.md.
 - **Implemented (Mac/Darwin compat):** `mac-darwin-compat/` subsystem with 64-bit Mach-O loader, Darwin BSD & Mach trap translation, Darwin process runtime (`darwin_runtime.c`), Darwin `launchd` PID 1 daemon with plist service loading and `launchctl` CLI (`launchd.c`), Mac-like case-insensitive filesystem, extended attributes (xattr), property list (.plist) engine, .app bundle resolution, CLI tools (`sw_vers`, `defaults`, `plutil`, `uname`, `otool`, `open`, `launchctl`), and AppKit/Cocoa GUI translation to Helix X11 server (`Calculator.app`, `TextEdit.app`), machine-tested (157 checks).
 - **Implemented (DoneJS compat):** `donejs-compat/` freestanding C11 JavaScript runtime ported for Helix OS, featuring AST tree-walking interpreter, CommonJS modules (`require`), standard library (`path`, `fs`, `process`, `util`, `assert`, `events`, `buffer`, `os`, `stream`), Promises, microtasks, timers (`setTimeout`), and event loop draining. Machine-tested (hosted suite).
@@ -193,7 +196,7 @@ Also, in the same change:
   `userspace/libc`: string, stdlib, stdio, unistd, errno; there is no `fork`;
   the M9 exit gate is not yet passed), the `installer` / live install
   environment (needs a disk driver and partitioning), isolated driver services,
-  a network stack above TCP-client (listening sockets, HTTP client, TLS), a real graphics stack (the desktop is a basic framebuffer demo
+  a network stack above the HTTP client (HTTPS and TLS, listening sockets), a real graphics stack (the desktop is a basic framebuffer demo
   with no compositor), POSIX translation layer.
 
 Do not write documentation or commit messages that imply unimplemented systems

@@ -37,6 +37,8 @@
 #include "input.h"
 #include "keyboard.h"
 #include "klog.h"
+#include "html_text.h"
+#include "net_http.h"
 #include "ps2_mouse.h"
 #include "kstring.h"
 #include "panic.h"
@@ -48,11 +50,11 @@
 /* Win98-style palette, packed for the framebuffer at run time. */
 static uint32_t c_desk, c_face, c_white, c_dark, c_black, c_navy, c_gray;
 
-typedef enum { APP_MYCOMP, APP_ABOUT, APP_SHUTDOWN, APP_TERMINAL, APP_EDITOR, APP_COUNT } app_t;
+typedef enum { APP_MYCOMP, APP_ABOUT, APP_SHUTDOWN, APP_TERMINAL, APP_EDITOR, APP_BROWSER, APP_COUNT } app_t;
 
-static const char *const g_app_names[APP_COUNT] = { "My Computer", "About Helix", "Shut Down", "Terminal", "Text Editor" };
+static const char *const g_app_names[APP_COUNT] = { "My Computer", "About Helix", "Shut Down", "Terminal", "Text Editor", "Browser" };
 
-#define ICON_COUNT 4            /* icons on the desktop: My Computer, About Helix, Terminal, Text Editor */
+#define ICON_COUNT 5            /* icons on the desktop: My Computer, About Helix, Terminal, Text Editor, Browser */
 #define MENU_COUNT 3            /* Start menu items, the last one is Shut Down */
 #define MAX_WIN 4
 #define MAX_LINES 16
@@ -60,7 +62,7 @@ static const char *const g_app_names[APP_COUNT] = { "My Computer", "About Helix"
 #define TASK_H 28u
 
 /* The app each desktop icon opens (icon i is not app i, since Shut Down is an app too). */
-static const app_t g_icon_app[ICON_COUNT] = { APP_MYCOMP, APP_ABOUT, APP_TERMINAL, APP_EDITOR };
+static const app_t g_icon_app[ICON_COUNT] = { APP_MYCOMP, APP_ABOUT, APP_TERMINAL, APP_EDITOR, APP_BROWSER };
 
 typedef struct {
     bool used;
@@ -419,6 +421,127 @@ static void draw_editor(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
     fb_draw_text(bx + 12, by + 4, "Save", c_black, 0, false);
 }
 
+/* ---- Browser window ----
+ * An address bar, a status line, and the page as plain text. Enter fetches the address
+ * with net_http_get and shows the body as text (html_to_text strips the tags). The fetch
+ * blocks the desktop until the response arrives or times out. Only plain http:// works. */
+#define BR_URL_CAP   240
+#define BR_RAW_CAP   (256u * 1024u)   /* the response, then its body in place */
+#define BR_TEXT_CAP  (64u * 1024u)    /* the page as plain text */
+#define BR_COLS      54               /* characters per page row */
+#define BR_VISIBLE   21               /* page rows shown: the window is 340 px high, see open_app */
+#define BR_BAR_H     18u
+#define BR_STATUS_H  20u
+#define BR_MAX_HOPS  3
+
+typedef struct {
+    char url[BR_URL_CAP];
+    uint32_t url_len;
+    char status[120];
+    uint32_t text_len;
+    uint32_t top;               /* first page row shown */
+} browser_t;
+
+static browser_t g_br = { .status = "Type an address and press Enter." };
+static uint8_t g_br_raw[BR_RAW_CAP];
+static char g_br_text[BR_TEXT_CAP];
+
+/* Append s, then the decimal value, to a bounded string. */
+static void br_append(char *d, uint32_t cap, const char *s) {
+    uint32_t n = (uint32_t)strlen(d);
+    while (*s != '\0' && n + 1 < cap) d[n++] = *s++;
+    d[n] = '\0';
+}
+
+static void br_append_uint(char *d, uint32_t cap, uint32_t v) {
+    char digits[12];
+    uint32_t k = 0;
+    do {
+        digits[k++] = (char)('0' + v % 10u);
+        v /= 10u;
+    } while (v != 0);
+    char text[12];
+    uint32_t m = 0;
+    while (k > 0) text[m++] = digits[--k];
+    text[m] = '\0';
+    br_append(d, cap, text);
+}
+
+/* Lay the page text out in rows of at most BR_COLS characters, breaking at newlines, and
+ * paint rows g_br.top .. top+visible-1 when paint is set. Returns the total row count. */
+static uint32_t br_layout(bool paint, uint32_t px, uint32_t py, uint32_t visible) {
+    uint32_t r = 0;
+    uint32_t n = g_br.text_len;
+    uint32_t start = 0;
+    for (;;) {
+        uint32_t end = start;
+        while (end < n && g_br_text[end] != '\n') end++;
+        uint32_t len = end - start;
+        uint32_t k = 0;
+        do {                                   /* an empty line still takes a row */
+            uint32_t rest = len - k;
+            uint32_t take = rest, adv = rest;
+            if (rest > BR_COLS) {
+                /* Break at the last space that fits; a word longer than a row is cut. */
+                take = BR_COLS;
+                adv = BR_COLS;
+                for (uint32_t b = BR_COLS; b > 0; b--) {
+                    if (g_br_text[start + k + b] == ' ') {
+                        take = b;
+                        adv = b + 1;               /* skip the space itself */
+                        break;
+                    }
+                }
+            }
+            if (paint && r >= g_br.top && r < g_br.top + visible) {
+                char row[BR_COLS + 1];
+                for (uint32_t j = 0; j < take; j++) row[j] = g_br_text[start + k + j];
+                row[take] = '\0';
+                fb_draw_text(px, py + (r - g_br.top) * 12u, row, c_black, 0, false);
+            }
+            r++;
+            k += adv;
+        } while (k < len);
+        if (end >= n) break;
+        start = end + 1;
+    }
+    return r;
+}
+
+static void browser_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
+    fb_fill_rect(cx, cy, cw, ch, c_white);
+
+    /* Address bar: a sunken box holding the end of the address, with a caret. */
+    uint32_t bx = cx + 4u, by = cy + 4u, bw = cw - 8u;
+    fb_fill_rect(bx, by, bw, BR_BAR_H, c_white);
+    bevel(bx, by, bw, BR_BAR_H, false);
+    uint32_t fits = (bw - 8u) / 8u;
+    uint32_t from = g_br.url_len > fits ? g_br.url_len - fits : 0;
+    char shown[BR_URL_CAP];
+    uint32_t k = 0;
+    for (uint32_t i = from; i < g_br.url_len; i++) shown[k++] = g_br.url[i];
+    shown[k] = '\0';
+    fb_draw_text(bx + 4u, by + 5u, shown, c_black, 0, false);
+    fb_fill_rect(bx + 4u + (g_br.url_len - from) * 8u, by + 3u, 1, 12, c_black);   /* caret */
+
+    /* Page: plain text rows below the address bar. */
+    uint32_t py = cy + BR_BAR_H + 12u;
+    br_layout(true, cx + 6u, py, BR_VISIBLE);
+
+    /* Status line at the bottom. */
+    uint32_t sy = cy + ch - BR_STATUS_H;
+    fb_fill_rect(cx, sy, cw, BR_STATUS_H, c_face);
+    uint32_t scols = (cw - 8u) / 8u;
+    char st[120];
+    uint32_t sn = 0;
+    while (g_br.status[sn] != '\0' && sn < scols && sn + 1 < sizeof st) {
+        st[sn] = g_br.status[sn];
+        sn++;
+    }
+    st[sn] = '\0';
+    fb_draw_text(cx + 4u, sy + 6u, st, c_black, 0, false);
+}
+
 static void draw_window(const window_t *w, bool focused) {
     fb_fill_rect(w->x, w->y, w->w, w->h, c_face);
     bevel(w->x, w->y, w->w, w->h, true);
@@ -445,6 +568,10 @@ static void draw_window(const window_t *w, bool focused) {
     }
     if (w->app == APP_EDITOR) {
         draw_editor(cx, cy, cw, ch);
+        return;
+    }
+    if (w->app == APP_BROWSER) {
+        browser_draw(cx, cy, cw, ch);
         return;
     }
     uint32_t cols = chars_in(cw - 8);
@@ -477,6 +604,14 @@ static void draw_icon(int idx, uint32_t x, uint32_t y, bool selected) {
         fb_draw_text(x + 8, y + 8, ">_", c_white, 0, false);
         fb_fill_rect(x + 10, y + 24, 12, 3, c_gray);
         fb_fill_rect(x + 7, y + 27, 18, 3, c_gray);
+    } else if (idx == 4) {
+        /* a window with an address bar and a page below it */
+        fb_fill_rect(x + 4, y + 2, 24, 26, c_gray);
+        fb_fill_rect(x + 6, y + 4, 20, 4, c_navy);
+        fb_fill_rect(x + 6, y + 10, 20, 16, c_white);
+        bevel(x + 6, y + 10, 20, 16, false);
+        fb_fill_rect(x + 9, y + 14, 14, 2, c_navy);
+        fb_fill_rect(x + 9, y + 19, 10, 2, c_navy);
     } else {
         /* a page with a few lines of text */
         fb_fill_rect(x + 8, y + 2, 18, 26, c_white);
@@ -771,8 +906,8 @@ static void open_app(app_t app) {
         g_win[i].app = app;
         g_win[i].x = 120u + n * 28u;
         g_win[i].y = 40u + n * 28u;
-        g_win[i].w = app == APP_TERMINAL ? 480 : app == APP_EDITOR ? 420 : 380;
-        g_win[i].h = app == APP_TERMINAL ? 330 : app == APP_EDITOR ? 280 : 250;
+        g_win[i].w = app == APP_TERMINAL ? 480 : app == APP_EDITOR ? 420 : app == APP_BROWSER ? 460 : 380;
+        g_win[i].h = app == APP_TERMINAL ? 330 : app == APP_EDITOR ? 280 : app == APP_BROWSER ? 340 : 250;
         g_focus = i;
         build_content(app);
         if (app == APP_EDITOR) editor_load_file(&g_ed);   /* once; the text survives reopening */
@@ -966,6 +1101,169 @@ static void editor_redraw(void) {
     g_repaint = false;
 }
 
+/* Redraw only the browser window, as editor_redraw does for the editor. */
+static void browser_redraw(void) {
+    int i = g_focus;
+    if (i < 0 || !g_win[i].used || g_win[i].app != APP_BROWSER || g_menu_open || g_drag >= 0 ||
+        g_win[i].y + g_win[i].h > fb_height() - TASK_H) {
+        g_repaint = true;
+        return;
+    }
+    window_t *w = &g_win[i];
+    for (int k = i + 1; k < MAX_WIN; k++) {
+        if (g_win[k].used && rect_hits((int)w->x, (int)w->y, (int)w->w, (int)w->h, &g_win[k])) {
+            g_repaint = true;
+            return;
+        }
+    }
+    cursor_restore();
+    draw_window(w, true);
+    cursor_show();
+    g_repaint = false;
+}
+
+static void browser_scroll(int delta) {
+    uint32_t rows = br_layout(false, 0, 0, 0);
+    uint32_t max_top = rows > BR_VISIBLE ? rows - BR_VISIBLE : 0;
+    if (delta < 0 && g_br.top > 0) {
+        g_br.top--;
+    } else if (delta > 0 && g_br.top < max_top) {
+        g_br.top++;
+    } else {
+        g_repaint = false;
+        return;
+    }
+    browser_redraw();
+}
+
+/* Turn a Location header into an absolute http:// address. Only absolute addresses and
+ * root-relative paths ("/x") are handled. */
+static bool br_resolve(const char *base, const char *loc, char *out, uint32_t cap) {
+    uint32_t n = 0;
+    out[0] = '\0';
+    if (strncmp(loc, "http://", 7) == 0) {
+        br_append(out, cap, loc);
+        return out[0] != '\0';
+    }
+    if (loc[0] != '/' || strncmp(base, "http://", 7) != 0) return false;
+    const char *host_end = base + 7;
+    while (*host_end != '\0' && *host_end != '/') host_end++;
+    for (const char *p = base; p < host_end && n + 1 < cap; p++) out[n++] = *p;
+    out[n] = '\0';
+    br_append(out, cap, loc);
+    return out[0] != '\0';
+}
+
+/* Fetch the address in the bar (http:// is added when missing), following redirects. */
+static void browser_go(void) {
+    char target[BR_URL_CAP];
+    target[0] = '\0';
+    if (strncmp(g_br.url, "http://", 7) != 0 && strncmp(g_br.url, "https://", 8) != 0) {
+        br_append(target, sizeof target, "http://");
+    }
+    br_append(target, sizeof target, g_br.url);
+    g_br.top = 0;
+    g_br.text_len = 0;
+    g_br.status[0] = '\0';
+    br_append(g_br.status, sizeof g_br.status, "Loading ");
+    br_append(g_br.status, sizeof g_br.status, target);
+    browser_redraw();                       /* show "Loading" before the wait */
+
+    for (int hop = 0;; hop++) {
+        net_http_result_t res;
+        if (!net_http_get(target, g_br_raw, BR_RAW_CAP, &res)) {
+            g_br.status[0] = '\0';
+            br_append(g_br.status, sizeof g_br.status, "Could not load: ");
+            br_append(g_br.status, sizeof g_br.status, res.error);
+            break;
+        }
+        bool redirect = res.status == 301 || res.status == 302 || res.status == 303 ||
+                        res.status == 307 || res.status == 308;
+        if (redirect && res.location[0] != '\0' && hop < BR_MAX_HOPS) {
+            char next[BR_URL_CAP];
+            if (!br_resolve(target, res.location, next, sizeof next)) {
+                g_br.status[0] = '\0';
+                br_append(g_br.status, sizeof g_br.status, "Redirect to an address this browser cannot follow");
+                break;
+            }
+            target[0] = '\0';
+            br_append(target, sizeof target, next);
+            continue;
+        }
+        /* Plain text shows as it is; anything else goes through the tag stripper. */
+        bool plain = strncmp(res.content_type, "text/plain", 10) == 0;
+        if (plain) {
+            uint32_t n = res.body_len < BR_TEXT_CAP - 1 ? res.body_len : BR_TEXT_CAP - 1;
+            for (uint32_t i = 0; i < n; i++) {
+                uint8_t c = res.body[i];
+                g_br_text[i] = (c == '\r' || c == '\t') ? ' ' : (c >= 0x7f ? '?' : (char)c);
+            }
+            g_br_text[n] = '\0';
+            g_br.text_len = n;
+        } else {
+            g_br.text_len = html_to_text(res.body, res.body_len, g_br_text, BR_TEXT_CAP);
+        }
+        g_br.status[0] = '\0';
+        br_append(g_br.status, sizeof g_br.status, "HTTP ");
+        br_append_uint(g_br.status, sizeof g_br.status, (uint32_t)res.status);
+        br_append(g_br.status, sizeof g_br.status, ", ");
+        br_append_uint(g_br.status, sizeof g_br.status, res.body_len);
+        br_append(g_br.status, sizeof g_br.status, " bytes");
+        break;
+    }
+    /* The bar shows the address that was finally loaded. */
+    if (target[0] != '\0') {
+        uint32_t n = 0;
+        while (target[n] != '\0' && n + 1 < BR_URL_CAP) {
+            g_br.url[n] = target[n];
+            n++;
+        }
+        g_br.url[n] = '\0';
+        g_br.url_len = n;
+    }
+    browser_redraw();
+}
+
+/* Keys typed into the focused browser. Esc closes the window (the desktop stays up). */
+static void browser_key(int c) {
+    if (c == 0x1b) {
+        close_window(g_focus);
+        return;
+    }
+    if (c == '\t') {
+        focus_next();
+        return;
+    }
+    if (c == '\n') {
+        browser_go();
+        return;
+    }
+    if (c == 0x08 || c == 0x7f) {
+        if (g_br.url_len == 0) {
+            g_repaint = false;
+            return;
+        }
+        g_br.url[--g_br.url_len] = '\0';
+    } else if (c >= 0x20 && c < 0x7f) {
+        if (g_br.url_len + 1 >= BR_URL_CAP) {
+            g_repaint = false;
+            return;
+        }
+        g_br.url[g_br.url_len++] = (char)c;
+        g_br.url[g_br.url_len] = '\0';
+    } else if (c == SHELL_KEY_UP) {
+        browser_scroll(-1);
+        return;
+    } else if (c == SHELL_KEY_DOWN) {
+        browser_scroll(1);
+        return;
+    } else {
+        g_repaint = false;
+        return;
+    }
+    browser_redraw();
+}
+
 /* Keys typed into the focused editor. Esc closes the editor (it does not leave the
  * desktop, so a stray Esc cannot discard the window); Tab moves focus as elsewhere. */
 static void editor_key(int c) {
@@ -1056,6 +1354,11 @@ static bool handle_key(int c) {
 
     if (g_focus >= 0 && g_win[g_focus].used && g_win[g_focus].app == APP_EDITOR) {
         editor_key(c);
+        return false;
+    }
+
+    if (g_focus >= 0 && g_win[g_focus].used && g_win[g_focus].app == APP_BROWSER) {
+        browser_key(c);
         return false;
     }
 

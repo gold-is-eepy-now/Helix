@@ -115,6 +115,26 @@ attribute, but real hardware does, so the cache-disable bit is set deliberately.
    zero-window persist timer of its own, and no TIME_WAIT. Only one open at a time is
    tested.
 
+9. **HTTP/1.1 client — built and QEMU-tested (plain http:// only).** Code: `net_http.c`.
+   One GET per connection with `Connection: close`. The URL gives host, port (80 by default)
+   and path; a name is resolved with the DNS client, a dotted address is used as it is. The
+   whole response is read into the caller's buffer. The headers end at the blank line.
+   Bodies are framed by `Transfer-Encoding: chunked`, by `Content-Length`, or by the close, in
+   that order. Chunked data is decoded in place. Kernel command `fetch`. Tests in the suite:
+   a closed port (`connect failed`), a name that does not exist (`no such host`), and an
+   `https://` address (refused). Checked by hand against a local Python server: a plain page
+   (200, 527 bytes), a 302 redirect (reported), and a chunked reply (42 bytes, decoded).
+   Not done: https, keep-alive, cookies, compression, and redirects in the kernel command
+   (the Browser follows them, `fetch` only reports them).
+10. **Browser window — built and QEMU-tested (plain http:// only).** Code: `desktop.c`
+   (the Browser app), `html_text.c` (tag stripping). Address bar, status line, and the page as
+   plain text. Text is wrapped at 54 columns, breaking at spaces. Verified in QEMU with
+   screenshots: an address on a local server loads and shows the text; a redirect is followed
+   and the address bar shows the final address. Limits: the text is capped at 64 KB and the raw
+   response at 256 KB; no images, no CSS, no layout beyond line breaks; the fetch blocks the
+   desktop while it waits. Nothing in the test suite opens the window: this part is checked by
+   hand.
+
 ## Known limits (stages 1–8)
 
 - One interface, one static address, no routing table beyond "the subnet, else

@@ -436,6 +436,13 @@ def main():
         # connect must fail cleanly rather than hang the shell. The success path is checked by hand.
         ser.send("tcpget 10.0.2.2 9 /\n")
         check("tcpget reports a failed connect to a closed port", "tcpget: connect to 10.0.2.2:9 failed", timeout=60)
+        # HTTP client error paths: each fails at a different step, without needing a server.
+        ser.send("fetch http://10.0.2.2:9/\n")
+        check("fetch reports a failed connect", "fetch: connect failed", timeout=60)
+        ser.send("fetch http://nonexistent.invalid/\n")
+        check("fetch reports a name that does not exist", "fetch: no such host", timeout=60)
+        ser.send("fetch https://example.com/\n")
+        check("fetch refuses https for now", "fetch: https is not supported yet", timeout=60)
 
         # Desktop: start it, open nothing, leave with Esc. This is the path that used
         # to fault when a process had run before it; the event log records the start.
