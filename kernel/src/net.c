@@ -11,11 +11,13 @@
 #include "net_arp.h"
 #include "net_ethernet.h"
 #include "net_ip.h"
+#include "net_udp.h"
 
 static uint8_t g_mac[6];
 static uint8_t g_ip[4]      = {10, 0, 2, 15};
 static uint8_t g_gateway[4] = {10, 0, 2, 2};
 static uint8_t g_netmask[4] = {255, 255, 255, 0};
+static uint8_t g_dns[4]     = {10, 0, 2, 3};
 static bool g_ready;
 
 void net_init(void) {
@@ -32,6 +34,16 @@ const uint8_t *net_mac(void) { return g_mac; }
 const uint8_t *net_ip_addr(void) { return g_ip; }
 const uint8_t *net_gateway(void) { return g_gateway; }
 const uint8_t *net_netmask(void) { return g_netmask; }
+const uint8_t *net_dns_server(void) { return g_dns; }
+
+void net_set_config(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gw[4], const uint8_t dns[4]) {
+    for (int i = 0; i < 4; i++) {
+        g_ip[i] = ip[i];
+        g_netmask[i] = mask[i];
+        g_gateway[i] = gw[i];
+        g_dns[i] = dns[i];
+    }
+}
 
 void net_poll(void) {
     /* On the stack, not static: an echo reply can send, which polls again and

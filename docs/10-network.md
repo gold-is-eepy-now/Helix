@@ -1,6 +1,6 @@
 # 10 — Network stack
 
-Status: **in progress** (M12). Stages 1–3 are built and QEMU-tested. Stages below are marked as they are built and
+Status: **in progress** (M12). Stages 1–4 and 6–7 are built and QEMU-tested; stage 5 is partly checked (see there). Stages below are marked as they are built and
 tested. Nothing here is implemented until its stage says so.
 
 ## Goal
@@ -82,16 +82,32 @@ attribute, but real hardware does, so the cache-disable bit is set deliberately.
    ICMP. **Checked here: the host has `ping_group_range` 1 0, so unprivileged ICMP is
    disabled and `ping 8.8.8.8` times out.** That is the host's policy, not a stack
    result; a host that allows unprivileged ICMP would need a fresh run to confirm.
-6. **UDP and DNS.** UDP send/receive, then name resolution through `10.0.2.3`.
-7. **DHCP.** Replace the static address with a lease.
+6. **UDP and DNS — built and QEMU-tested.** Code: `net_udp.c`, `net_dns.c`.
+   UDP has four bound ports, each with a four-datagram queue, and checks the length field;
+   checksums are 0 (legal for UDP over IPv4). The DNS client sends one A query to the
+   configured server (10.0.2.3 under QEMU) from port 40053, three attempts, and parses the
+   answer with name compression. Kernel command `nslookup <name>`; ring-3 `/bin/nslookup`
+   through `SYS_NET_RESOLVE` (syscall 37). Tests: `nslookup nonexistent.invalid` gets
+   "not found" from the kernel shell and from ring 3. Also checked by hand: `github.com` and
+   `pypi.org` resolve to the same addresses as the host's own resolver, over UDP through
+   QEMU's DNS. `ping <name>` in the kernel shell resolves the name first.
+7. **DHCP — built and QEMU-tested.** Code: `net_dhcp.c`. Discover (broadcast from
+   0.0.0.0), offer, request, ack; the ack sets the address, mask, router, DNS server and
+   lease time. Kernel command `dhcp`. Test: `dhcp` gets `10.0.2.15` from QEMU's server.
+   Not done: it runs when asked, not at boot; no renewal or rebinding (the lease time is
+   reported, not counted down); no ring-3 `dhcp`.
 8. **TCP.** Out of scope for this plan; separate document when started.
 
-## Known limits (stages 1–5)
+## Known limits (stages 1–7)
 
 - One interface, one static address, no routing table beyond "the subnet, else
   the gateway".
 - No IP fragmentation. Packets larger than the MTU are dropped with a log line.
-- No retransmission. A ping that gets no reply times out.
+- No retransmission. A ping that gets no reply times out. DNS retries its query twice.
+- UDP checksums are not computed or checked. A datagram to a port nobody bound is dropped
+  silently (no ICMP port unreachable).
+- DHCP has no renewal, so the lease expires silently after its time.
+- No DNS cache. No ARP aging.
 - Polling only, so a ping spins the CPU while it waits. Acceptable until the
   scheduler can block on the device.
 - Not tested on real hardware.

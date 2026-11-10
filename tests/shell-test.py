@@ -316,6 +316,10 @@ def main():
         ser.send("ping 10.0.2.2\n")
         check("ring-3 ping gets an echo reply from the gateway", "reply from 10.0.2.2: seq=1", timeout=60)
         check("ring-3 ping reports a summary", "4 sent, 4 received", timeout=60)
+        # DNS over UDP: ring-3 nslookup asks the kernel's resolver. The name ends in .invalid,
+        # so the answer is "no such name" from any server, with no internet needed.
+        ser.send("nslookup nonexistent.invalid\n")
+        check("ring-3 nslookup reports a name that does not exist", "nslookup: nonexistent.invalid: not found", timeout=60)
         # M9 spawn: the shell runs /bin/args as a child process (nested under the
         # kernel-started shell), and argv arrives intact.
         ser.send("args one two\n")
@@ -423,6 +427,11 @@ def main():
                 break
             ser.raw += data
         check_true("kernel ping gets a new echo reply from the gateway", got_new)
+        # DHCP: QEMU's DHCP server leases 10.0.2.15 (the same address the static config had).
+        ser.send("dhcp\n")
+        check("dhcp gets a lease from QEMU's DHCP server", "dhcp: lease 10.0.2.15", timeout=60)
+        ser.send("nslookup nonexistent.invalid\n")
+        check("kernel nslookup reports a name that does not exist", "nslookup: nonexistent.invalid: not found", timeout=60)
 
         # Desktop: start it, open nothing, leave with Esc. This is the path that used
         # to fault when a process had run before it; the event log records the start.

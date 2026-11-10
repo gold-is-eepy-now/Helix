@@ -38,6 +38,8 @@ extern const uint8_t user_blob_edit_start[];
 extern const uint8_t user_blob_edit_end[];
 extern const uint8_t user_blob_ping_start[];
 extern const uint8_t user_blob_ping_end[];
+extern const uint8_t user_blob_nslookup_start[];
+extern const uint8_t user_blob_nslookup_end[];
 
 static const userprog_t g_progs[] = {
     { "sh",   "/bin/sh",   user_blob_sh_start,   user_blob_sh_end },
@@ -57,6 +59,7 @@ static const userprog_t g_progs[] = {
     { "find", "/bin/find", user_blob_find_start, user_blob_find_end },
     { "edit", "/bin/edit", user_blob_edit_start, user_blob_edit_end },
     { "ping", "/bin/ping", user_blob_ping_start, user_blob_ping_end },
+    { "nslookup", "/bin/nslookup", user_blob_nslookup_start, user_blob_nslookup_end },
 };
 
 #define PROG_COUNT (sizeof(g_progs) / sizeof(g_progs[0]))

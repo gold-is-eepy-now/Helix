@@ -14,6 +14,7 @@
 #include "net_arp.h"
 #include "net_ethernet.h"
 #include "net_icmp.h"
+#include "net_udp.h"
 
 #define IP_HLEN      20
 #define IP_TTL       64
@@ -50,6 +51,11 @@ bool net_ip_warm(const uint8_t dst[4]) {
 }
 
 bool net_ip_send(const uint8_t dst[4], uint8_t proto, const uint8_t *payload, uint16_t len) {
+    return net_ip_send_from(net_ip_addr(), dst, proto, payload, len);
+}
+
+bool net_ip_send_from(const uint8_t src[4], const uint8_t dst[4], uint8_t proto,
+                      const uint8_t *payload, uint16_t len) {
     /* Static: a packet is too big for the kernel stack. The next hop is resolved
      * before the buffer is filled, so a nested send during resolution cannot clash. */
     static uint8_t pkt[NET_MAX_FRAME - NET_ETH_HLEN];
@@ -57,11 +63,19 @@ bool net_ip_send(const uint8_t dst[4], uint8_t proto, const uint8_t *payload, ui
     if (!net_ready()) return false;
     if (len > sizeof pkt - IP_HLEN) return false;
 
-    const uint8_t *hop = on_subnet(dst) ? dst : net_gateway();
+    /* Broadcast needs no ARP: it goes to the all-ones MAC. DHCP uses it before we have
+     * an address, so the source may be 0.0.0.0 here. */
+    static const uint8_t broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    static const uint8_t broadcast_ip[4] = {255, 255, 255, 255};
     uint8_t mac[6];
-    if (!net_arp_resolve(hop, mac, 1000)) {
-        klog_note(KLOG_INPUT, "[net] no ARP reply from %u.%u.%u.%u\n", hop[0], hop[1], hop[2], hop[3]);
-        return false;
+    if (same4(dst, broadcast_ip)) {
+        for (int i = 0; i < 6; i++) mac[i] = broadcast_mac[i];
+    } else {
+        const uint8_t *hop = on_subnet(dst) ? dst : net_gateway();
+        if (!net_arp_resolve(hop, mac, 1000)) {
+            klog_note(KLOG_INPUT, "[net] no ARP reply from %u.%u.%u.%u\n", hop[0], hop[1], hop[2], hop[3]);
+            return false;
+        }
     }
 
     uint16_t total = (uint16_t)(IP_HLEN + len);
@@ -73,7 +87,6 @@ bool net_ip_send(const uint8_t dst[4], uint8_t proto, const uint8_t *payload, ui
     pkt[8] = IP_TTL;
     pkt[9] = proto;
     net_put16(pkt + 10, 0);                 /* checksum is zero while it is computed */
-    const uint8_t *src = net_ip_addr();
     for (int i = 0; i < 4; i++) {
         pkt[12 + i] = src[i];
         pkt[16 + i] = dst[i];
@@ -105,5 +118,7 @@ void net_ip_input(const uint8_t *frame, uint16_t n) {
     }
     if (ip[9] == NET_IP_PROTO_ICMP) {
         net_icmp_input(ip + 12, ip + hl, (uint16_t)(total - hl));
+    } else if (ip[9] == NET_IP_PROTO_UDP) {
+        net_udp_input(ip + 12, ip + hl, (uint16_t)(total - hl));
     }
 }

@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #define NET_IP_PROTO_ICMP 1
+#define NET_IP_PROTO_UDP  17
 
 /* The Internet checksum: one's-complement sum of 16-bit big-endian words, inverted.
  * Run over a header that already holds its checksum, the result is 0. */
@@ -17,6 +18,11 @@ uint16_t net_checksum(const uint8_t *data, uint16_t len);
 /* Send `len` bytes of `payload` to `dst` as protocol `proto`. False if the next hop
  * cannot be resolved, the packet is too big, or the card refuses it. */
 bool net_ip_send(const uint8_t dst[4], uint8_t proto, const uint8_t *payload, uint16_t len);
+
+/* As net_ip_send, with an explicit source address. DHCP needs this: before a lease
+ * the source is 0.0.0.0. A broadcast destination is sent to the all-ones MAC. */
+bool net_ip_send_from(const uint8_t src[4], const uint8_t dst[4], uint8_t proto,
+                      const uint8_t *payload, uint16_t len);
 
 /* Resolve the next hop for `dst` without sending anything. A ping calls this first so
  * the ARP wait does not count as round-trip time. False if the hop never answers. */

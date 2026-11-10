@@ -87,6 +87,7 @@ static inline uint64_t helix_syscall(uint64_t native_num,
 #define SYS_RMDIR              34   /* rmdir(path): empty directories only */
 #define SYS_TRUNCATE           35   /* truncate(path, size) */
 #define SYS_NET_PING           36   /* net_ping(ipv4_be, seq, timeout_ms) -> rtt in us, or -1 */
+#define SYS_NET_RESOLVE        37   /* net_resolve(name) -> ipv4_be, -1 not found, -2 no answer */
 
 /* Result of SYS_STAT. Same layout as kernel/src/syscall_fs.c's user_stat_t. */
 struct helix_stat {
@@ -139,6 +140,10 @@ int helix_truncate(const char *path, uint64_t size);
 /* One ICMP echo through the kernel stack. ip is the IPv4 address with the first octet
  * in the top byte. Returns the round-trip time in microseconds, or -1 on timeout. */
 int64_t helix_net_ping(uint32_t ip, uint16_t seq, uint32_t timeout_ms);
+
+/* Resolve a host name through the kernel. Returns the IPv4 address (first octet in the
+ * top byte), -1 if the name does not exist, or -2 if the server did not answer. */
+int64_t helix_net_resolve(const char *name);
 int64_t helix_read(int fd, void *buf, size_t count);
 int64_t helix_write(int fd, const void *buf, size_t count);
 int helix_close(int fd);

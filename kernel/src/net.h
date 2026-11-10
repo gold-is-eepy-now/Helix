@@ -27,6 +27,11 @@ const uint8_t *net_mac(void);
 const uint8_t *net_ip_addr(void);
 const uint8_t *net_gateway(void);
 const uint8_t *net_netmask(void);
+/* The DNS server: 10.0.2.3 (QEMU's resolver) until DHCP says otherwise. */
+const uint8_t *net_dns_server(void);
+
+/* Replace the interface configuration. Used by DHCP once it has a lease. */
+void net_set_config(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gw[4], const uint8_t dns[4]);
 
 /* Drain the receive ring and dispatch each frame by EtherType. */
 void net_poll(void);

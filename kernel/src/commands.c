@@ -36,6 +36,8 @@
 #include "display_surface.h"
 #include "input_device.h"
 #include "net.h"
+#include "net_dhcp.h"
+#include "net_dns.h"
 #include "net_icmp.h"
 #include "net_interface.h"
 #include "e1000.h"
@@ -769,6 +771,48 @@ static void cmd_init(int argc, char **argv) {
 /* log            print the recent kernel events, oldest first
  * log clear      forget the events recorded so far
  * log serial on|off   echo every event to the serial console as it happens */
+/* nslookup NAME: resolve a host name with the DNS server (10.0.2.3 under QEMU). */
+static void cmd_nslookup(int argc, char **argv) {
+    if (argc < 2) {
+        kprintf("usage: nslookup <name>\n");
+        return;
+    }
+    if (!net_ready()) {
+        kprintf("nslookup: no network card (QEMU: -netdev user,id=n0 -device e1000,netdev=n0)\n");
+        return;
+    }
+    uint8_t ip[4];
+    int r = net_dns_resolve(argv[1], ip, 3000);
+    if (r == NET_DNS_OK) {
+        kprintf("%s is %u.%u.%u.%u\n", argv[1], ip[0], ip[1], ip[2], ip[3]);
+    } else if (r == NET_DNS_NOTFOUND) {
+        kprintf("nslookup: %s: not found\n", argv[1]);
+    } else if (r == NET_DNS_SERVFAIL) {
+        kprintf("nslookup: %s: the DNS server failed (rcode %d)\n", argv[1], net_dns_last_rcode());
+    } else {
+        const uint8_t *s = net_dns_server();
+        kprintf("nslookup: no answer from %u.%u.%u.%u\n", s[0], s[1], s[2], s[3]);
+    }
+}
+
+/* dhcp: ask for a lease. On success the interface uses the lease's address and routes. */
+static void cmd_dhcp(int argc, char **argv) {
+    (void)argc; (void)argv;
+    if (!net_ready()) {
+        kprintf("dhcp: no network card (QEMU: -netdev user,id=n0 -device e1000,netdev=n0)\n");
+        return;
+    }
+    dhcp_lease_t l;
+    if (!net_dhcp_configure(6000, &l)) {
+        kprintf("dhcp: no lease (no DHCP server answered)\n");
+        return;
+    }
+    kprintf("dhcp: lease %u.%u.%u.%u mask %u.%u.%u.%u router %u.%u.%u.%u dns %u.%u.%u.%u server %u.%u.%u.%u, %u s\n",
+            l.ip[0], l.ip[1], l.ip[2], l.ip[3], l.mask[0], l.mask[1], l.mask[2], l.mask[3],
+            l.router[0], l.router[1], l.router[2], l.router[3], l.dns[0], l.dns[1], l.dns[2], l.dns[3],
+            l.server[0], l.server[1], l.server[2], l.server[3], l.lease_seconds);
+}
+
 /* ping a.b.c.d: four echo requests, one second each. The round-trip time is in
  * microseconds, measured with the TSC (calibrated at boot). */
 static void cmd_ping(int argc, char **argv) {
@@ -776,14 +820,18 @@ static void cmd_ping(int argc, char **argv) {
         kprintf("usage: ping <a.b.c.d>\n");
         return;
     }
-    uint8_t ip[4];
-    if (!net_parse_ip(argv[1], ip)) {
-        kprintf("ping: not an IPv4 address: %s\n", argv[1]);
-        return;
-    }
     if (!net_ready()) {
         kprintf("ping: no network card (QEMU: -netdev user,id=n0 -device e1000,netdev=n0)\n");
         return;
+    }
+    uint8_t ip[4];
+    if (!net_parse_ip(argv[1], ip)) {
+        /* Not a dotted quad: treat it as a host name and ask the DNS server. */
+        if (net_dns_resolve(argv[1], ip, 3000) != NET_DNS_OK) {
+            kprintf("ping: cannot resolve %s\n", argv[1]);
+            return;
+        }
+        kprintf("ping: %s is %u.%u.%u.%u\n", argv[1], ip[0], ip[1], ip[2], ip[3]);
     }
     kprintf("PING %u.%u.%u.%u: 32 data bytes\n", ip[0], ip[1], ip[2], ip[3]);
     int received = 0;
@@ -2166,7 +2214,9 @@ const command_t helix_commands[] = {
     {"desktop", "start the graphical desktop (Start, My Computer, Esc to leave)", cmd_desktop},
     {"log",     "show the kernel event log (log clear | log serial on|off)", cmd_log},
     {"net",     "network card: MAC, link, frame counters (net test: ARP self-test)", cmd_net},
-    {"ping",    "ping an IPv4 address: ping <a.b.c.d> (four echo requests)", cmd_ping},
+    {"ping",    "ping an address or host name: ping <a.b.c.d | name> (four echo requests)", cmd_ping},
+    {"nslookup", "resolve a host name with the DNS server: nslookup <name>", cmd_nslookup},
+    {"dhcp",    "get a network address from a DHCP server (replaces the static address)", cmd_dhcp},
     {"halt",    "halt the machine",                     cmd_halt},
     {"reboot",  "restart the machine",                  cmd_reboot},
     {"fsinfo",  "show filesystem information",          cmd_fsinfo},

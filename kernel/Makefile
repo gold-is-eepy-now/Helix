@@ -82,7 +82,7 @@ USER_SH_ELF   := $(USER_BLOB_DIR)/sh.elf
 USER_INIT_ELF := $(USER_BLOB_DIR)/init.elf
 # Every userspace/bin/<name>.c becomes /bin/<name>. Add the name here and the .c
 # file there: the rule, the embedded blob and the program table follow from it.
-USER_BIN_NAMES := args env echo true false cat ls mkdir rmdir rm touch cp find edit ping
+USER_BIN_NAMES := args env echo true false cat ls mkdir rmdir rm touch cp find edit ping nslookup
 USER_BIN_ELFS  := $(foreach n,$(USER_BIN_NAMES),$(USER_BLOB_DIR)/$(n).elf)
 USER_ELFS      := $(USER_SH_ELF) $(USER_INIT_ELF) $(USER_BIN_ELFS)
 USER_BLOB_S   := $(USER_BLOB_DIR)/user_blob.S

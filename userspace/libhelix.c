@@ -86,6 +86,11 @@ int64_t helix_net_ping(uint32_t ip, uint16_t seq, uint32_t timeout_ms)
     return (int64_t)helix_syscall(SYS_NET_PING, ip, seq, timeout_ms, 0, 0, 0, 0);
 }
 
+int64_t helix_net_resolve(const char *name)
+{
+    return (int64_t)helix_syscall(SYS_NET_RESOLVE, (uint64_t)(uintptr_t)name, 0, 0, 0, 0, 0, 0);
+}
+
 int helix_open(const char *path, int flags)
 {
     uint64_t r = helix_syscall(SYS_OPEN, (uint64_t)(uintptr_t)path, (uint64_t)flags, 0, 0, 0, 0, 0);
