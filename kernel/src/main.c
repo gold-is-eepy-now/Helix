@@ -47,6 +47,7 @@
 #include "usb_host.h"
 #include "e1000.h"
 #include "net.h"
+#include "virtio_gpu.h"
 #include "ext4.h"
 
 /* M11: ext4 root time source (wall-clock seconds since the Unix epoch). */
@@ -220,6 +221,7 @@ static void kernel_main_continue(void) {
     /* The network card (Intel e1000). Absent cards are reported by `net`, not at boot. */
     e1000_init();
     net_init();                 /* the IPv4 stack on top of the card; see docs/10-network.md */
+    virtio_gpu_init();          /* the virtio-gpu display list, if QEMU provides the device */
 
     /* M9: install the programs into /bin, then start PID 1 (/bin/init) in ring 3.
      * init starts /bin/sh, so this runs after USB (the keyboard may be on USB) and

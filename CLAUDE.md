@@ -161,6 +161,9 @@ Also, in the same change:
 - **Implemented (kernel event log):** `klog` ring of scheduler, syscall, process,
   shell, input and exception events; `log` command; dumped on CPU exceptions.
   Machine-tested.
+- **Implemented (graphics, step 1, QEMU-tested only):** a virtio 1.0 PCI transport
+  (`kernel/src/virtio.c`) and the virtio-gpu display list (`virtio_gpu.c`, shell `gpu`).
+  The desktop still draws to the UEFI GOP framebuffer. See docs/12-graphics.md.
 - **Implemented (desktop, basic, QEMU-tested only):** `desktop` command: teal
   desktop, My Computer, About, Terminal, Text Editor and Browser windows (the Browser loads plain http:// pages and shows them as text; the Terminal runs kernel shell
   commands and `exec <path>`, output shown in the window; keyboard-only programs

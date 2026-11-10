@@ -39,6 +39,7 @@
 #include "net_dhcp.h"
 #include "net_dns.h"
 #include "net_http.h"
+#include "virtio_gpu.h"
 #include "net_tcp.h"
 #include "net_icmp.h"
 #include "net_interface.h"
@@ -813,6 +814,24 @@ static void cmd_dhcp(int argc, char **argv) {
             l.ip[0], l.ip[1], l.ip[2], l.ip[3], l.mask[0], l.mask[1], l.mask[2], l.mask[3],
             l.router[0], l.router[1], l.router[2], l.router[3], l.dns[0], l.dns[1], l.dns[2], l.dns[3],
             l.server[0], l.server[1], l.server[2], l.server[3], l.lease_seconds);
+}
+
+/* gpu: list the display outputs the virtio-gpu device reports. */
+static void cmd_gpu(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    uint32_t n = virtio_gpu_scanout_count();
+    if (n == 0) {
+        kprintf("gpu: no virtio-gpu device ready (QEMU: -device virtio-gpu-pci)\n");
+        return;
+    }
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t w = 0, h = 0;
+        bool on = false;
+        if (!virtio_gpu_scanout(i, &w, &h, &on)) continue;
+        if (on) kprintf("gpu: scanout %u: %ux%u\n", i, w, h);
+        else kprintf("gpu: scanout %u: off\n", i);
+    }
 }
 
 /* fetch http://host[:port]/path: an HTTP GET that prints the status, the body length and
@@ -2305,6 +2324,7 @@ const command_t helix_commands[] = {
     {"nslookup", "resolve a host name with the DNS server: nslookup <name>", cmd_nslookup},
     {"tcpget", "fetch a path over TCP: tcpget <a.b.c.d> <port> <path>", cmd_tcpget},
     {"fetch", "HTTP GET of an http:// address: fetch <http://host[:port]/path>", cmd_fetch},
+    {"gpu", "list the display outputs of the virtio-gpu device", cmd_gpu},
     {"dhcp",    "get a network address from a DHCP server (replaces the static address)", cmd_dhcp},
     {"halt",    "halt the machine",                     cmd_halt},
     {"reboot",  "restart the machine",                  cmd_reboot},

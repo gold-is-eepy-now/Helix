@@ -202,6 +202,8 @@ def main():
         # Network card (Intel e1000) with QEMU's user-mode network: a real gateway
         # answers our ARP request. See docs/10-network.md.
         "-netdev", "user,id=n0", "-device", "e1000,netdev=n0",
+        # Graphics card: a virtio-gpu device, found by its PCI IDs. See docs/12-graphics.md.
+        "-device", "virtio-gpu-pci",
         "-display", "none",
         "-no-reboot",
     ]
@@ -437,6 +439,8 @@ def main():
         ser.send("tcpget 10.0.2.2 9 /\n")
         check("tcpget reports a failed connect to a closed port", "tcpget: connect to 10.0.2.2:9 failed", timeout=60)
         # HTTP client error paths: each fails at a different step, without needing a server.
+        ser.send("gpu\n")
+        check("gpu lists the virtio-gpu scanout", "gpu: scanout 0: ", timeout=60)
         ser.send("fetch http://10.0.2.2:9/\n")
         check("fetch reports a failed connect", "fetch: connect failed", timeout=60)
         ser.send("fetch http://nonexistent.invalid/\n")
