@@ -96,9 +96,26 @@ attribute, but real hardware does, so the cache-disable bit is set deliberately.
    lease time. Kernel command `dhcp`. Test: `dhcp` gets `10.0.2.15` from QEMU's server.
    Not done: it runs when asked, not at boot; no renewal or rebinding (the lease time is
    reported, not counted down); no ring-3 `dhcp`.
-8. **TCP.** Out of scope for this plan; separate document when started.
+8. **TCP — built and QEMU-tested (client only).** Code: `net_tcp.c`, `net_tcp.h`.
+   Active opens only: `net_tcp_connect` sends SYN with a 1400-byte MSS and waits for SYN-ACK
+   (retrying the SYN once a second). Four connection slots. Each slot has an 8 KB receive
+   ring, and the window it advertises is the free space in that ring. Sends go out in
+   segments of up to 1400 bytes, limited by the peer's window, and wait for ACKs; on a
+   timeout they go back to the first unacknowledged byte and resend (go-back-N, five
+   retries, one-second timeout). Out-of-order segments are dropped and re-acknowledged.
+   Close sends FIN and waits up to a second for the peer's FIN. The checksum covers the
+   pseudo-header and is summed in place, so a segment of any length up to the frame
+   size is checked. Kernel command `tcpget <a.b.c.d> <port> <path>` sends a
+   HTTP/1.0 GET and prints the byte count and the status line.
+   Tests: `tcpget` to a closed port reports the connect failure (in the suite). Checked by
+   hand: `tcpget 10.0.2.2 8765 /` against a local `python3 -m http.server` on the host
+   (QEMU maps 10.0.2.2 to the host's loopback) receives the whole 16512-byte response.
+   Not done: no listening sockets, no window scaling, SACK, timestamps or fast
+   retransmit (a lost segment waits for the timeout), no congestion control, no
+   zero-window persist timer of its own, and no TIME_WAIT. Only one open at a time is
+   tested.
 
-## Known limits (stages 1–7)
+## Known limits (stages 1–8)
 
 - One interface, one static address, no routing table beyond "the subnet, else
   the gateway".

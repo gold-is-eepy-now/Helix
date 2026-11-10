@@ -312,6 +312,7 @@ shows it; typing `myprog arg1 arg2` runs it.
 | `net` | network card: MAC, link state, and frame counters (`net test` sends an ARP request to the QEMU gateway 10.0.2.2 and waits for the reply). Needs `-netdev user,id=n0 -device e1000,netdev=n0`; without a card it says so |
 | `ping <a.b.c.d \| name>` | four ICMP echo requests, one second each; prints each reply's round-trip time in microseconds, then a count. `ping 10.0.2.2` gets replies under QEMU. A dead address times out. A host name is resolved first |
 | `nslookup <name>` | resolve a name to an IPv4 address with the DNS server (10.0.2.3 under QEMU). Prints "not found" for a name that does not exist |
+| `tcpget <a.b.c.d> <port> <path>` | open a TCP connection, send `GET <path>` (HTTP/1.0), and print the byte count and the status line. Example: `tcpget 10.0.2.2 8765 /` against a host web server |
 | `dhcp` | get an address, mask, router and DNS server from a DHCP server, replacing the static configuration. Runs when asked, not at boot |
 
 The ring-3 `/bin/ping <a.b.c.d>` does the same through `SYS_NET_PING` (syscall 36): the kernel sends and times each echo, and the program prints the results. `/bin/nslookup <name>` asks the kernel to resolve a name (`SYS_NET_RESOLVE`, syscall 37).

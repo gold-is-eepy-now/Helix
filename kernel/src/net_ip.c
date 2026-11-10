@@ -14,6 +14,7 @@
 #include "net_arp.h"
 #include "net_ethernet.h"
 #include "net_icmp.h"
+#include "net_tcp.h"
 #include "net_udp.h"
 
 #define IP_HLEN      20
@@ -120,5 +121,7 @@ void net_ip_input(const uint8_t *frame, uint16_t n) {
         net_icmp_input(ip + 12, ip + hl, (uint16_t)(total - hl));
     } else if (ip[9] == NET_IP_PROTO_UDP) {
         net_udp_input(ip + 12, ip + hl, (uint16_t)(total - hl));
+    } else if (ip[9] == NET_IP_PROTO_TCP) {
+        net_tcp_input(ip + 12, ip + 16, ip + hl, (uint16_t)(total - hl));
     }
 }

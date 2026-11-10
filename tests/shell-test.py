@@ -432,6 +432,10 @@ def main():
         check("dhcp gets a lease from QEMU's DHCP server", "dhcp: lease 10.0.2.15", timeout=60)
         ser.send("nslookup nonexistent.invalid\n")
         check("kernel nslookup reports a name that does not exist", "nslookup: nonexistent.invalid: not found", timeout=60)
+        # TCP: nothing listens on port 9 of the host loopback (QEMU maps 10.0.2.2 there), so the
+        # connect must fail cleanly rather than hang the shell. The success path is checked by hand.
+        ser.send("tcpget 10.0.2.2 9 /\n")
+        check("tcpget reports a failed connect to a closed port", "tcpget: connect to 10.0.2.2:9 failed", timeout=60)
 
         # Desktop: start it, open nothing, leave with Esc. This is the path that used
         # to fault when a process had run before it; the event log records the start.

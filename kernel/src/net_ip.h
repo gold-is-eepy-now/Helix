@@ -10,6 +10,7 @@
 
 #define NET_IP_PROTO_ICMP 1
 #define NET_IP_PROTO_UDP  17
+#define NET_IP_PROTO_TCP  6
 
 /* The Internet checksum: one's-complement sum of 16-bit big-endian words, inverted.
  * Run over a header that already holds its checksum, the result is 0. */

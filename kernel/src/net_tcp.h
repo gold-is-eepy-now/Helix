@@ -1,0 +1,31 @@
+/* net_tcp.h — TCP client connections: connect, send, receive, close.
+ *
+ * Scope: active opens only (we connect out; nothing listens). Data is delivered in order.
+ * Out-of-order segments are dropped and re-sent by the peer. Sending is stop-and-wait
+ * per window with go-back-N retransmission after a timeout. Options: MSS is sent in the
+ * SYN; nothing else (no window scaling, SACK or timestamps). See docs/10-network.md. */
+#ifndef HELIX_NET_TCP_H
+#define HELIX_NET_TCP_H
+
+#include <stdint.h>
+
+#define NET_TCP_CONNS 4
+
+/* Open a connection to ip:port. Returns a connection id, or -1 (no free slot, timeout,
+ * or refused). Blocks, polling the network, until established or timeout_ms passes. */
+int net_tcp_connect(const uint8_t ip[4], uint16_t port, uint32_t timeout_ms);
+
+/* Send all of data. Returns len, or -1 if the peer stopped acknowledging. Blocks. */
+int net_tcp_send(int conn, const uint8_t *data, uint32_t len, uint32_t timeout_ms);
+
+/* Receive up to cap bytes. Returns the count (at least 1), 0 when the peer has closed
+ * and everything it sent has been read, or -1 on timeout or reset. */
+int net_tcp_recv(int conn, uint8_t *buf, uint32_t cap, uint32_t timeout_ms);
+
+/* Send FIN, wait briefly for the peer's FIN, and free the slot. */
+void net_tcp_close(int conn);
+
+/* Called by net_ip_input for each TCP segment. dst is our address. */
+void net_tcp_input(const uint8_t src[4], const uint8_t dst[4], const uint8_t *seg, uint16_t len);
+
+#endif /* HELIX_NET_TCP_H */

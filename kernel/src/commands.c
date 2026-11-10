@@ -38,6 +38,7 @@
 #include "net.h"
 #include "net_dhcp.h"
 #include "net_dns.h"
+#include "net_tcp.h"
 #include "net_icmp.h"
 #include "net_interface.h"
 #include "e1000.h"
@@ -811,6 +812,69 @@ static void cmd_dhcp(int argc, char **argv) {
             l.ip[0], l.ip[1], l.ip[2], l.ip[3], l.mask[0], l.mask[1], l.mask[2], l.mask[3],
             l.router[0], l.router[1], l.router[2], l.router[3], l.dns[0], l.dns[1], l.dns[2], l.dns[3],
             l.server[0], l.server[1], l.server[2], l.server[3], l.lease_seconds);
+}
+
+/* tcpget a.b.c.d PORT PATH: connect over TCP, send a GET, print the first line of the
+ * reply. A check of the TCP layer; the browser comes later. */
+static void cmd_tcpget(int argc, char **argv) {
+    if (argc < 4) {
+        kprintf("usage: tcpget <a.b.c.d> <port> <path>\n");
+        return;
+    }
+    if (!net_ready()) {
+        kprintf("tcpget: no network card (QEMU: -netdev user,id=n0 -device e1000,netdev=n0)\n");
+        return;
+    }
+    uint8_t ip[4];
+    if (!net_parse_ip(argv[1], ip)) {
+        kprintf("tcpget: %s is not an IPv4 address\n", argv[1]);
+        return;
+    }
+    uint32_t port = 0;
+    for (const char *p = argv[2]; *p != '\0'; p++) {
+        if (*p < '0' || *p > '9') { port = 0; break; }
+        port = port * 10 + (uint32_t)(*p - '0');
+        if (port > 65535u) break;
+    }
+    if (port == 0 || port > 65535u) {
+        kprintf("tcpget: bad port %s\n", argv[2]);
+        return;
+    }
+    int conn = net_tcp_connect(ip, (uint16_t)port, 3000);
+    if (conn < 0) {
+        kprintf("tcpget: connect to %s:%u failed\n", argv[1], port);
+        return;
+    }
+    uint8_t req[320];
+    uint32_t n = 0;
+    static const char head[] = "GET ";
+    static const char tail[] = " HTTP/1.0\r\nHost: helix\r\nConnection: close\r\n\r\n";
+    for (const char *s = head; *s != '\0'; s++) req[n++] = (uint8_t)*s;
+    for (const char *s = argv[3]; *s != '\0' && n < 200; s++) req[n++] = (uint8_t)*s;
+    for (const char *s = tail; *s != '\0'; s++) req[n++] = (uint8_t)*s;
+    if (net_tcp_send(conn, req, n, 3000) < 0) {
+        kprintf("tcpget: send failed\n");
+        net_tcp_close(conn);
+        return;
+    }
+    static char resp[512];
+    uint32_t got = 0, total = 0;
+    for (;;) {
+        uint8_t chunk[256];
+        int r = net_tcp_recv(conn, chunk, sizeof chunk, 3000);
+        if (r <= 0) {
+            if (r < 0) kprintf("tcpget: receive timed out\n");
+            break;
+        }
+        total += (uint32_t)r;
+        for (int i = 0; i < r && got < sizeof resp - 1; i++) resp[got++] = (char)chunk[i];
+    }
+    resp[got] = '\0';
+    net_tcp_close(conn);
+    uint32_t cut = 0;
+    while (cut < got && resp[cut] != '\r' && resp[cut] != '\n') cut++;
+    resp[cut] = '\0';
+    kprintf("tcpget: %u byte(s); first line: %s\n", total, resp);
 }
 
 /* ping a.b.c.d: four echo requests, one second each. The round-trip time is in
@@ -2216,6 +2280,7 @@ const command_t helix_commands[] = {
     {"net",     "network card: MAC, link, frame counters (net test: ARP self-test)", cmd_net},
     {"ping",    "ping an address or host name: ping <a.b.c.d | name> (four echo requests)", cmd_ping},
     {"nslookup", "resolve a host name with the DNS server: nslookup <name>", cmd_nslookup},
+    {"tcpget", "fetch a path over TCP: tcpget <a.b.c.d> <port> <path>", cmd_tcpget},
     {"dhcp",    "get a network address from a DHCP server (replaces the static address)", cmd_dhcp},
     {"halt",    "halt the machine",                     cmd_halt},
     {"reboot",  "restart the machine",                  cmd_reboot},

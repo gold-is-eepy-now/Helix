@@ -261,15 +261,16 @@ not implemented.
 
 ## M12 — Networking and graphics 🚧
 
-- 🚧 Network-interface objects (`net_interface.c`). There is no network stack yet: no ARP, IPv4, UDP or TCP.
+- 🚧 Network-interface objects (`net_interface.c`). The network stack is partial: ARP, IPv4, ICMP, UDP, DNS, DHCP and a TCP client exist; no listening sockets, no HTTP yet.
 - 🚧 Display-surface objects (`display_surface.c`). There is no compositor yet.
 - 🚧 Network stack (`docs/10-network.md`): Intel e1000 driver (stage 1, built and
   QEMU-tested: `net`, `net test` gets an ARP reply from the gateway); Ethernet and
   ARP with a cache (stage 2); IPv4 and ICMP echo, where kernel-shell `ping 10.0.2.2`
   gets replies (stage 3); a ring-3 `/bin/ping` through `SYS_NET_PING` (stage 4); UDP and
-  a DNS client, `nslookup` (stage 6); DHCP, `dhcp` (stage 7). Built and QEMU-tested only.
-  Stage 5 (ping to internet addresses) is blocked here: the host disables unprivileged
-  ICMP. Stage 8 (TCP) is not started.
+  a DNS client, `nslookup` (stage 6); DHCP, `dhcp` (stage 7); TCP client with
+  `tcpget` (stage 8), which fetched a 16 KB page from a local HTTP server. Built and
+  QEMU-tested only. Stage 5 (ping to internet addresses) is blocked here: the host
+  disables unprivileged ICMP. HTTP client, browser window and HTTPS are not started.
 - 🚧 A basic graphical desktop (`desktop` command): teal desktop, My Computer and
   About windows, taskbar with clock, Start menu, a pointer driven by a PS/2
   mouse (QEMU's default pointer; `kernel/src/ps2_mouse.c`) or a USB mouse. A Terminal icon opens a window that runs kernel shell commands (the recovery shell) and `exec <path>` for ring-3 programs, with output shown in the window. Moving the pointer redraws only the arrow; typing in the Text Editor window (`note.txt` in the root, arrows, Home, End, Delete, a Save button) redraws only that window; dragging a title bar moves an outline and redraws the window on release. Tested in QEMU only (screenshots; PS/2 and USB mouse emulation); not on
