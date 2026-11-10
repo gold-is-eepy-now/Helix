@@ -22,7 +22,6 @@ native object model. They are not the foundation.
 > and networking/display/input object frameworks.
 > M1–M3 built the boot chain, interactive shell, and physical memory foundations.
 
-
 ---
 
 ## What is implemented today
