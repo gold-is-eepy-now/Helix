@@ -149,9 +149,10 @@ test: image
 	@BUILD_DIR="$(BUILD_DIR)" python3 tests/shell-test.py "$(IMAGE)"
 	@BUILD_DIR="$(BUILD_DIR)" python3 tests/usb-test.py "$(IMAGE)"
 	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/usb-hid-unit" tests/usb-hid-unit.c kernel/src/usb_hid.c && "$(BUILD_DIR)/test/usb-hid-unit"
-	@$(MAKE) -C runtime test
-	@$(MAKE) -C mac-darwin-compat test
-	@$(MAKE) -C donejs-compat test
+	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/t2-unit" tests/t2-unit.c kernel/src/t2_protocol.c && "$(BUILD_DIR)/test/t2-unit"
+	@$(MAKE) -C runtime test CC="$(HOST_CC)"
+	@$(MAKE) -C mac-darwin-compat test CC="$(HOST_CC)"
+	@$(MAKE) -C donejs-compat test CC="$(HOST_CC)"
 
 mac-darwin-compat:
 	@$(MAKE) -C mac-darwin-compat all
@@ -161,9 +162,9 @@ mac-test:
 
 test-with-linux-drivers: linux-submodule linux-drivers
 	@BUILD_DIR="$(BUILD_DIR)" python3 tests/shell-test.py "$(IMAGE)"
-	@$(MAKE) -C runtime test
-	@$(MAKE) -C mac-darwin-compat test
-	@$(MAKE) -C donejs-compat test
+	@$(MAKE) -C runtime test CC="$(HOST_CC)"
+	@$(MAKE) -C mac-darwin-compat test CC="$(HOST_CC)"
+	@$(MAKE) -C donejs-compat test CC="$(HOST_CC)"
 
 clean:
 	@$(MAKE) -C kernel BUILD_DIR="$(KERNEL_BUILD_DIR)" clean

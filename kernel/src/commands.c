@@ -38,6 +38,7 @@
 #include "shell.h"
 #include "usb_host.h"
 #include "usermode.h"
+#include "t2.h"
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -764,6 +765,12 @@ static void cmd_usb(int argc, char **argv) {
     (void)argc;
     (void)argv;
     usb_host_print_status();
+}
+
+static void cmd_t2info(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    t2_print_status();
 }
 
 static void cmd_version(int argc, char **argv) {
@@ -2044,6 +2051,7 @@ const command_t helix_commands[] = {
     {"color",   "turn ANSI colour on/off: color on|off", cmd_color},
     {"version", "show the OS version",                  cmd_version},
     {"usb",     "USB controllers, hubs and HID devices", cmd_usb},
+    {"t2info",  "Apple T2 security SoC mailbox status", cmd_t2info},
     {"usermode", "run a test program in ring 3", cmd_usermode},
     {"usershell", "run the userland shell in ring 3 (type exit to return)", cmd_usershell},
     {"init",    "run /bin/init (PID 1) in ring 3; it starts /bin/sh", cmd_init},

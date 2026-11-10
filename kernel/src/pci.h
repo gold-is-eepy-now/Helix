@@ -29,4 +29,9 @@ void pci_config_write32(uint8_t bus, uint8_t device, uint8_t function, uint8_t o
 bool pci_find_class(uint8_t class_code, uint8_t subclass, uint8_t prog_if, size_t index,
                     pci_function_t *out);
 
+/* Find the index-th function with the given vendor / device ID, scanning bus
+ * 0 to 255. Returns false when there is no such function. */
+bool pci_find_device(uint16_t vendor_id, uint16_t device_id, size_t index,
+                     pci_function_t *out);
+
 #endif /* HELIX_PCI_H */

@@ -158,6 +158,14 @@ Also, in the same change:
 - **Implemented (LC-1, Linux compat):** `compat/include/linux/*` headers (types, slab, spinlock, atomic, mutex, module_init, printk) and a self-test driver run at boot. See docs/08-linux-compat.md.
 - **Implemented (Mac/Darwin compat):** `mac-darwin-compat/` subsystem with 64-bit Mach-O loader, Darwin BSD & Mach trap translation, Darwin process runtime (`darwin_runtime.c`), Darwin `launchd` PID 1 daemon with plist service loading and `launchctl` CLI (`launchd.c`), Mac-like case-insensitive filesystem, extended attributes (xattr), property list (.plist) engine, .app bundle resolution, CLI tools (`sw_vers`, `defaults`, `plutil`, `uname`, `otool`, `open`, `launchctl`), and AppKit/Cocoa GUI translation to Helix X11 server (`Calculator.app`, `TextEdit.app`), machine-tested (157 checks).
 - **Implemented (DoneJS compat):** `donejs-compat/` freestanding C11 JavaScript runtime ported for Helix OS, featuring AST tree-walking interpreter, CommonJS modules (`require`), standard library (`path`, `fs`, `process`, `util`, `assert`, `events`, `buffer`, `os`, `stream`), Promises, microtasks, timers (`setTimeout`), and event loop draining. Machine-tested (hosted suite).
+- **Implemented (Apple T2):** a clean-room driver for the Apple T2 security SoC
+  (iBridge2, up to iBridge2,15): PCI discovery of the BCE mailbox function
+  (106b:1801), BAR4 mailbox mapping, the firmware protocol-version handshake,
+  a device object with a `Device.Control` capability, and the `t2info` shell
+  command. Hosted unit tests cover the mailbox wire format; QEMU boot proves
+  the "no T2 present" path. SEP key services, disk-encryption integration,
+  Apple Secure Boot verification and real-hardware testing are not done. See
+  docs/09-apple-t2.md.
 - **Not implemented:** the full C library and an environment (userspace has a
   libc subset in `userspace/libc`: string, stdlib, stdio, unistd, errno, but
   `getenv` finds nothing and there is no `fork`; the M9 exit gate is not yet

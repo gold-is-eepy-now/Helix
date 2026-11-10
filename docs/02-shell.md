@@ -298,6 +298,7 @@ shows it; typing `myprog arg1 arg2` runs it.
 | `time` | current wall-clock time in UTC (`21:34:26`) |
 | `version` | name, version, codename |
 | `usb` | USB controllers, hubs, and HID devices with their reports |
+| `t2info` | Apple T2 security SoC: mailbox function, BAR addresses, firmware handshake state, device object and control capability (see docs/09-apple-t2.md) |
 | `echo` | prints its arguments |
 | `history` | lists the lines typed so far, numbered (Up/Down recall them) |
 | `usermode` | runs a built-in test program in ring 3; it writes a line through the syscall gate and exits with status 7 |

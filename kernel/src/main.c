@@ -46,6 +46,7 @@
 #include "syscall.h"
 #include "usb_host.h"
 #include "ext4.h"
+#include "t2.h"
 
 /* M11: ext4 root time source (wall-clock seconds since the Unix epoch). */
 static uint32_t wallclock_secs(void) {
@@ -209,6 +210,10 @@ static void kernel_main_continue(void) {
     /* The syscall table is filled here; int $0x80 (user code and tests) uses it. */
     syscall_init();
 
+    /* The Apple T2 mailbox lives in MMIO space, so it needs our page tables
+     * too (vmm_init ran in kmain). See docs/09-apple-t2.md. */
+    t2_start();
+
     /* USB needs our page tables (vmm_init ran in kmain) to map the EHCI registers,
      * so it starts here, before the shell takes the keyboard. See docs/07-usb.md. */
     if (!usb_host_init(hhdm_request.response->offset)) {
@@ -284,6 +289,9 @@ void kmain(void) {
 
     /* M10: initialize driver framework and drivers. */
     ramdisk_driver_init();
+    /* The T2 probe only touches PCI config space, so it joins the driver
+     * framework here. The mailbox itself is mapped later, after vmm_init(). */
+    t2_register();
     driver_init_all();
     block_device_init_all();
 

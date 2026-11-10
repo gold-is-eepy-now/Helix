@@ -27,25 +27,18 @@ static inline uint64_t invoke_native_syscall(int native_num, uint64_t arg1,
                                               uint64_t arg4, uint64_t arg5,
                                               uint64_t arg6, uint64_t arg7) {
     uint64_t result;
-    
-    /* Set up arguments in registers as expected by kernel (x86-64 syscall ABI):
-     * rax = syscall number, rdi = arg1, rsi = arg2, rdx = arg3,
-     * r10 = arg4, r8 = arg5, r9 = arg6
-     * int $0x80 invokes the kernel syscall handler directly. */
+
+    /* x86-64 exposes six syscall argument registers. The native ABI's
+     * seventh argument is always zero, so do not force it into the inline
+     * assembly: seven inputs plus one output cannot fit in the register file.
+     */
+    (void)arg7;
     __asm__ volatile (
-        "movq %1, %%rax\n"
-        "movq %2, %%rdi\n"
-        "movq %3, %%rsi\n"
-        "movq %4, %%rdx\n"
-        "movq %5, %%r10\n"
-        "movq %6, %%r8\n"
-        "movq %7, %%r9\n"
-        "int $0x80\n"
-        "movq %%rax, %0\n"
-        : "=r"(result)
-        : "r"((uint64_t)native_num), "r"(arg1), "r"(arg2), "r"(arg3),
-          "r"(arg4), "r"(arg5), "r"(arg6), "r"(arg7)
-        : "rax", "rdi", "rsi", "rdx", "r10", "r8", "r9"
+        "int $0x80"
+        : "=a"(result)
+        : "a"((uint64_t)native_num), "D"(arg1), "S"(arg2), "d"(arg3),
+          "r"(arg4), "r"(arg5), "r"(arg6)
+        : "memory"
     );
     
     return result;

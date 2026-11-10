@@ -56,6 +56,7 @@ native object model. They are not the foundation.
 | Linux / BSD / POSIX compatibility | 🚧 in progress (runtime subsystem) |
 | Mac / Darwin compatibility | ✅ working, machine-tested (Mach-O loader, Darwin syscalls, Mac-like FS, xattrs, plist/bundle, CLI/GUI via X11) |
 | USB HID support | 🚧 UHCI host, root ports, hubs and HID keyboard/mouse in QEMU; not yet verified on real iMac hardware (see docs/07-usb.md) |
+| Apple T2 security SoC | 🚧 BCE mailbox driver (PCI 106b:1801), firmware protocol handshake, `t2info` command and a control capability on the T2 device object; SEP key services and real-hardware verification pending (see docs/09-apple-t2.md) |
 
 See [ROADMAP.md](ROADMAP.md) for the full plan, [docs/02-shell.md](docs/02-shell.md)
 for the shell, [docs/03-cpython-requirements.md](docs/03-cpython-requirements.md)
@@ -63,7 +64,8 @@ for what it will take to run CPython and Linux/BSD software,
 [docs/04-paging-interrupts.md](docs/04-paging-interrupts.md) for virtual memory
 and interrupts, [docs/05-object-manager.md](docs/05-object-manager.md) for the
 M5 object and handle APIs, and [docs/06-capabilities.md](docs/06-capabilities.md)
-for M6 capability semantics.
+for M6 capability semantics. [docs/09-apple-t2.md](docs/09-apple-t2.md) covers
+the Apple T2 security SoC mailbox driver.
 
 ---
 
@@ -299,8 +301,10 @@ say so.
 - **Capabilities, not root.** Authority is explicit. The capability mechanism
   (derivation, rights, revocation) is implemented. The named kinds planned for
   it, such as `Display.Draw`, `Network.Connect`, `Storage.Read`, `Storage.Write`
-  and `Driver.Control`, are not yet defined in the code. Least privilege is the
-  default.
+  and `Driver.Control`, are not yet defined in the code; device objects already
+  hand out generic control capabilities (the T2 device object in
+  [docs/09-apple-t2.md](docs/09-apple-t2.md) is the first). Least privilege is
+  the default.
 - **Message passing.** Objects communicate by sending messages through
   channels.
 - **Isolated drivers.** Drivers are user-space services wherever practical.

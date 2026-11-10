@@ -60,3 +60,36 @@ bool pci_find_class(uint8_t class_code, uint8_t subclass, uint8_t prog_if, size_
     }
     return false;
 }
+
+bool pci_find_device(uint16_t vendor_id, uint16_t device_id, size_t index,
+                     pci_function_t *out) {
+    size_t seen = 0;
+    for (unsigned bus = 0; bus < 256; bus++) {
+        for (unsigned device = 0; device < 32; device++) {
+            uint32_t id0 = pci_config_read32((uint8_t)bus, (uint8_t)device, 0, 0x00);
+            if ((id0 & 0xFFFFu) == 0xFFFFu) continue;           /* no device here */
+            uint32_t header = pci_config_read32((uint8_t)bus, (uint8_t)device, 0, 0x0C);
+            unsigned functions = (header & 0x800000u) != 0 ? 8u : 1u;
+            for (unsigned function = 0; function < functions; function++) {
+                uint32_t vendor = pci_config_read32((uint8_t)bus, (uint8_t)device,
+                                                    (uint8_t)function, 0x00);
+                if ((vendor & 0xFFFFu) == 0xFFFFu) continue;
+                if ((uint16_t)(vendor & 0xFFFFu) != vendor_id) continue;
+                if ((uint16_t)(vendor >> 16) != device_id) continue;
+                if (seen++ != index) continue;
+                if (out != NULL) {
+                    uint32_t klass = pci_config_read32((uint8_t)bus, (uint8_t)device,
+                                                       (uint8_t)function, 0x08);
+                    out->bus = (uint8_t)bus;
+                    out->device = (uint8_t)device;
+                    out->function = (uint8_t)function;
+                    out->prog_if = (uint8_t)((klass >> 8) & 0xFFu);
+                    out->vendor_id = vendor_id;
+                    out->device_id = device_id;
+                }
+                return true;
+            }
+        }
+    }
+    return false;
+}

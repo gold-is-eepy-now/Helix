@@ -1,0 +1,19 @@
+{
+  "migrated_version": "3.0.0",
+  "finalized": false,
+  "appliedAt": "2026-11-10T11:43:08.978Z",
+  "log": [
+    {
+      "action": "skipped:missing",
+      "from": "/var/home/absolutely-proprietary/Code/Helix/.unipi/config/compactor.json"
+    },
+    {
+      "action": "skipped:missing",
+      "from": "/var/home/absolutely-proprietary/Code/Helix/.unipi/fusion-preset.json"
+    },
+    {
+      "action": "skipped:missing",
+      "from": "/var/home/absolutely-proprietary/Code/Helix/.unipi/config/background-tasks.json"
+    }
+  ]
+}

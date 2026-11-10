@@ -385,6 +385,10 @@ def main():
         ser.send("objects\n")
         check("captest leaves no objects behind", "live objects : 0")
 
+        ser.send("t2info\n")
+        check("t2info reports the Apple T2 security SoC state",
+              "T2 security SoC")
+
         ser.send("ticks\n")
         check("PIT timer is ticking", "PIT timer")
         ser.read_until("ms\n")  # wait for the whole line, not just its prefix

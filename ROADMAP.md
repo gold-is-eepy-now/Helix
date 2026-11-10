@@ -235,6 +235,10 @@ environment (envp on the stack and `getenv`/`setenv`) and a complete C library
 
 - ✅ Native driver interface and driver registration (`driver_t`, `driver_register`).
 - ✅ Block-device objects, with the ramdisk as the only block driver.
+- ✅ Apple T2 security SoC: BCE mailbox driver (PCI 106b:1801), firmware
+  protocol handshake, a device object with a control capability, and the
+  `t2info` shell command. SEP key services are not implemented and no T2
+  hardware has been tested yet (see docs/09-apple-t2.md).
 - ⛔ User-space driver services: not implemented.
 - ⛔ A real device driver: no virtio code exists. The `runtime/optional_drivers`
   adapters are outlines, not working drivers.
