@@ -71,6 +71,10 @@ bool time_available(void) {
     return g_tsc_per_ms != 0;
 }
 
+uint64_t time_tsc_per_ms(void) {
+    return g_tsc_per_ms;
+}
+
 uint64_t time_uptime_ms(void) {
     if (g_tsc_per_ms == 0) {
         return 0;

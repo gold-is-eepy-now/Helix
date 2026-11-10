@@ -769,8 +769,8 @@ static void cmd_init(int argc, char **argv) {
 /* log            print the recent kernel events, oldest first
  * log clear      forget the events recorded so far
  * log serial on|off   echo every event to the serial console as it happens */
-/* ping a.b.c.d: four echo requests, one second each. The round-trip time is in whole
- * milliseconds because the clock we have is the 100 Hz tick. */
+/* ping a.b.c.d: four echo requests, one second each. The round-trip time is in
+ * microseconds, measured with the TSC (calibrated at boot). */
 static void cmd_ping(int argc, char **argv) {
     if (argc < 2) {
         kprintf("usage: ping <a.b.c.d>\n");
@@ -788,10 +788,10 @@ static void cmd_ping(int argc, char **argv) {
     kprintf("PING %u.%u.%u.%u: 32 data bytes\n", ip[0], ip[1], ip[2], ip[3]);
     int received = 0;
     for (uint16_t seq = 1; seq <= 4; seq++) {
-        uint32_t rtt = 0;
-        if (net_ping(ip, seq, 1000, &rtt)) {
+        uint32_t rtt_us = 0;
+        if (net_ping(ip, seq, 1000, &rtt_us)) {
             received++;
-            kprintf("reply from %u.%u.%u.%u: seq=%u time=%u ms\n", ip[0], ip[1], ip[2], ip[3], seq, rtt);
+            kprintf("reply from %u.%u.%u.%u: seq=%u time=%u us\n", ip[0], ip[1], ip[2], ip[3], seq, rtt_us);
         } else {
             kprintf("request timed out: seq=%u\n", seq);
         }

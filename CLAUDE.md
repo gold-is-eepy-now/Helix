@@ -174,9 +174,10 @@ Also, in the same change:
   gets an ARP reply from QEMU's gateway. See docs/10-network.md.
 - **Implemented (network, stages 2–3, QEMU-tested only):** Ethernet framing, ARP with
   a 16-entry cache, IPv4 send/receive with checksum and subnet routing, ICMP echo.
-  The kernel-shell `ping <a.b.c.d>` gets replies from the QEMU gateway 10.0.2.2. Not
+  The kernel-shell `ping <a.b.c.d>` and the ring-3 `/bin/ping` (via `SYS_NET_PING`) get
+  replies from the QEMU gateway 10.0.2.2, with microsecond round-trip times. Not
   verified to the internet: this host's ICMP policy stops QEMU's user network from
-  forwarding echo requests. No ring-3 ping, UDP, DNS or DHCP yet.
+  forwarding echo requests. No UDP, DNS or DHCP yet.
 - **Implemented (LC-1, Linux compat):** `compat/include/linux/*` headers (types, slab, spinlock, atomic, mutex, module_init, printk) and a self-test driver run at boot. See docs/08-linux-compat.md.
 - **Implemented (Mac/Darwin compat):** `mac-darwin-compat/` subsystem with 64-bit Mach-O loader, Darwin BSD & Mach trap translation, Darwin process runtime (`darwin_runtime.c`), Darwin `launchd` PID 1 daemon with plist service loading and `launchctl` CLI (`launchd.c`), Mac-like case-insensitive filesystem, extended attributes (xattr), property list (.plist) engine, .app bundle resolution, CLI tools (`sw_vers`, `defaults`, `plutil`, `uname`, `otool`, `open`, `launchctl`), and AppKit/Cocoa GUI translation to Helix X11 server (`Calculator.app`, `TextEdit.app`), machine-tested (157 checks).
 - **Implemented (DoneJS compat):** `donejs-compat/` freestanding C11 JavaScript runtime ported for Helix OS, featuring AST tree-walking interpreter, CommonJS modules (`require`), standard library (`path`, `fs`, `process`, `util`, `assert`, `events`, `buffer`, `os`, `stream`), Promises, microtasks, timers (`setTimeout`), and event loop draining. Machine-tested (hosted suite).

@@ -59,9 +59,13 @@ enum {
     SYSCALL_UNLINK,        /* unlink(path) -> 0, or -1 (files only) */
     SYSCALL_RMDIR,         /* rmdir(path) -> 0, or -1 (empty directories only) */
     SYSCALL_TRUNCATE,      /* truncate(path, size) -> 0, or -1 */
+    SYSCALL_NET_PING,      /* net_ping(ipv4 as big-endian u32, seq, timeout_ms) -> rtt in us, or -1 */
 };
 
 /* Numbers are append-only: user programs (libhelix.h) depend on them. */
+
+uint64_t sys_net_ping(uint64_t ip_be, uint64_t seq, uint64_t timeout_ms,
+                      uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
 
 /* System call handler signature. All syscalls use a uniform 7-argument
  * interface matching the x86_64 ABI: rax = syscall number, then rdi,

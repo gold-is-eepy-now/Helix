@@ -312,6 +312,10 @@ def main():
         ser.send("q\n")
         ser.send("cat /edt.txt\n")
         check("edit wrote the lines in order", "\none\ntwo\n")
+        # Stage 4: /bin/ping sends its echoes through the kernel (SYS_NET_PING).
+        ser.send("ping 10.0.2.2\n")
+        check("ring-3 ping gets an echo reply from the gateway", "reply from 10.0.2.2: seq=1", timeout=60)
+        check("ring-3 ping reports a summary", "4 sent, 4 received", timeout=60)
         # M9 spawn: the shell runs /bin/args as a child process (nested under the
         # kernel-started shell), and argv arrives intact.
         ser.send("args one two\n")
@@ -399,8 +403,26 @@ def main():
         check("net reports the link up", "link up")
         ser.send("net test\n")
         check("net test gets an ARP reply from the gateway", "net test: ARP reply from gateway 10.0.2.2", timeout=40)
+        # Count new replies: the ring-3 ping above printed the same text earlier, so a
+        # plain search would pass even if this kernel ping printed nothing.
+        needle = "reply from 10.0.2.2: seq=1"
+        before = ser.text().count(needle)
         ser.send("ping 10.0.2.2\n")
-        check("ping gets an echo reply from the gateway", "reply from 10.0.2.2: seq=1", timeout=60)
+        got_new = False
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            if ser.text().count(needle) > before:
+                got_new = True
+                break
+            ser.sock.settimeout(0.3)
+            try:
+                data = ser.sock.recv(65536)
+            except socket.timeout:
+                continue
+            if not data:
+                break
+            ser.raw += data
+        check_true("kernel ping gets a new echo reply from the gateway", got_new)
 
         # Desktop: start it, open nothing, leave with Esc. This is the path that used
         # to fault when a process had run before it; the event log records the start.

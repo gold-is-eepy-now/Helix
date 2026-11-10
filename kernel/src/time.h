@@ -11,6 +11,8 @@ void time_init(void);
 
 /* True if calibration succeeded and uptime is meaningful. */
 bool time_available(void);
+/* TSC ticks per millisecond from calibration; 0 until calibrated. */
+uint64_t time_tsc_per_ms(void);
 
 /* Milliseconds since time_init(). Returns 0 if the clock is unavailable. */
 uint64_t time_uptime_ms(void);

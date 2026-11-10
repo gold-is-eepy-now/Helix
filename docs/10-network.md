@@ -68,10 +68,15 @@ attribute, but real hardware does, so the cache-disable bit is set deliberately.
    gateway. ICMP answers echo requests with a copy of the payload, and `net_ping` matches
    replies on identifier, sequence and sender. Test: `ping 10.0.2.2` gets replies
    (`tests/shell-test.py`: `reply from 10.0.2.2: seq=1`). A dead address (`10.0.2.99`)
-   times out. The RTT is whole milliseconds, because the clock has no finer unit.
-4. **Ring-3 `ping`.** `SYS_NET_PING(ip, seq, timeout_ms)` returns the round-trip
-   time in microseconds, or -1 on timeout. A ring-3 `/bin/ping` prints each
-   reply and a summary. Test: `ping 10.0.2.2` from the ring-3 shell.
+   times out. The round trip is in microseconds, measured with the TSC (calibrated at boot,
+   so it is only as accurate as that calibration; under TCG it is an emulated clock).
+4. **Ring-3 `ping` — built and QEMU-tested.** `SYS_NET_PING` (syscall 36, `syscall_net.c`) takes
+   the IPv4 address as one big-endian value, the sequence number and a timeout (1–10000 ms),
+   and returns the round-trip time in microseconds, or -1 on timeout. The round trip is
+   timed with the TSC after the next hop is resolved (`net_ip_warm`), so the first ARP
+   wait is not counted. `/bin/ping` (`userspace/bin/ping.c`) prints each reply and a
+   summary. Test: `tests/shell-test.py` runs `ping 10.0.2.2` from the ring-3 shell and
+   checks the reply and the `4 sent, 4 received` summary.
 5. **Internet addresses.** Ping `8.8.8.8` through the gateway. This depends on the
    host: QEMU's user network answers ICMP only if the host permits unprivileged
    ICMP. **Checked here: the host has `ping_group_range` 1 0, so unprivileged ICMP is

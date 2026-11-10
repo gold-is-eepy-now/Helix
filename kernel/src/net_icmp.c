@@ -56,7 +56,7 @@ void net_icmp_input(const uint8_t src[4], const uint8_t *msg, uint16_t len) {
     }
 }
 
-bool net_ping(const uint8_t dst[4], uint16_t seq, uint32_t timeout_ms, uint32_t *rtt_ms) {
+bool net_ping(const uint8_t dst[4], uint16_t seq, uint32_t timeout_ms, uint32_t *rtt_us) {
     static uint8_t msg[ICMP_HLEN + PING_PAYLOAD];
     if (!net_ready() || !time_available()) return false;
 
@@ -69,12 +69,17 @@ bool net_ping(const uint8_t dst[4], uint16_t seq, uint32_t timeout_ms, uint32_t 
     for (int i = 0; i < PING_PAYLOAD; i++) msg[ICMP_HLEN + i] = (uint8_t)i;
     net_put16(msg + 2, net_checksum(msg, sizeof msg));
 
+    /* Resolve the next hop first, so the clock below measures only the echo. */
+    if (!net_ip_warm(dst)) return false;
+
     g_ping.waiting = true;
     g_ping.got = false;
     g_ping.seq = seq;
     for (int i = 0; i < 4; i++) g_ping.dst[i] = dst[i];
 
-    uint64_t start = time_uptime_ms();
+    uint64_t tsc_per_ms = time_tsc_per_ms();
+    uint64_t start_ms = time_uptime_ms();
+    uint64_t start_tsc = time_tsc();
     if (!net_ip_send(dst, NET_IP_PROTO_ICMP, msg, sizeof msg)) {
         g_ping.waiting = false;
         return false;
@@ -82,12 +87,13 @@ bool net_ping(const uint8_t dst[4], uint16_t seq, uint32_t timeout_ms, uint32_t 
     for (;;) {
         net_poll();
         if (g_ping.got) break;
-        if (time_uptime_ms() - start >= timeout_ms) {
+        if (time_uptime_ms() - start_ms >= timeout_ms) {
             g_ping.waiting = false;
             return false;
         }
     }
+    uint64_t ticks = time_tsc() - start_tsc;
     g_ping.waiting = false;
-    *rtt_ms = (uint32_t)(time_uptime_ms() - start);
+    *rtt_us = (uint32_t)(ticks * 1000u / tsc_per_ms);
     return true;
 }

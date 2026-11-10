@@ -12,7 +12,7 @@
 void net_icmp_input(const uint8_t src[4], const uint8_t *msg, uint16_t len);
 
 /* Send one echo request to `dst` and wait for its reply. True and the round-trip
- * time in milliseconds on success; false on timeout or if the send fails. */
-bool net_ping(const uint8_t dst[4], uint16_t seq, uint32_t timeout_ms, uint32_t *rtt_ms);
+ * time in microseconds (from the TSC) on success; false on timeout or if the send fails. */
+bool net_ping(const uint8_t dst[4], uint16_t seq, uint32_t timeout_ms, uint32_t *rtt_us);
 
 #endif /* HELIX_NET_ICMP_H */

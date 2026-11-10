@@ -310,7 +310,9 @@ shows it; typing `myprog arg1 arg2` runs it.
 | `color` | turn ANSI colour on/off: `color on`, `color off` |
 | `log` | show the kernel event log, oldest first: scheduler, syscalls, process spawn/exit, shell lines, input, USB mouse, exceptions. `log clear` forgets earlier events; `log serial on`/`off` echoes every event to the serial console as it happens. The log is also dumped automatically when a CPU exception is taken |
 | `net` | network card: MAC, link state, and frame counters (`net test` sends an ARP request to the QEMU gateway 10.0.2.2 and waits for the reply). Needs `-netdev user,id=n0 -device e1000,netdev=n0`; without a card it says so |
-| `ping <a.b.c.d>` | four ICMP echo requests, one second each; prints each reply's time in whole milliseconds, then a count. `ping 10.0.2.2` gets replies under QEMU. A dead address times out |
+| `ping <a.b.c.d>` | four ICMP echo requests, one second each; prints each reply's round-trip time in microseconds, then a count. `ping 10.0.2.2` gets replies under QEMU. A dead address times out |
+
+The ring-3 `/bin/ping <a.b.c.d>` does the same through `SYS_NET_PING` (syscall 36): the kernel sends and times each echo, and the program prints the results.
 | `halt` | halt the machine (you may close the QEMU window) |
 | `reboot` | reset the machine |
 

@@ -112,6 +112,7 @@ void syscall_init(void) {
     syscall_table[SYSCALL_UNLINK]        = sys_unlink;
     syscall_table[SYSCALL_RMDIR]         = sys_rmdir;
     syscall_table[SYSCALL_TRUNCATE]      = sys_truncate;
+    syscall_table[SYSCALL_NET_PING]      = sys_net_ping;
 }
 
 /* -- Handler implementations ------------------------------------------ */

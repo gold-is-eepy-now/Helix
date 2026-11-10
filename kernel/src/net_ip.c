@@ -43,6 +43,12 @@ static bool on_subnet(const uint8_t *ip) {
     return true;
 }
 
+bool net_ip_warm(const uint8_t dst[4]) {
+    const uint8_t *hop = on_subnet(dst) ? dst : net_gateway();
+    uint8_t mac[6];
+    return net_arp_resolve(hop, mac, 1000);
+}
+
 bool net_ip_send(const uint8_t dst[4], uint8_t proto, const uint8_t *payload, uint16_t len) {
     /* Static: a packet is too big for the kernel stack. The next hop is resolved
      * before the buffer is filled, so a nested send during resolution cannot clash. */

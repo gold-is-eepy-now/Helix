@@ -18,6 +18,10 @@ uint16_t net_checksum(const uint8_t *data, uint16_t len);
  * cannot be resolved, the packet is too big, or the card refuses it. */
 bool net_ip_send(const uint8_t dst[4], uint8_t proto, const uint8_t *payload, uint16_t len);
 
+/* Resolve the next hop for `dst` without sending anything. A ping calls this first so
+ * the ARP wait does not count as round-trip time. False if the hop never answers. */
+bool net_ip_warm(const uint8_t dst[4]);
+
 /* Handle one received Ethernet frame (length n) that carries IPv4. */
 void net_ip_input(const uint8_t *frame, uint16_t n);
 
