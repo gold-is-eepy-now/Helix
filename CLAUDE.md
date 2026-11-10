@@ -164,8 +164,13 @@ Also, in the same change:
 - **Implemented (graphics, step 1, QEMU-tested only):** a virtio 1.0 PCI transport
   (`kernel/src/virtio.c`) and the virtio-gpu display list (`virtio_gpu.c`, shell `gpu`).
   The desktop still draws to the UEFI GOP framebuffer. See docs/12-graphics.md.
-- **Implemented (desktop, basic, QEMU-tested only):** `desktop` command: teal
-  desktop, My Computer, About, Terminal, Text Editor and Browser windows (the Browser loads plain http:// pages and shows them as text; the Terminal runs kernel shell
+- **Implemented (accounts and sign-in, QEMU-tested only):** user accounts in
+  `/etc/users` (PBKDF2-HMAC-SHA256 hashes, RDRAND salts; `users`, `mkusr`, `su`,
+  `passwd`, `whoami`) and a graphical sign-in screen that `desktop` shows first.
+  SHA-256 checked against published vectors on the host (`tests/sha256-unit.c`).
+- **Implemented (desktop, basic, QEMU-tested only):** `desktop` command: blue
+  Windows-7-style wallpaper (cached gradient), glass window frames with rounded
+  corners, taskbar with Start orb, desktop, My Computer, About, Terminal, Text Editor and Browser windows (the Browser loads plain http:// pages and shows them as text; the Terminal runs kernel shell
   commands and `exec <path>`, output shown in the window; keyboard-only programs
   are refused), taskbar with clock, Start menu, pointer
   driven by a PS/2 mouse (QEMU's default) or a USB mouse; dragging a title bar moves an outline and redraws the window on release; pointer moves redraw only the arrow; typing in the Text Editor redraws only its window. No compositor; not

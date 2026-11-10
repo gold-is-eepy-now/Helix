@@ -939,7 +939,9 @@ static void redraw(void) {
     uint32_t sw = fb_width(), sh = fb_height();
     g_cur_shown = false;                        /* the frame below wipes the old arrow */
     g_outline_shown = false;
-    fill_box(0, 0, sw, sh, 0, 0x6FB6F0u, 0x0D3D78u, false);   /* sky-blue wallpaper */
+    if (!fb_draw_wallpaper(0x6FB6F0u, 0x0D3D78u)) {          /* sky-blue wallpaper */
+        fill_box(0, 0, sw, sh, 0, 0x6FB6F0u, 0x0D3D78u, false);
+    }
     for (int i = 0; i < ICON_COUNT; i++) {
         draw_icon(i, 16, 16u + (uint32_t)i * 72u, i == g_icon_sel && !g_menu_open);
     }

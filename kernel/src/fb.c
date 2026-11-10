@@ -416,6 +416,55 @@ void fb_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color
 
 /* Draw one 8x8 glyph per character, left to right. With `opaque` false only the
  * set pixels are drawn, so text can sit on a coloured background. */
+/* A vertical gradient drawn once and copied to the screen on each frame, so
+ * redrawing the desktop does not recompute every pixel. */
+#define WALL_CAP (1280u * 800u)
+static uint32_t g_wall[WALL_CAP];
+static bool g_wall_ready;
+static const struct limine_framebuffer *g_wall_fb;
+static uint32_t g_wall_w, g_wall_h, g_wall_top, g_wall_bottom;
+
+static uint32_t wall_mix(uint32_t a, uint32_t b, uint32_t t, uint32_t n) {
+    if (n == 0) n = 1;
+    int out[3];
+    for (int i = 0; i < 3; i++) {
+        int sa = (int)((a >> (16 - 8 * i)) & 0xFFu);
+        int sb = (int)((b >> (16 - 8 * i)) & 0xFFu);
+        out[i] = sa + (sb - sa) * (int)t / (int)n;
+    }
+    return fb_rgb((uint8_t)out[0], (uint8_t)out[1], (uint8_t)out[2]);
+}
+
+bool fb_draw_wallpaper(uint32_t top_rgb, uint32_t bottom_rgb) {
+    if (!fb_ready() || g_fb->bpp != 32) return false;
+    uint32_t w = (uint32_t)g_fb->width, h = (uint32_t)g_fb->height;
+    if ((size_t)w * h > WALL_CAP) return false;
+    if (!g_wall_ready || g_wall_fb != g_fb || g_wall_w != w || g_wall_h != h ||
+        g_wall_top != top_rgb || g_wall_bottom != bottom_rgb) {
+        for (uint32_t y = 0; y < h; y++) {
+            uint32_t c = wall_mix(top_rgb, bottom_rgb, y, h - 1u);
+            for (uint32_t x = 0; x < w; x++) g_wall[(size_t)y * w + x] = c;
+        }
+        g_wall_ready = true;
+        g_wall_fb = g_fb;
+        g_wall_w = w;
+        g_wall_h = h;
+        g_wall_top = top_rgb;
+        g_wall_bottom = bottom_rgb;
+    }
+    for (uint32_t y = 0; y < h; y++) {
+        uint32_t *row = (uint32_t *)((uint8_t *)g_fb->address + (size_t)y * g_fb->pitch);
+        const uint32_t *src = &g_wall[(size_t)y * w];
+        for (uint32_t x = 0; x < w; x++) row[x] = src[x];
+    }
+    if (g_on_virtio) {
+        mark_dirty(0, 0);
+        g_dx1 = w;
+        g_dy1 = h;
+    }
+    return true;
+}
+
 void fb_draw_text(uint32_t x, uint32_t y, const char *s, uint32_t fg, uint32_t bg, bool opaque) {
     if (!fb_ready()) {
         return;

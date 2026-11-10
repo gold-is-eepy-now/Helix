@@ -96,6 +96,7 @@ static void draw_button(uint32_t x, uint32_t y, const char *label, bool primary)
  * under the panel on every pass is what made the screen flicker. */
 static void draw_backdrop(void) {
     uint32_t sw = fb_width(), sh = fb_height();
+    if (fb_draw_wallpaper(0x1B3A6Bu, 0x4F86C6u)) return;   /* cached gradient */
     for (uint32_t y = 0; y < sh; y += 8) {
         uint32_t t = y * 255u / sh;
         uint8_t r = (uint8_t)(0x1B + ((0x4F - 0x1B) * t) / 255u);
