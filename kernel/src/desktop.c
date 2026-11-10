@@ -35,6 +35,7 @@
 #include "ext4.h"
 #include "fb.h"
 #include "input.h"
+#include "login.h"
 #include "keyboard.h"
 #include "klog.h"
 #include "html_text.h"
@@ -59,7 +60,12 @@ static const char *const g_app_names[APP_COUNT] = { "My Computer", "About Helix"
 #define MAX_WIN 4
 #define MAX_LINES 16
 #define LINE_LEN 48
-#define TASK_H 28u
+#define TASK_H 36u
+#define TB_BTN_X    58u         /* taskbar window buttons: first x, size, step between them */
+#define TB_BTN_Y    5u
+#define TB_BTN_H    26u
+#define TB_BTN_W    150u
+#define TB_BTN_STEP 156u
 
 /* The app each desktop icon opens (icon i is not app i, since Shut Down is an app too). */
 static const app_t g_icon_app[ICON_COUNT] = { APP_MYCOMP, APP_ABOUT, APP_TERMINAL, APP_EDITOR, APP_BROWSER };
@@ -147,6 +153,68 @@ static void bevel(uint32_t x, uint32_t y, uint32_t w, uint32_t h, bool raised) {
     fb_fill_rect(x, y, 1, h, hi);
     fb_fill_rect(x, y + h - 1, w, 1, lo);
     fb_fill_rect(x + w - 1, y, 1, h, lo);
+}
+
+/* ------------------------------------------------------------------ */
+/* Windows 7 look: glass gradients, rounded corners, shadowed text.     */
+/* Colours here are 0xRRGGBB and are packed for the framebuffer when   */
+/* drawn.                                                              */
+/* ------------------------------------------------------------------ */
+
+static uint32_t isqrt_u32(uint32_t n) {
+    uint32_t r = 0;
+    while ((r + 1) * (r + 1) <= n) r++;
+    return r;
+}
+
+/* The colour t/n of the way from a to b (both 0xRRGGBB). */
+static uint32_t rgb_mix(uint32_t a, uint32_t b, uint32_t t, uint32_t n) {
+    if (n == 0) n = 1;
+    int out[3];
+    for (int i = 0; i < 3; i++) {
+        int sa = (int)((a >> (16 - 8 * i)) & 0xFFu);
+        int sb = (int)((b >> (16 - 8 * i)) & 0xFFu);
+        out[i] = sa + (sb - sa) * (int)t / (int)n;
+    }
+    return fb_rgb((uint8_t)out[0], (uint8_t)out[1], (uint8_t)out[2]);
+}
+
+/* A box with a vertical gradient from top to bottom colour. Corners of radius r
+ * are rounded at the top, and at the bottom when round_bottom is set. r = 0 gives
+ * a plain box. */
+static void fill_box(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t r,
+                     uint32_t top, uint32_t bottom, bool round_bottom) {
+    if (w == 0 || h == 0) return;
+    if (r * 2u > w) r = w / 2u;
+    if (r * 2u > h) r = h / 2u;
+    for (uint32_t row = 0; row < h; row++) {
+        uint32_t inset = 0;
+        if (row < r) {
+            uint32_t dy = r - row;
+            inset = r - isqrt_u32(r * r - dy * dy);
+        } else if (round_bottom && row >= h - r) {
+            uint32_t dy = r - (h - 1u - row);
+            inset = r - isqrt_u32(r * r - dy * dy);
+        }
+        fb_fill_rect(x + inset, y + row, w - 2u * inset, 1, rgb_mix(top, bottom, row, h - 1u));
+    }
+}
+
+/* Text with a one-pixel shadow, so it stays readable over the wallpaper. */
+static void draw_text_shadow(uint32_t x, uint32_t y, const char *s, uint32_t fg, uint32_t shadow) {
+    fb_draw_text(x + 1u, y + 1u, s, shadow, 0, false);
+    fb_draw_text(x, y, s, fg, 0, false);
+}
+
+/* The round Start orb: a disc shaded from light green at the top to darker at the bottom. */
+static void draw_orb(uint32_t cx, uint32_t cy, uint32_t r, bool pressed) {
+    uint32_t top = pressed ? 0x2A6E24u : 0x9AE68Au;
+    uint32_t bottom = pressed ? 0x163D12u : 0x2C8A2Au;
+    for (uint32_t i = 0; i <= 2u * r; i++) {
+        int dy = (int)i - (int)r;
+        uint32_t half = isqrt_u32(r * r - (uint32_t)(dy * dy));
+        fb_fill_rect(cx - half, cy - r + i, 2u * half + 1u, 1, rgb_mix(top, bottom, i, 2u * r));
+    }
 }
 
 /* How many characters fit in `px` pixels. */
@@ -543,25 +611,32 @@ static void browser_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
 }
 
 static void draw_window(const window_t *w, bool focused) {
-    fb_fill_rect(w->x, w->y, w->w, w->h, c_face);
-    bevel(w->x, w->y, w->w, w->h, true);
+    /* Glass frame with a darker outline. */
+    fill_box(w->x, w->y, w->w, w->h, 6, 0x1E4C86u, 0x1E4C86u, false);
+    if (focused) {
+        fill_box(w->x + 1, w->y + 1, w->w - 2, w->h - 2, 5, 0xC4DDF5u, 0x7FA9D6u, false);
+    } else {
+        fill_box(w->x + 1, w->y + 1, w->w - 2, w->h - 2, 5, 0xE4ECF5u, 0xB6C9DEu, false);
+    }
 
-    /* Title bar: navy when focused, grey otherwise. */
+    /* Caption: the title on the glass, and a red close button. */
     uint32_t tx = w->x + 3, ty = w->y + 3, tw = w->w - 6;
-    fb_fill_rect(tx, ty, tw, 18, focused ? c_navy : c_gray);
-    fb_draw_text(tx + 4, ty + 5, g_app_names[w->app], c_white, 0, false);
+    fb_draw_text(tx + 8, ty + 5, g_app_names[w->app],
+                 focused ? fb_rgb(0x10, 0x23, 0x3D) : fb_rgb(0x4D, 0x64, 0x80), 0, false);
 
-    /* Close button at the right end of the title bar. */
     uint32_t bx = tx + tw - 18;
-    fb_fill_rect(bx, ty + 2, 16, 14, c_face);
-    bevel(bx, ty + 2, 16, 14, true);
-    fb_draw_text(bx + 4, ty + 5, "x", c_black, 0, false);
+    fill_box(bx, ty + 2, 16, 14, 3, 0xE8A38Cu, 0xC2472Cu, true);
+    fb_draw_text(bx + 4, ty + 5, "x", fb_rgb(0xFF, 0xFF, 0xFF), 0, false);
 
-    /* Client area: a sunken white panel with the window's text. */
+    /* Client area: white with a thin blue-grey edge. */
     uint32_t cx = w->x + 6, cy = w->y + 26;
     uint32_t cw = w->w - 12, ch = w->h - 32;
+    uint32_t edge = fb_rgb(0x5A, 0x7A, 0xA3);
     fb_fill_rect(cx, cy, cw, ch, c_white);
-    bevel(cx, cy, cw, ch, false);
+    fb_fill_rect(cx, cy, cw, 1, edge);
+    fb_fill_rect(cx, cy + ch - 1, cw, 1, edge);
+    fb_fill_rect(cx, cy, 1, ch, edge);
+    fb_fill_rect(cx + cw - 1, cy, 1, ch, edge);
     if (w->app == APP_TERMINAL) {
         term_draw(cx, cy, cw, ch);
         return;
@@ -624,38 +699,37 @@ static void draw_icon(int idx, uint32_t x, uint32_t y, bool selected) {
     uint32_t label_x = x + 4;
     uint32_t label_w = (uint32_t)strlen(name) * 8u + 4u;
     if (selected) {
-        fb_fill_rect(label_x - 2, y + 36, label_w, 12, c_navy);
-        fb_draw_text(label_x, y + 38, name, c_white, 0, false);
-    } else {
-        fb_draw_text(label_x, y + 38, name, c_white, 0, false);
+        fill_box(label_x - 2, y + 36, label_w, 14, 3, 0x4A8AD2u, 0x2A5FA3u, true);
     }
+    draw_text_shadow(label_x, y + 38, name, fb_rgb(0xFF, 0xFF, 0xFF), fb_rgb(0x0B, 0x1F, 0x3A));
 }
 
 static void draw_taskbar(uint32_t sw, uint32_t sh) {
     uint32_t ty = sh - TASK_H;
-    fb_fill_rect(0, ty, sw, TASK_H, c_face);
-    fb_fill_rect(0, ty, sw, 1, c_white);
+    fill_box(0, ty, sw, TASK_H, 0, 0x33507Au, 0x0F1E36u, false);   /* dark glass */
+    fb_fill_rect(0, ty, sw, 1, fb_rgb(0x8F, 0xA9, 0xCC));
 
-    /* Start button: pressed in while the menu is open. */
-    bevel(2, ty + 2, 60, 22, !g_menu_open);
-    fb_fill_rect(3, ty + 3, 58, 20, g_menu_open ? c_gray : c_face);
-    fb_draw_text(16, ty + 9, "Start", c_black, 0, false);
+    draw_orb(24, ty + 18, 14, g_menu_open);
 
-    /* One button per open window, pressed in for the focused one. */
-    uint32_t bx = 70;
+    /* One rounded button per open window, lit for the focused one. */
+    uint32_t bx = TB_BTN_X;
     for (int i = 0; i < MAX_WIN; i++) {
         if (!g_win[i].used) continue;
         bool focused = (i == g_focus);
-        bevel(bx, ty + 2, 130, 22, !focused);
-        fb_fill_rect(bx + 1, ty + 3, 128, 20, focused ? c_gray : c_face);
+        if (focused) {
+            fill_box(bx, ty + TB_BTN_Y, TB_BTN_W, TB_BTN_H, 4, 0xA7CCF0u, 0x5B8CC6u, true);
+        } else {
+            fill_box(bx, ty + TB_BTN_Y, TB_BTN_W, TB_BTN_H, 4, 0x4D6E9Cu, 0x2C4870u, true);
+        }
         char title[20];
         put_str(title, sizeof(title), g_app_names[g_win[i].app]);
-        title[chars_in(120)] = '\0';
-        fb_draw_text(bx + 8, ty + 9, title, c_black, 0, false);
-        bx += 136;
+        title[chars_in(TB_BTN_W - 20u)] = '\0';
+        fb_draw_text(bx + 10, ty + TB_BTN_Y + 9, title,
+                     focused ? fb_rgb(0x10, 0x23, 0x3D) : fb_rgb(0xFF, 0xFF, 0xFF), 0, false);
+        bx += TB_BTN_STEP;
     }
 
-    /* Clock in a sunken box at the right. */
+    /* The clock, shadowed on the glass at the right. */
     int year, month, day, hour, minute, second, weekday;
     time_now_utc(&year, &month, &day, &hour, &minute, &second, &weekday);
     char clock[8];
@@ -665,22 +739,22 @@ static void draw_taskbar(uint32_t sw, uint32_t sh) {
     clock[3] = (char)('0' + minute / 10);
     clock[4] = (char)('0' + minute % 10);
     clock[5] = '\0';
-    bevel(sw - 66, ty + 3, 62, 22, false);
-    fb_draw_text(sw - 56, ty + 9, clock, c_black, 0, false);
+    draw_text_shadow(sw - 60, ty + 14, clock, fb_rgb(0xFF, 0xFF, 0xFF), fb_rgb(0x0B, 0x1F, 0x3A));
 }
 
 static void draw_start_menu(uint32_t sh) {
     uint32_t mh = MENU_COUNT * 22u + 8u;
     uint32_t my = sh - TASK_H - mh;
-    fb_fill_rect(2, my, 180, mh, c_face);
-    bevel(2, my, 180, mh, true);
-    fb_fill_rect(4, my + 4, 22, mh - 8, c_navy);
-    fb_draw_text(9, my + 8, "Helix", c_white, 0, false);
+    fill_box(2, my, 180, mh, 6, 0x2B4C7Eu, 0x2B4C7Eu, false);          /* outline */
+    fill_box(3, my + 1, 178, mh - 2, 5, 0xF4F8FDu, 0xDCE7F4u, false);  /* light panel */
+    fill_box(4, my + 4, 22, mh - 8, 0, 0x2B4C7Eu, 0x1B3157u, false);   /* dark strip */
+    fb_draw_text(9, my + 8, "Helix", fb_rgb(0xFF, 0xFF, 0xFF), 0, false);
     for (int i = 0; i < MENU_COUNT; i++) {
         uint32_t iy = my + 4 + (uint32_t)i * 22u;
         bool sel = (i == g_menu_sel);
-        if (sel) fb_fill_rect(28, iy, 152, 20, c_navy);
-        fb_draw_text(36, iy + 6, g_app_names[i], sel ? c_white : c_black, 0, false);
+        if (sel) fill_box(28, iy, 152, 20, 3, 0xA7CCF0u, 0x6FA2DAu, true);
+        fb_draw_text(36, iy + 6, g_app_names[i],
+                     sel ? fb_rgb(0x10, 0x23, 0x3D) : c_black, 0, false);
     }
 }
 
@@ -808,7 +882,7 @@ static void redraw(void) {
     uint32_t sw = fb_width(), sh = fb_height();
     g_cur_shown = false;                        /* the frame below wipes the old arrow */
     g_outline_shown = false;
-    fb_fill_rect(0, 0, sw, sh, c_desk);
+    fill_box(0, 0, sw, sh, 0, 0x6FB6F0u, 0x0D3D78u, false);   /* sky-blue wallpaper */
     for (int i = 0; i < ICON_COUNT; i++) {
         draw_icon(i, 16, 16u + (uint32_t)i * 72u, i == g_icon_sel && !g_menu_open);
     }
@@ -978,20 +1052,20 @@ static int handle_click(int x, int y, uint32_t sh) {
         g_menu_open = false;                                   /* any other click closes it */
     }
 
-    if (inside(x, y, 2, ty + 2, 60, 22)) {                     /* Start button */
+    if (inside(x, y, 4, ty + 3, 40, 30)) {                     /* Start orb */
         g_menu_open = !g_menu_open;
         g_menu_sel = 0;
         return PTR_REDRAW;
     }
 
-    uint32_t bx = 70;                                          /* taskbar window buttons */
+    uint32_t bx = TB_BTN_X;                                    /* taskbar window buttons */
     for (int i = 0; i < MAX_WIN; i++) {
         if (!g_win[i].used) continue;
-        if (inside(x, y, bx, ty + 2, 130, 22)) {
+        if (inside(x, y, bx, ty + TB_BTN_Y, TB_BTN_W, TB_BTN_H)) {
             g_focus = i;
             return PTR_REDRAW;
         }
-        bx += 136;
+        bx += TB_BTN_STEP;
     }
 
     /* Windows: the close box first, then the body (which brings the window forward). */
@@ -1421,6 +1495,10 @@ bool desktop_run(void) {
     g_menu_open = false;
 
     fb_graphics_begin();   /* the text console stays quiet while the desktop is up */
+    if (!login_run()) {    /* the desktop starts only after a sign-in */
+        fb_graphics_end();
+        return false;
+    }
     klog_note(KLOG_DESKTOP, "[desktop] started (%llux%llu)\n", (unsigned long long)sw, (unsigned long long)sh);
     redraw();
 

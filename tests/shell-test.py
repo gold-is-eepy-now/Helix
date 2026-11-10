@@ -243,6 +243,25 @@ def main():
         check("PID 1 reports /bin/sh's exit status", "[init] /bin/sh exited with status 0")
         check("init (PID 1) exits with status 0 at boot", "[init] PID 1 exited with status 0")
         check("shell prompt", "helix> ")
+        check("sha256 self-test passes at boot", "[crypto] sha256 self-test passed")
+
+        # --- user accounts: names, passwords hashed with PBKDF2-HMAC-SHA256 ---
+        ser.send("users\n")
+        check("users lists the console root", "root (uid 0, console)")
+        ser.send("mkusr alice wonderland\n")
+        check("mkusr creates an account with a uid", "mkusr: created 'alice' (uid 1000)")
+        ser.send("mkusr alice again\n")
+        check("mkusr refuses a name that is taken", "mkusr: could not create 'alice'")
+        ser.send("su alice wrongpass\n")
+        check("su refuses a wrong password", "su: authentication failed")
+        ser.send("su alice wonderland\n")
+        ser.send("whoami\n")
+        check("su with the right password switches identity", "alice\nhelix> ")
+        ser.send("passwd newpass\n")
+        check("passwd changes the current user's password", "passwd: password changed for 'alice'")
+        ser.send("su root\n")
+        ser.send("whoami\n")
+        check("su root returns to the console identity", "root\nhelix> ")
 
         # --- commands ---
         ser.send("help\n")
@@ -450,8 +469,11 @@ def main():
 
         # Desktop: start it, open nothing, leave with Esc. This is the path that used
         # to fault when a process had run before it; the event log records the start.
+        # The desktop opens behind a sign-in screen: alice (password set above) signs in.
         ser.send("desktop\n")
-        check("desktop starts in graphics mode", "[desktop] started")
+        ser.send("alice\t")
+        ser.send("newpass\n")
+        check("signing in starts the desktop in graphics mode", "[desktop] started")
         ser.send("\x1b")
         check("Esc leaves the desktop and returns to the shell", "[desktop] exited")
 

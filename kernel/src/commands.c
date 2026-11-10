@@ -9,6 +9,7 @@
 #include "desktop.h"
 #include "klog.h"
 #include "commands.h"
+#include "accounts.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -2028,7 +2029,8 @@ static void cmd_uname(int argc, char **argv) {
 
 static void cmd_whoami(int argc, char **argv) {
     (void)argc; (void)argv;
-    console_write("root\n");
+    console_write(accounts_session());
+    console_write("\n");
 }
 
 static void cmd_chmod(int argc, char **argv) {
@@ -2084,27 +2086,82 @@ static void cmd_chown(int argc, char **argv) {
 }
 
 static void cmd_mkusr(int argc, char **argv) {
-    if (argc < 2) {
-        console_write("mkusr: missing username\n");
-        console_write("usage: mkusr <username> [password]\n");
+    if (argc < 3) {
+        console_write("mkusr: missing username or password\n");
+        console_write("usage: mkusr <username> <password>\n");
         return;
     }
-    /* User management requires /etc/passwd and /etc/shadow support.
-     * For now, just report the request. */
-    console_write("mkusr: user '");
+    if (!ext4_get_current()) {
+        console_write("mkusr: no ext4 filesystem mounted\n");
+        return;
+    }
+    if (!accounts_name_valid(argv[1])) {
+        console_write("mkusr: names use letters, digits, '-' and '_', and start with a letter\n");
+        return;
+    }
+    uint32_t uid = 0;
+    if (!accounts_create(argv[1], argv[2], &uid)) {
+        console_write("mkusr: could not create '");
+        console_write(argv[1]);
+        console_write("' (name taken, table full, or password too long)\n");
+        return;
+    }
+    console_write("mkusr: created '");
     console_write(argv[1]);
-    console_write("' creation requested (not yet implemented)\n");
+    console_write("' (uid ");
+    console_write_dec(uid);
+    console_write(")\n");
+}
+
+static void cmd_users(int argc, char **argv) {
+    (void)argc; (void)argv;
+    console_write("root (uid 0, console)\n");
+    for (uint32_t i = 0; i < accounts_count(); i++) {
+        console_write(accounts_name(i));
+        console_write("\n");
+    }
 }
 
 static void cmd_su(int argc, char **argv) {
     if (argc < 2) {
         console_write("su: missing username\n");
-        console_write("usage: su [username]\n");
+        console_write("usage: su <username> [password]   (root needs no password)\n");
         return;
     }
-    console_write("su: switching to user '");
-    console_write(argv[1]);
-    console_write("' (not yet implemented)\n");
+    if (strcmp(argv[1], "root") == 0) {
+        accounts_set_session("root", 0);
+        return;
+    }
+    if (argc < 3) {
+        console_write("su: password required\n");
+        return;
+    }
+    uint32_t uid = 0;
+    if (!accounts_verify(argv[1], argv[2], &uid)) {
+        console_write("su: authentication failed\n");
+        return;
+    }
+    accounts_set_session(argv[1], uid);
+}
+
+static void cmd_passwd(int argc, char **argv) {
+    if (argc < 2) {
+        console_write("passwd: missing new password\n");
+        console_write("usage: passwd <new-password>\n");
+        return;
+    }
+    const char *who = accounts_session();
+    if (strcmp(who, "root") == 0) {
+        console_write("passwd: root is the console and has no password entry\n");
+        return;
+    }
+    if (!accounts_set_password(who, argv[1])) {
+        console_write("passwd: could not save the new password\n");
+        return;
+    }
+    console_write("passwd: password changed for '");
+    console_write(who);
+    console_write("'\n");
 }
 
 static void cmd_dosu(int argc, char **argv) {
@@ -2346,6 +2403,8 @@ const command_t helix_commands[] = {
     {"chown",   "change file owner",                    cmd_chown},
     {"mkusr",   "create a user account",                cmd_mkusr},
     {"su",      "switch user identity",                 cmd_su},
+    {"users",   "list user accounts",                   cmd_users},
+    {"passwd",  "change the current user's password",   cmd_passwd},
     {"dosu",    "switch user and execute command",       cmd_dosu},
     {"find",    "search for files in a directory tree", cmd_find},
     {"exit",    "halt the machine",                     cmd_exit},

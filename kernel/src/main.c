@@ -48,6 +48,7 @@
 #include "e1000.h"
 #include "net.h"
 #include "klog.h"
+#include "accounts.h"
 #include "virtio_gpu.h"
 #include "ext4.h"
 
@@ -338,6 +339,7 @@ void kmain(void) {
         fs_boot_add_file("LICENSE", "MIT License\n\nCopyright (c) 2025 Helix OS\n\nPermission is hereby granted, free of charge, ...\n", 0);
     } else {
         console_write("[main] mounted ext4 from ramdisk as root\n");
+        accounts_init();
         /* ext4_set_time_source and ext4_mount already set g_ext4_current */
     }
 

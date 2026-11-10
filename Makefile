@@ -164,6 +164,7 @@ test: image
 	@BUILD_DIR="$(BUILD_DIR)" python3 tests/shell-test.py "$(IMAGE)"
 	@BUILD_DIR="$(BUILD_DIR)" python3 tests/usb-test.py "$(IMAGE)"
 	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/usb-hid-unit" tests/usb-hid-unit.c kernel/src/usb_hid.c && "$(BUILD_DIR)/test/usb-hid-unit"
+	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/sha256-unit" tests/sha256-unit.c kernel/src/sha256.c && "$(BUILD_DIR)/test/sha256-unit"
 	@$(MAKE) -C runtime test
 	@$(MAKE) -C mac-darwin-compat test
 	@$(MAKE) -C donejs-compat test
