@@ -23,6 +23,9 @@ enum {
 
 /* Codes returned by keyboard_read and input_getchar for the editing keys. They
  * sit outside the byte range, so a key code never collides with a typed character. */
+/* Switches between the graphical session and the TUI shell. Ctrl+Alt+T on the
+ * keyboard; Ctrl+T (0x14) arrives this way on the serial console. */
+#define KBD_SWITCH_KEY   0x14
 #define SHELL_KEY_UP     0x101
 #define SHELL_KEY_DOWN   0x102
 #define SHELL_KEY_LEFT   0x103

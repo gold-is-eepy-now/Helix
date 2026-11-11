@@ -50,7 +50,8 @@ native object model. They are not the foundation.
 | User space / ELF / syscalls | 🚧 ring-3 entry, syscall gate, console input, ELF64 loader, file I/O on the root, brk heap, nested `execve` with argv and environment, `/bin` installed at boot and `/bin/init` starting `/bin/sh`, machine-tested (M9); libc-style runtime still partial |
 | Userland shell (`usershell`) | 🚧 ring-3 program with its own line editor, history, built-ins and `/bin` programs, machine-tested; runtime is minimal (not a libc) |
 | Graphics (`docs/12-graphics.md`) | 🚧 virtio-gpu device found and its display list read (QEMU only); the desktop still draws to the GOP framebuffer |
-| Graphical desktop (`desktop`) | 🚧 basic Windows-98-style desktop: My Computer, About, Terminal, Text Editor (window-only redraw while typing, Save button), Browser (plain http:// pages as text), taskbar with clock, Start menu, PS/2 or USB mouse pointer; QEMU-tested only |
+| Sign-in, desktop and TUI shell | 🚧 boot goes to a graphical sign-in screen (accounts in `/etc/users`, PBKDF2 hashes); Ctrl+Alt+T opens the TUI shell and returns; Esc on the desktop signs out; QEMU-tested only |
+| Graphical desktop (`desktop`) | 🚧 Windows-7-style desktop: glass window frames, taskbar with Start orb, My Computer, About, Terminal, Text Editor, Browser (plain http:// pages as text), clock, Start menu, PS/2 or USB mouse pointer; QEMU-tested only |
 | Line editor (`/bin/edit FILE`) | 🚧 ring-3 program: type commands (`a`, `i`, `r`, `d`, `p`, `w`, `q`); QEMU-tested only |
 | Kernel event log (`log`) | ✅ 512-event ring of kernel activity, dumped automatically on a CPU exception; machine-tested |
 | Shell command history (Up/Down, `history`) | ✅ working in the kernel shell; a userland shell still to come |

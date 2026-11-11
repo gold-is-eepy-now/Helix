@@ -231,6 +231,8 @@ void shell_history_print(void) {
     }
 }
 
+static bool g_leave_shell;   /* set when the switch key is pressed while reading a line */
+
 static size_t read_line(char *line, size_t max) {
     size_t len = 0;
     g_history_pos = g_history_count;
@@ -239,6 +241,10 @@ static size_t read_line(char *line, size_t max) {
         if (c < 0) {
             __asm__ volatile("pause");
             continue;
+        }
+        if (c == KBD_SWITCH_KEY) {
+            g_leave_shell = true;
+            return (size_t)-1;
         }
 
         if (c == SHELL_KEY_UP) {
@@ -536,6 +542,28 @@ void shell_run(void) {
         size_t len = read_line(line, sizeof(line));
         if (len == (size_t)-1) {
             continue; /* cancelled */
+        }
+        history_add(line);
+        execute(line);
+    }
+}
+
+/* The kernel shell inside the graphical session: the same loop as shell_run, but it
+ * returns when the switch key is pressed, so the caller can go back to the desktop. */
+void shell_run_until_switch(void) {
+    static char line[LINE_MAX];
+    for (;;) {
+        console_set_fg(CONSOLE_BRIGHT_GREEN);
+        console_write(PROMPT);
+        console_reset_color();
+
+        size_t len = read_line(line, sizeof(line));
+        if (g_leave_shell) {
+            g_leave_shell = false;
+            return;
+        }
+        if (len == (size_t)-1) {
+            continue;
         }
         history_add(line);
         execute(line);

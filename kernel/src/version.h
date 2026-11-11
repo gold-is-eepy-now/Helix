@@ -3,8 +3,8 @@
 #define HELIX_VERSION_H
 
 #define HELIX_NAME    "Helix OS"
-#define HELIX_VERSION "0.5.41-dev.20261111"
-#define HELIX_CODENAME "Keystone"
+#define HELIX_VERSION "0.5.42-dev.20261111"
+#define HELIX_CODENAME "Gateway"
 #define HELIX_BUILD_DATE "2026-11-11"
 #define HELIX_SHELL   "helixsh"
 

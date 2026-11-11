@@ -151,8 +151,13 @@ bool keyboard_read_event(keyboard_event_t *event) {
 }
 
 int keyboard_read(void) {
+    static bool ctrl_held, alt_held;
     keyboard_event_t event;
-    if (!keyboard_read_event(&event) || !event.pressed) return -1;
+    if (!keyboard_read_event(&event)) return -1;
+    if (event.key == KBD_KEY_CTRL) ctrl_held = event.pressed;
+    if (event.key == KBD_KEY_ALT) alt_held = event.pressed;
+    if (!event.pressed) return -1;
+    if ((event.key == 't' || event.key == 'T') && ctrl_held && alt_held) return KBD_SWITCH_KEY;
     if (event.key == '\n') return '\n';
     if (event.key == KBD_KEY_ENTER) return '\n';
     if (event.key == KBD_KEY_ESCAPE) return 0x1b;

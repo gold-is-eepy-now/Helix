@@ -36,6 +36,7 @@
 #include "fb.h"
 #include "input.h"
 #include "login.h"
+#include "ui.h"
 #include "keyboard.h"
 #include "klog.h"
 #include "html_text.h"
@@ -1565,6 +1566,9 @@ static bool handle_key(int c) {
     return false;
 }
 
+/* True until someone signs in; leaving the desktop signs the user out again. */
+static bool g_login_pending = true;
+
 bool desktop_run(void) {
     if (!fb_ready()) return false;
     uint32_t sw = fb_width(), sh = fb_height();
@@ -1605,9 +1609,12 @@ bool desktop_run(void) {
     g_menu_open = false;
 
     fb_graphics_begin();   /* the text console stays quiet while the desktop is up */
-    if (!login_run()) {    /* the desktop starts only after a sign-in */
-        fb_graphics_end();
-        return false;
+    if (g_login_pending) {  /* the desktop starts only after a sign-in */
+        if (!login_run()) {
+            fb_graphics_end();
+            return false;
+        }
+        g_login_pending = false;
     }
     klog_note(KLOG_DESKTOP, "[desktop] started (%llux%llu)\n", (unsigned long long)sw, (unsigned long long)sh);
     redraw();
@@ -1618,6 +1625,10 @@ bool desktop_run(void) {
         int p = poll_pointer();
         if (p == PTR_EXIT) break;
         int c = input_getchar();
+        if (c == KBD_SWITCH_KEY) {      /* Ctrl+Alt+T: leave for the TUI shell */
+            ui_request_switch();
+            break;
+        }
         if (c < 0) {
             /* Idle: repaint when the pointer moved or the clock's minute changed. */
             int y, mo, d, h, mi, s, wd;
@@ -1639,6 +1650,9 @@ bool desktop_run(void) {
     }
 
     fb_graphics_end();     /* hand the screen back to the text console */
+    if (!ui_switch_requested()) {
+        g_login_pending = true;   /* leaving the desktop signs the user out */
+    }
     klog_note(KLOG_DESKTOP, "[desktop] exited\n");
     return true;
 }

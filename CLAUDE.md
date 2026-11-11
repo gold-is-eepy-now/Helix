@@ -168,6 +168,10 @@ Also, in the same change:
   `/etc/users` (PBKDF2-HMAC-SHA256 hashes, RDRAND salts; `users`, `mkusr`, `su`,
   `passwd`, `whoami`) and a graphical sign-in screen that `desktop` shows first.
   SHA-256 checked against published vectors on the host (`tests/sha256-unit.c`).
+- **Implemented (boot to sign-in, QEMU-tested only):** with a framebuffer, boot goes
+  straight to the sign-in screen (`ui.c`). Ctrl+Alt+T (Ctrl+T on serial) opens the TUI
+  shell on screen and returns. Esc on the desktop signs out. Without a framebuffer, the
+  serial shell runs as before.
 - **Implemented (desktop, basic, QEMU-tested only):** `desktop` command: blue
   Windows-7-style wallpaper (cached gradient), glass window frames with rounded
   corners, taskbar with Start orb, desktop, My Computer, About, Terminal, Text Editor and Browser windows (the Browser loads plain http:// pages and shows them as text; the Terminal runs kernel shell

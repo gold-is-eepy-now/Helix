@@ -234,15 +234,12 @@ def main():
         check("boot banner: HELIX OS", "HELIX OS")
         check("boot banner: Boot successful.", "Boot successful.")
         check("linux compat self-test passed at boot", "[compat] self-test passed")
-        # M9: the kernel installs /bin, starts /bin/init (PID 1) from it, and init
-        # starts /bin/sh, so the first prompt at boot is the userland shell.
+        # A graphical boot goes to the sign-in screen (PID 1 is not started then).
+        # Ctrl+T, which is 0x14 on serial, opens the TUI shell from there.
         check("boot installs /bin/sh from the embedded image", "[bin] installed /bin/sh")
-        check("PID 1 (/bin/init) starts /bin/sh", "[init] starting /bin/sh")
-        check("userland shell is the first prompt at boot", "ring3> ")
-        ser.send("exit\n")
-        check("PID 1 reports /bin/sh's exit status", "[init] /bin/sh exited with status 0")
-        check("init (PID 1) exits with status 0 at boot", "[init] PID 1 exited with status 0")
-        check("shell prompt", "helix> ")
+        check("boot reaches the sign-in screen", "[ui] sign-in")
+        ser.send("\x14")
+        check("Ctrl+T opens the TUI shell prompt", "helix> ")
         check("sha256 self-test passes at boot", "[crypto] sha256 self-test passed")
 
         # --- user accounts: names, passwords hashed with PBKDF2-HMAC-SHA256 ---

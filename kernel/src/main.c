@@ -48,6 +48,7 @@
 #include "e1000.h"
 #include "net.h"
 #include "klog.h"
+#include "ui.h"
 #include "accounts.h"
 #include "virtio_gpu.h"
 #include "ext4.h"
@@ -241,9 +242,9 @@ static void kernel_main_continue(void) {
     if (!userbin_install()) {
         kprintf("[init] could not install /bin\n");
     }
-    {
+    usermode_env_reset();   /* default PATH and HOME for every program, on every boot */
+    if (!fb_ready()) {      /* graphical boots go to the sign-in screen instead */
         const char *init_argv[] = { "/bin/init", NULL };
-        usermode_env_reset();
         int64_t init_status = usermode_spawn("/bin/init", 1, init_argv);
         if (init_status < 0) {
             kprintf("[init] could not start /bin/init (status %d)\n", (int)init_status);
@@ -259,7 +260,7 @@ static void kernel_main_continue(void) {
     thread_init();
     thread_yield();
 
-    shell_run();
+    ui_run();            /* sign-in, desktop and TUI shell; falls back to the serial shell */
     kernel_idle_loop();
 }
 

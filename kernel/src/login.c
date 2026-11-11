@@ -10,6 +10,7 @@
 #include "input.h"
 #include "keyboard.h"
 #include "kstring.h"
+#include "ui.h"
 #include "time.h"
 
 #define PANEL_W   440u
@@ -237,6 +238,11 @@ bool login_run(void) {
         }
         prev = c;
         redraw = true;
+        if (c == KBD_SWITCH_KEY) {           /* Ctrl+Alt+T: go to the TUI shell */
+            ui_request_switch();
+            secure_zero(&st, sizeof st);
+            return false;
+        }
         if (c == 27 || c == KBD_KEY_ESCAPE) {
             secure_zero(&st, sizeof st);
             return false;

@@ -31,8 +31,18 @@ power → UEFI → Limine → kmain()
                     ├─ boot banner (HELIX OS / ...)
                     ├─ status lines (console, memory, clock)
                     │
-                    └─ shell_run() ─────────► helix>
+                    └─ ui_run()
+                         ├─ framebuffer present ─► sign-in screen ─► desktop
+                         │                         Ctrl+Alt+T ─► TUI shell (helix>)
+                         └─ no framebuffer ──────► shell_run() ─► helix>
 ```
+
+On a machine with a framebuffer, boot goes straight to the sign-in screen, and PID 1
+(`/bin/init`) is not started. Ctrl+Alt+T (Ctrl+T on the serial console) switches to the
+TUI shell, a text shell on the screen. Ctrl+Alt+T again returns to the screen you came
+from. Esc on the desktop signs out. The ring-3 shell is still available: `exec /bin/sh`
+from the TUI shell or the desktop Terminal. Without a framebuffer the serial shell runs
+as before, and `/bin/init` starts `/bin/sh`.
 
 ---
 
@@ -301,6 +311,11 @@ shows it; typing `myprog arg1 arg2` runs it.
 | `echo` | prints its arguments |
 | `history` | lists the lines typed so far, numbered (Up/Down recall them) |
 | `usermode` | runs a built-in test program in ring 3; it writes a line through the syscall gate and exits with status 7 |
+| `users` | lists accounts: the console `root` (uid 0) and the accounts in `/etc/users` |
+| `mkusr <name> <password>` | creates an account; passwords are stored as PBKDF2-HMAC-SHA256 hashes with a random salt |
+| `su <name> <password>` | switches the console to an account after checking its password; `su root` needs no password |
+| `passwd <new>` | changes the password of the current account (not root) |
+| `whoami` | prints the current identity |
 | `usershell` | runs the userland shell in ring 3 (an ELF loaded into its own process); type `exit` to return. Inside it: `cat <path>`, `write <path> <text>` and `heap` (a 64 KiB brk heap check) |
 | `init` | runs `/bin/init` (PID 1) in ring 3; it starts `/bin/sh` |
 | `exec` | `exec <path> [args...]`: runs a program from the root and waits for it |
