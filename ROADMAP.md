@@ -274,6 +274,7 @@ not implemented.
   QEMU-tested only. Stage 5 (ping to internet addresses) is blocked here: the host
   disables unprivileged ICMP. HTTPS (TLS 1.3, crypto primitives, certificate checks) is not started.
 - 🚧 Graphics: a virtio 1.0 transport and the virtio-gpu display list (`gpu`, `docs/12-graphics.md`, step 1 of 4). Resources, scanout and flushes are next.
+- 🚧 My Computer is an Explorer-style window over the ext4 volume: an Up button and the path, folders listed first, a click or Enter opens a folder, Backspace goes up, and a file's first 512 bytes show in a preview pane (binary files show as dots). A Settings window shows read-only information (signed-in user, accounts, screen size, version); nothing can be changed there yet. QEMU-tested (screenshots) only.
 - 🚧 A basic graphical desktop (`desktop` command): teal desktop, My Computer and
   About windows, taskbar with clock, Start menu, a pointer driven by a PS/2
   mouse (QEMU's default pointer; `kernel/src/ps2_mouse.c`) or a USB mouse. A Terminal icon opens a window that runs kernel shell commands (the recovery shell) and `exec <path>` for ring-3 programs, with output shown in the window. Moving the pointer redraws only the arrow; typing in the Text Editor window (`note.txt` in the root, arrows, Home, End, Delete, a Save button) redraws only that window; dragging a title bar moves an outline and redraws the window on release. Tested in QEMU only (screenshots; PS/2 and USB mouse emulation); not on

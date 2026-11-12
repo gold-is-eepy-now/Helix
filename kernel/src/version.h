@@ -3,9 +3,9 @@
 #define HELIX_VERSION_H
 
 #define HELIX_NAME    "Helix OS"
-#define HELIX_VERSION "0.5.42-dev.20261111"
-#define HELIX_CODENAME "Gateway"
-#define HELIX_BUILD_DATE "2026-11-11"
+#define HELIX_VERSION "0.5.43-dev.20261113"
+#define HELIX_CODENAME "Explorer"
+#define HELIX_BUILD_DATE "2026-11-13"
 #define HELIX_SHELL   "helixsh"
 
 #endif /* HELIX_VERSION_H */

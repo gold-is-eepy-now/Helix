@@ -1,8 +1,9 @@
 /* desktop.c — a basic Windows 98-style desktop, drawn on the framebuffer.
  *
  * What it is: a teal desktop with two icons, a grey taskbar with a Start menu
- * and a clock, and bevelled windows with navy title bars. "My Computer" lists the
- * real root directory from the ext4 volume; "About Helix" is static text.
+ * and a clock, and bevelled windows with navy title bars. "My Computer" is an
+ * Explorer-style window over the ext4 volume (folders, files, a preview of a file);
+ * "Settings" shows read-only system information; "About Helix" is static text.
  *
  * Terminal icon: a window that runs kernel shell commands (the recovery shell) and
  * exec <path> for ring-3 programs, with their output shown in the window.
@@ -39,8 +40,10 @@
 #include "login.h"
 #include "ui.h"
 #include "keyboard.h"
+#include "accounts.h"
 #include "klog.h"
 #include "html_text.h"
+#include "version.h"
 #include "net_http.h"
 #include "ps2_mouse.h"
 #include "kstring.h"
@@ -53,12 +56,12 @@
 /* Win98-style palette, packed for the framebuffer at run time. */
 static uint32_t c_desk, c_face, c_white, c_dark, c_black, c_navy, c_gray;
 
-typedef enum { APP_MYCOMP, APP_ABOUT, APP_SHUTDOWN, APP_TERMINAL, APP_EDITOR, APP_BROWSER, APP_COUNT } app_t;
+typedef enum { APP_MYCOMP, APP_ABOUT, APP_SHUTDOWN, APP_TERMINAL, APP_EDITOR, APP_BROWSER, APP_SETTINGS, APP_COUNT } app_t;
 
-static const char *const g_app_names[APP_COUNT] = { "My Computer", "About Helix", "Shut Down", "Terminal", "Text Editor", "Browser" };
+static const char *const g_app_names[APP_COUNT] = { "My Computer", "About Helix", "Shut Down", "Terminal", "Text Editor", "Browser", "Settings" };
 
 #define ICON_COUNT 5            /* icons on the desktop: My Computer, About Helix, Terminal, Text Editor, Browser */
-#define MENU_COUNT 3            /* Start menu items, the last one is Shut Down */
+#define MENU_COUNT 4            /* Start menu items, in order; Shut Down is last (see g_menu_app) */
 #define MAX_WIN 4
 #define MAX_LINES 16
 #define LINE_LEN 48
@@ -71,6 +74,9 @@ static const char *const g_app_names[APP_COUNT] = { "My Computer", "About Helix"
 
 /* The app each desktop icon opens (icon i is not app i, since Shut Down is an app too). */
 static const app_t g_icon_app[ICON_COUNT] = { APP_MYCOMP, APP_ABOUT, APP_TERMINAL, APP_EDITOR, APP_BROWSER };
+
+/* The Start menu's items, top to bottom. */
+static const app_t g_menu_app[MENU_COUNT] = { APP_MYCOMP, APP_SETTINGS, APP_ABOUT, APP_SHUTDOWN };
 
 typedef struct {
     bool used;
@@ -233,37 +239,225 @@ static void add_line(app_t app, const char *s) {
     put_str(g_text[app][g_nlines[app]++], LINE_LEN, s);
 }
 
-/* Callback for ext4_readdir: one line per entry in the root directory. */
-static bool list_entry(void *ctx, const ext4_stat_t *st, const char *name, uint32_t name_len) {
-    (void)ctx;
-    if (name_len == 1 && name[0] == '.') return false;
-    if (name_len == 2 && name[0] == '.' && name[1] == '.') return false;
-    if (g_nlines[APP_MYCOMP] >= MAX_LINES) return true;   /* window is full */
+/* ------------------------------------------------------------------ */
+/* My Computer: an Explorer-style window over the ext4 volume.         */
+/* A toolbar (Up and the path), the folder's entries on the left, and  */
+/* a preview of the selected file on the right. A click selects an     */
+/* entry; a folder opens on a second click or Enter; a file's first    */
+/* bytes show in the preview. Backspace goes up one folder. Each folder */
+/* is read with ext4_readdir when it is opened, so the list is current. */
+/* ------------------------------------------------------------------ */
 
-    char line[LINE_LEN];
-    size_t at = 0;
-    line[0] = '\0';
-    uint32_t shown = name_len < 26 ? name_len : 26;
-    for (uint32_t i = 0; i < shown; i++) {
-        char c = name[i];
-        if (c < 0x20 || c > 0x7e) c = '?';
-        if (at + 1 < sizeof(line)) line[at++] = c;
+#define EXP_MAX        64u          /* entries listed for one folder */
+#define EXP_DEPTH      12           /* folder levels below the root */
+#define EXP_NAME       28           /* longest name kept (longer names are cut) */
+#define EXP_PREV_LINES 14           /* lines of a previewed file */
+#define EXP_PREV_COLS  30           /* characters per preview line */
+#define EXP_PREV_BYTES 512u         /* bytes read for a preview */
+#define EXP_TOOL_H     26u          /* toolbar strip: the Up button and the path */
+#define EXP_STAT_H     18u          /* status line at the bottom */
+#define EXP_LIST_W     230u         /* the list pane; the preview pane is to its right */
+
+typedef struct {
+    uint64_t ino;
+    uint64_t size;
+    bool dir;
+    char name[EXP_NAME];
+} exp_entry_t;
+
+static struct {
+    uint64_t ino[EXP_DEPTH];          /* the folder at each level; ino[0] is the root */
+    char name[EXP_DEPTH][EXP_NAME];   /* that folder's name; name[0] stays empty */
+    uint32_t depth;                   /* the folder shown is ino[depth] */
+    exp_entry_t ent[EXP_MAX];
+    uint32_t n;                       /* entries in use */
+    uint32_t sel;                     /* the selected entry */
+    uint32_t top;                     /* the first entry drawn in the list */
+    bool previewing;                  /* the selected file's first bytes are shown */
+    char prev_name[EXP_NAME];
+    uint64_t prev_size;
+    uint32_t prev_n;
+    char prev[EXP_PREV_LINES][EXP_PREV_COLS + 1];
+    char status[80];
+} g_exp;
+
+static bool exp_same(const char *a, const char *b) {
+    while (*a != '\0' && *a == *b) {
+        a++;
+        b++;
     }
-    line[at] = '\0';
-    while (at < 30) {                       /* pad the name into a column */
-        at = cat_str(line, sizeof(line), at, " ");
+    return *a == '\0' && *b == '\0';
+}
+
+/* The folder's path: "/" then the names joined with "/". */
+static void exp_path(char *out, size_t cap) {
+    size_t at = cat_str(out, cap, 0, "/");
+    for (uint32_t d = 1; d <= g_exp.depth; d++) {
+        at = cat_str(out, cap, at, g_exp.name[d]);
+        if (d < g_exp.depth) at = cat_str(out, cap, at, "/");
     }
-    if (EXT4_S_ISDIR(st->mode)) {
-        at = cat_str(line, sizeof(line), at, "<DIR>");
-    } else {
-        at = cat_dec(line, sizeof(line), at, st->size);
-        at = cat_str(line, sizeof(line), at, " bytes");
+}
+
+/* Rows of the list that fit in a client area of height ch. */
+static uint32_t exp_rows(uint32_t ch) {
+    uint32_t used = EXP_TOOL_H + EXP_STAT_H + 4u;
+    return ch > used ? (ch - used) / 12u : 0u;
+}
+
+/* Folders sort before files; names compare case-insensitively. */
+static int exp_lower(char c) {
+    return (c >= 'A' && c <= 'Z') ? c + ('a' - 'A') : (int)c;
+}
+
+static bool exp_before(const exp_entry_t *a, const exp_entry_t *b) {
+    if (a->dir != b->dir) return a->dir;
+    for (uint32_t i = 0; i < EXP_NAME; i++) {
+        int ca = exp_lower(a->name[i]);
+        int cb = exp_lower(b->name[i]);
+        if (ca != cb) return ca < cb;
+        if (ca == 0) return false;
     }
-    add_line(APP_MYCOMP, line);
     return false;
 }
 
+/* Callback for ext4_readdir: keep each entry except "." and "..". */
+static bool exp_collect(void *ctx, const ext4_stat_t *st, const char *name, uint32_t name_len) {
+    (void)ctx;
+    if (name_len == 0) return false;
+    if (name[0] == '.' && (name_len == 1 || (name_len == 2 && name[1] == '.'))) return false;
+    if (g_exp.n >= EXP_MAX) return true;             /* the list is full */
+    exp_entry_t *e = &g_exp.ent[g_exp.n++];
+    uint32_t k = name_len < EXP_NAME - 1 ? name_len : EXP_NAME - 1;
+    for (uint32_t i = 0; i < k; i++) {
+        char c = name[i];
+        e->name[i] = (c < 0x20 || c > 0x7e) ? '?' : c;
+    }
+    e->name[k] = '\0';
+    e->ino = st->ino;
+    e->size = st->size;
+    e->dir = EXT4_S_ISDIR(st->mode);
+    return false;
+}
+
+static void exp_preview(uint32_t i);
+
+/* Read the folder ino[depth] into the list, sorted, and reset the selection. */
+static void exp_load(void) {
+    g_exp.n = 0;
+    g_exp.sel = 0;
+    g_exp.top = 0;
+    g_exp.previewing = false;
+    ext4_fs_t *fs = ext4_get_current();
+    if (fs == NULL) {
+        put_str(g_exp.status, sizeof g_exp.status, "No ext4 volume is mounted.");
+        return;
+    }
+    ext4_readdir(fs, g_exp.ino[g_exp.depth], exp_collect, NULL);
+    /* Insertion sort: the list is short, and it keeps the code small. */
+    for (uint32_t i = 1; i < g_exp.n; i++) {
+        exp_entry_t tmp = g_exp.ent[i];
+        uint32_t j = i;
+        while (j > 0 && exp_before(&tmp, &g_exp.ent[j - 1])) {
+            g_exp.ent[j] = g_exp.ent[j - 1];
+            j--;
+        }
+        g_exp.ent[j] = tmp;
+    }
+    size_t at = cat_dec(g_exp.status, sizeof g_exp.status, 0, g_exp.n);
+    at = cat_str(g_exp.status, sizeof g_exp.status, at, g_exp.n == 1 ? " item" : " items");
+    if (g_exp.n == EXP_MAX) cat_str(g_exp.status, sizeof g_exp.status, at, " (list full)");
+    /* The first entry is selected, so a file there is shown at once. */
+    if (g_exp.n > 0 && !g_exp.ent[0].dir) exp_preview(0);
+}
+
+/* Read the first bytes of file entry i for the preview pane. */
+static void exp_preview(uint32_t i) {
+    const exp_entry_t *e = &g_exp.ent[i];
+    g_exp.previewing = true;
+    put_str(g_exp.prev_name, sizeof g_exp.prev_name, e->name);
+    g_exp.prev_size = e->size;
+    g_exp.prev[0][0] = '\0';
+    g_exp.prev_n = 1;
+    ext4_fs_t *fs = ext4_get_current();
+    if (fs == NULL || e->size == 0) return;
+    uint8_t buf[EXP_PREV_BYTES];
+    uint64_t got = ext4_read(fs, e->ino, 0, buf, sizeof buf);
+    if (got == 0) {
+        put_str(g_exp.prev[0], sizeof g_exp.prev[0], "(could not read this file)");
+        return;
+    }
+    /* Newlines start a new line, long lines wrap, and bytes that are not text show as dots. */
+    uint32_t line = 0, col = 0;
+    for (uint64_t k = 0; k < got; k++) {
+        uint8_t c = buf[k];
+        if (c == '\r') continue;
+        if (c == '\n' || col == EXP_PREV_COLS) {
+            if (line + 1 >= EXP_PREV_LINES) break;
+            line++;
+            col = 0;
+            g_exp.prev[line][0] = '\0';
+            if (c == '\n') continue;
+        }
+        g_exp.prev[line][col++] = (c < 0x20 || c > 0x7e) ? '.' : (char)c;
+        g_exp.prev[line][col] = '\0';
+    }
+    g_exp.prev_n = line + 1;
+}
+
+static void exp_select(uint32_t i) {
+    if (i >= g_exp.n) return;
+    g_exp.sel = i;
+    if (g_exp.ent[i].dir) {
+        g_exp.previewing = false;
+    } else {
+        exp_preview(i);
+    }
+}
+
+/* Open a folder (it becomes the current one), or preview a file. */
+static void exp_open(uint32_t i) {
+    if (i >= g_exp.n) return;
+    const exp_entry_t *e = &g_exp.ent[i];
+    if (!e->dir) {
+        exp_preview(i);
+        return;
+    }
+    if (g_exp.depth + 1 >= EXP_DEPTH) {
+        put_str(g_exp.status, sizeof g_exp.status, "Folders are nested too deep to open.");
+        return;
+    }
+    uint32_t d = ++g_exp.depth;
+    g_exp.ino[d] = e->ino;
+    put_str(g_exp.name[d], EXP_NAME, e->name);
+    exp_load();
+}
+
+/* Up one folder, with the folder we came from selected. */
+static void exp_up(void) {
+    if (g_exp.depth == 0) return;
+    char came[EXP_NAME];
+    put_str(came, sizeof came, g_exp.name[g_exp.depth]);
+    g_exp.depth--;
+    exp_load();
+    for (uint32_t i = 0; i < g_exp.n; i++) {
+        if (exp_same(g_exp.ent[i].name, came)) {
+            g_exp.sel = i;
+            break;
+        }
+    }
+}
+
+/* Start the window at the root of the volume. */
+static void exp_init(void) {
+    g_exp.depth = 0;
+    ext4_fs_t *fs = ext4_get_current();
+    g_exp.ino[0] = fs != NULL ? ext4_root(fs) : 0;
+    g_exp.name[0][0] = '\0';
+    exp_load();
+}
+
 static void build_content(app_t app) {
+    if ((unsigned)app >= APP_COUNT) return;     /* the table below is indexed by app */
     g_nlines[app] = 0;
     if (app == APP_ABOUT) {
         add_line(app, "Helix OS desktop (basic test build).");
@@ -273,18 +467,6 @@ static void build_content(app_t app) {
         add_line(app, "");
         add_line(app, "Tab switches windows, x closes one.");
         add_line(app, "Start > Shut Down, or Esc, leaves the desktop.");
-    } else if (app == APP_MYCOMP) {
-        add_line(app, "Root directory of the ext4 volume:");
-        add_line(app, "");
-        ext4_fs_t *fs = ext4_get_current();
-        if (fs == NULL) {
-            add_line(app, "(no ext4 volume is mounted)");
-            return;
-        }
-        ext4_readdir(fs, ext4_root(fs), list_entry, NULL);
-        if (g_nlines[app] == 2) {
-            add_line(app, "(empty)");
-        }
     }
 }
 
@@ -699,6 +881,140 @@ static void browser_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
     fb_draw_text(cx + 4u, sy + 6u, st, c_black, 0, false);
 }
 
+/* Draw a line of text clipped to cols characters and to the bottom edge. */
+static void exp_text(uint32_t x, uint32_t y, uint32_t bottom, uint32_t cols, const char *s, uint32_t color) {
+    if (y + 10u > bottom) return;
+    char t[80];
+    put_str(t, sizeof t, s);
+    if (cols < sizeof t && strlen(t) > cols) t[cols] = '\0';
+    fb_draw_text(x, y, t, color, 0, false);
+}
+
+/* My Computer's client area: toolbar, folder list, preview pane, status line. */
+static void exp_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
+    fb_fill_rect(cx, cy, cw, ch, c_white);
+
+    /* Toolbar: the Up button (greyed at the root) and the path. */
+    fb_fill_rect(cx, cy, cw, EXP_TOOL_H, c_face);
+    fb_fill_rect(cx, cy + EXP_TOOL_H - 1u, cw, 1, c_dark);
+    fb_fill_rect(cx + 4u, cy + 3u, 40, 20, c_face);
+    bevel(cx + 4u, cy + 3u, 40, 20, true);
+    fb_draw_text(cx + 12u, cy + 9u, "Up", g_exp.depth > 0 ? c_black : c_gray, 0, false);
+    char path[160];
+    exp_path(path, sizeof path);
+    uint32_t pcols = (cw - 56u) / 8u;
+    if (pcols >= sizeof path) pcols = sizeof path - 1u;
+    if (strlen(path) > pcols) path[pcols] = '\0';
+    fb_draw_text(cx + 52u, cy + 9u, path, c_black, 0, false);
+
+    /* The list pane: keep the selected entry on screen, then draw the visible rows. */
+    uint32_t rows = exp_rows(ch);
+    if (g_exp.sel < g_exp.top) g_exp.top = g_exp.sel;
+    if (rows > 0 && g_exp.sel >= g_exp.top + rows) g_exp.top = g_exp.sel + 1u - rows;
+
+    uint32_t body_y = cy + EXP_TOOL_H;
+    uint32_t body_h = ch - EXP_TOOL_H - EXP_STAT_H;
+    uint32_t list_y = body_y + 2u;
+    fb_fill_rect(cx + EXP_LIST_W, body_y, 1, body_h, c_dark);      /* divider */
+    if (g_exp.n == 0) {
+        fb_draw_text(cx + 6u, list_y, "This folder is empty.", c_black, 0, false);
+    }
+    for (uint32_t r = 0; r < rows; r++) {
+        uint32_t i = g_exp.top + r;
+        if (i >= g_exp.n) break;
+        const exp_entry_t *e = &g_exp.ent[i];
+        uint32_t y = list_y + r * 12u;
+        bool sel = (i == g_exp.sel);
+        if (sel) fb_fill_rect(cx + 2u, y, EXP_LIST_W - 4u, 12, fb_rgb(0x2F, 0x6E, 0xB8));
+        char label[19];
+        put_str(label, sizeof label, e->name);
+        fb_draw_text(cx + 6u, y + 2u, label, sel ? c_white : c_black, 0, false);
+        char info[12];
+        if (e->dir) {
+            put_str(info, sizeof info, "<DIR>");
+        } else {
+            size_t at = cat_dec(info, sizeof info, 0, e->size);
+            cat_str(info, sizeof info, at, " B");
+        }
+        fb_draw_text(cx + EXP_LIST_W - 72u, y + 2u, info, sel ? c_white : c_black, 0, false);
+    }
+
+    /* The preview pane: a file's name, size and first lines, or a folder's hint. */
+    uint32_t px = cx + EXP_LIST_W + 8u;
+    uint32_t prev_cols = (cw - (EXP_LIST_W + 8u) - 6u) / 8u;
+    uint32_t pbottom = cy + ch - EXP_STAT_H;
+    if (g_exp.n > 0 && g_exp.previewing) {
+        exp_text(px, list_y, pbottom, prev_cols, g_exp.prev_name, c_navy);
+        char info[48];
+        size_t at = cat_dec(info, sizeof info, 0, g_exp.prev_size);
+        at = cat_str(info, sizeof info, at, " bytes");
+        if (g_exp.prev_size > EXP_PREV_BYTES) cat_str(info, sizeof info, at, ", first 512 shown");
+        exp_text(px, list_y + 14u, pbottom, prev_cols, info, c_black);
+        uint32_t ty = list_y + 32u;
+        if (g_exp.prev_size == 0) {
+            exp_text(px, ty, pbottom, prev_cols, "(empty file)", c_black);
+        } else {
+            for (uint32_t r = 0; r < g_exp.prev_n; r++) {
+                exp_text(px, ty + r * 12u, pbottom, prev_cols, g_exp.prev[r], c_black);
+            }
+        }
+    } else if (g_exp.n > 0 && g_exp.ent[g_exp.sel].dir) {
+        exp_text(px, list_y, pbottom, prev_cols, g_exp.ent[g_exp.sel].name, c_navy);
+        exp_text(px, list_y + 16u, pbottom, prev_cols, "Folder. Press Enter, or click", c_black);
+        exp_text(px, list_y + 28u, pbottom, prev_cols, "it again, to open it.", c_black);
+    }
+
+    /* Status line. */
+    uint32_t sy = cy + ch - EXP_STAT_H;
+    fb_fill_rect(cx, sy, cw, EXP_STAT_H, c_face);
+    exp_text(cx + 4u, sy + 4u, cy + ch, (cw - 8u) / 8u, g_exp.status, c_black);
+}
+
+/* One line of the Settings page; advances y to the next line. */
+static void settings_line(uint32_t x, uint32_t *y, uint32_t color, const char *s) {
+    fb_draw_text(x, *y, s, color, 0, false);
+    *y += 14u;
+}
+
+/* The Settings page: read-only system information. Nothing here can be changed yet. */
+static void settings_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
+    (void)cw;
+    (void)ch;
+    fb_fill_rect(cx, cy, cw, ch, c_white);
+    uint32_t x = cx + 10u;
+    uint32_t y = cy + 8u;
+    char line[80];
+
+    settings_line(x, &y, c_navy, "Account");
+    const char *who = accounts_session();
+    put_str(line, sizeof line, "Signed in as: ");
+    cat_str(line, sizeof line, strlen(line), (who != NULL && who[0] != '\0') ? who : "(nobody)");
+    settings_line(x, &y, c_black, line);
+    put_str(line, sizeof line, "Accounts on this system: ");
+    cat_dec(line, sizeof line, strlen(line), accounts_count());
+    settings_line(x, &y, c_black, line);
+    settings_line(x, &y, c_black, accounts_persistent() ? "Saved to /etc/users."
+                                                       : "Kept in memory only, not saved.");
+    y += 8u;
+
+    settings_line(x, &y, c_navy, "Display");
+    put_str(line, sizeof line, "Screen: ");
+    size_t at = cat_dec(line, sizeof line, strlen(line), fb_width());
+    at = cat_str(line, sizeof line, at, " x ");
+    cat_dec(line, sizeof line, at, fb_height());
+    settings_line(x, &y, c_black, line);
+    settings_line(x, &y, c_black, "Wallpaper: sky blue (the only choice).");
+    y += 8u;
+
+    settings_line(x, &y, c_navy, "System");
+    put_str(line, sizeof line, "Version: ");
+    cat_str(line, sizeof line, strlen(line), HELIX_VERSION);
+    settings_line(x, &y, c_black, line);
+    settings_line(x, &y, c_black, "Clock: UTC.");
+    y += 8u;
+    settings_line(x, &y, c_gray, "Read-only for now: nothing here can be changed yet.");
+}
+
 static void draw_window(const window_t *w, bool focused) {
     /* Glass frame with a darker outline. */
     fill_box(w->x, w->y, w->w, w->h, 6, 0x1E4C86u, 0x1E4C86u, false);
@@ -736,6 +1052,14 @@ static void draw_window(const window_t *w, bool focused) {
     }
     if (w->app == APP_BROWSER) {
         browser_draw(cx, cy, cw, ch);
+        return;
+    }
+    if (w->app == APP_MYCOMP) {
+        exp_draw(cx, cy, cw, ch);
+        return;
+    }
+    if (w->app == APP_SETTINGS) {
+        settings_draw(cx, cy, cw, ch);
         return;
     }
     uint32_t cols = chars_in(cw - 8);
@@ -851,7 +1175,7 @@ static void draw_start_menu(uint32_t sh) {
         uint32_t iy = my + 4 + (uint32_t)i * 22u;
         bool sel = (i == g_menu_sel);
         if (sel) fill_box(28, iy, 152, 20, 3, 0xA7CCF0u, 0x6FA2DAu, true);
-        fb_draw_text(36, iy + 6, g_app_names[i],
+        fb_draw_text(36, iy + 6, g_app_names[g_menu_app[i]],
                      sel ? fb_rgb(0x10, 0x23, 0x3D) : c_black, 0, false);
     }
 }
@@ -1080,10 +1404,13 @@ static void open_app(app_t app) {
         g_win[i].app = app;
         g_win[i].x = 120u + n * 28u;
         g_win[i].y = 40u + n * 28u;
-        g_win[i].w = app == APP_TERMINAL ? 480 : app == APP_EDITOR ? 420 : app == APP_BROWSER ? 460 : 380;
-        g_win[i].h = app == APP_TERMINAL ? 330 : app == APP_EDITOR ? 280 : app == APP_BROWSER ? 340 : 250;
+        g_win[i].w = app == APP_TERMINAL ? 480 : app == APP_EDITOR ? 420 : app == APP_BROWSER ? 460 :
+                     app == APP_MYCOMP ? 520 : 380;
+        g_win[i].h = app == APP_TERMINAL ? 330 : app == APP_EDITOR ? 280 : app == APP_BROWSER ? 340 :
+                     app == APP_MYCOMP ? 320 : app == APP_SETTINGS ? 270 : 250;
         g_focus = i;
         build_content(app);
+        if (app == APP_MYCOMP) exp_init();   /* opens at the root of the volume */
         if (app == APP_EDITOR) editor_load_file(&g_ed);   /* once; the text survives reopening */
         if (app == APP_TERMINAL && !g_term_started) {
             g_term_started = true;
@@ -1115,6 +1442,50 @@ static void close_focused(void) {
 
 static bool inside(int x, int y, uint32_t rx, uint32_t ry, uint32_t rw, uint32_t rh) {
     return x >= (int)rx && y >= (int)ry && x < (int)(rx + rw) && y < (int)(ry + rh);
+}
+
+/* A click in My Computer: Up goes up; a list row selects it, and a folder that is
+ * already selected opens. The preview pane takes no clicks. */
+static void exp_click(const window_t *w, int x, int y) {
+    uint32_t cx = w->x + 6u, cy = w->y + 26u, cw = w->w - 12u, ch = w->h - 32u;
+    (void)cw;
+    if (y < (int)(cy + EXP_TOOL_H)) {
+        if (inside(x, y, cx + 4u, cy + 3u, 40u, 20u)) exp_up();
+        return;
+    }
+    uint32_t list_y = cy + EXP_TOOL_H + 2u;
+    if (x < (int)cx || x >= (int)(cx + EXP_LIST_W) || y < (int)list_y) return;
+    uint32_t row = ((uint32_t)y - list_y) / 12u;
+    if (row >= exp_rows(ch)) return;
+    uint32_t i = g_exp.top + row;
+    if (i >= g_exp.n) return;
+    if (i == g_exp.sel && g_exp.ent[i].dir) {
+        exp_open(i);
+    } else {
+        exp_select(i);
+    }
+}
+
+/* Keys in My Computer: Up/Down move the selection (a file's preview follows), Enter
+ * opens, Backspace goes up. Returns false for keys it does not use (Esc, Tab, x, s). */
+static bool exp_key(int c) {
+    if (c == SHELL_KEY_UP) {
+        if (g_exp.sel > 0) exp_select(g_exp.sel - 1u);
+        return true;
+    }
+    if (c == SHELL_KEY_DOWN) {
+        if (g_exp.sel + 1u < g_exp.n) exp_select(g_exp.sel + 1u);
+        return true;
+    }
+    if (c == '\n') {
+        exp_open(g_exp.sel);
+        return true;
+    }
+    if (c == 0x08 || c == 0x7f) {
+        exp_up();
+        return true;
+    }
+    return false;
 }
 
 /* A left click at (x, y). Returns PTR_EXIT for Shut Down, otherwise PTR_REDRAW. */
@@ -1179,8 +1550,8 @@ static int handle_click(int x, int y, uint32_t sh) {
             uint32_t iy = my + 4 + (uint32_t)i * 22u;
             if (inside(x, y, 28, iy, 152, 20)) {
                 g_menu_open = false;
-                if (i == APP_SHUTDOWN) return PTR_EXIT;
-                open_app((app_t)i);
+                if (g_menu_app[i] == APP_SHUTDOWN) return PTR_EXIT;
+                open_app(g_menu_app[i]);
                 return PTR_REDRAW;
             }
         }
@@ -1231,6 +1602,10 @@ static int handle_click(int x, int y, uint32_t sh) {
                 bool full = g_repaint;
                 g_repaint = false;
                 return full ? PTR_REDRAW : PTR_NONE;
+            }
+            if (w->app == APP_MYCOMP && !refocus && !menu_was_open) {
+                exp_click(w, x, y);                /* the list or Up changed: repaint the window */
+                return PTR_REDRAW;
             }
             if (refocus || menu_was_open) return PTR_REDRAW;   /* title colours or the menu changed */
             if (w->app == APP_EDITOR) {                        /* caret moved or Save pressed */
@@ -1580,8 +1955,8 @@ static bool handle_key(int c) {
             g_menu_sel = (g_menu_sel + 1) % MENU_COUNT;
         } else if (c == '\n') {
             g_menu_open = false;
-            if (g_menu_sel == APP_SHUTDOWN) return true;
-            open_app((app_t)g_menu_sel);
+            if (g_menu_app[g_menu_sel] == APP_SHUTDOWN) return true;
+            open_app(g_menu_app[g_menu_sel]);
         } else if (c == 0x1b || c == 's' || c == 'S') {
             g_menu_open = false;
         }
@@ -1616,6 +1991,10 @@ static bool handle_key(int c) {
     if (g_focus >= 0 && g_win[g_focus].used && g_win[g_focus].app == APP_EDITOR) {
         editor_key(c);
         return false;
+    }
+
+    if (g_focus >= 0 && g_win[g_focus].used && g_win[g_focus].app == APP_MYCOMP && exp_key(c)) {
+        return false;                  /* Up/Down/Enter/Backspace went to the folder list */
     }
 
     if (g_focus >= 0 && g_win[g_focus].used && g_win[g_focus].app == APP_BROWSER) {
