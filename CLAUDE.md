@@ -174,7 +174,7 @@ Also, in the same change:
   serial shell runs as before.
 - **Implemented (desktop, basic, QEMU-tested only):** `desktop` command: blue
   Windows-7-style wallpaper (cached gradient), glass window frames with rounded
-  corners, taskbar with Start orb, desktop, My Computer (an Explorer-style window: folders, a file preview, Up), Settings (read-only), About, Terminal, Text Editor and Browser windows (the Browser loads plain http:// pages and shows them as text; the Terminal runs kernel shell
+  corners, taskbar with Start orb, desktop, My Computer (an Explorer-style window: folders, a file preview, Up, New folder, New file, Copy, Edit, Delete), Network (ping and name lookup), Settings (a light and dark theme, in memory), About, Terminal, Text Editor and Browser windows (the Browser loads plain http:// pages and shows them as text; the Terminal runs kernel shell
   commands and `exec <path>`, output shown in the window; keyboard-only programs
   are refused), taskbar with clock, Start menu, pointer
   driven by a PS/2 mouse (QEMU's default) or a USB mouse; dragging a title bar moves an outline and redraws the window on release; pointer moves redraw only the arrow; typing in the Text Editor redraws only its window. No compositor; not

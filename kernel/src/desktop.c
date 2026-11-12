@@ -18,6 +18,10 @@
  * What it is not (yet): the desktop runs in the kernel, not as a ring-3 program,
  * and there is no double-click or right-click.
  *
+ * Keys (in My Computer): Up/Down select, Enter opens, Backspace goes up,
+ *        n new folder, f new file, c copy, e edit, d delete (press twice).
+ * Keys (in Network): type a host name or address, Enter pings it.
+ * Keys (in Settings): t toggles the light and dark theme.
  * Keys:  Up/Down  move the icon selection (or the Start menu selection)
  *        Enter    open the selected icon or menu item
  *        s        open or close the Start menu
@@ -45,6 +49,9 @@
 #include "html_text.h"
 #include "version.h"
 #include "net_http.h"
+#include "net.h"
+#include "net_dns.h"
+#include "net_icmp.h"
 #include "ps2_mouse.h"
 #include "kstring.h"
 #include "panic.h"
@@ -55,13 +62,80 @@
 
 /* Win98-style palette, packed for the framebuffer at run time. */
 static uint32_t c_desk, c_face, c_white, c_dark, c_black, c_navy, c_gray;
+static uint32_t c_client, c_ink;      /* client-area fill and text on it: set by theme_apply */
 
-typedef enum { APP_MYCOMP, APP_ABOUT, APP_SHUTDOWN, APP_TERMINAL, APP_EDITOR, APP_BROWSER, APP_SETTINGS, APP_COUNT } app_t;
+/* The theme: every colour that differs between light and dark, as 0xRRGGBB. The packed
+ * c_* globals above are set from the current theme by theme_apply(); the window, taskbar,
+ * menu and wallpaper drawing reads these fields directly. */
+typedef struct {
+    uint32_t client, ink, muted, heading, face, edge;
+    uint32_t frame_rim, frame_focus_top, frame_focus_bot, frame_blur_top, frame_blur_bot;
+    uint32_t cap_focus, cap_blur, client_edge;
+    uint32_t desk_top, desk_bot;
+    uint32_t task_top, task_bot, task_line;
+    uint32_t tbtn_focus_top, tbtn_focus_bot, tbtn_focus_text, tbtn_blur_top, tbtn_blur_bot;
+    uint32_t menu_rim, menu_top, menu_bot, menu_strip, menu_hi_top, menu_hi_bot;
+    uint32_t track, thumb_top, thumb_bot;
+} theme_t;
 
-static const char *const g_app_names[APP_COUNT] = { "My Computer", "About Helix", "Shut Down", "Terminal", "Text Editor", "Browser", "Settings" };
+/* The light theme is the Win98 and Windows 7 look the desktop had before themes. */
+static const theme_t g_theme_light = {
+    .client = 0xFFFFFFu, .ink = 0x000000u, .muted = 0x808080u, .heading = 0x000080u,
+    .face = 0xC0C0C0u, .edge = 0x808080u,
+    .frame_rim = 0x1E4C86u, .frame_focus_top = 0xC4DDF5u, .frame_focus_bot = 0x7FA9D6u,
+    .frame_blur_top = 0xE4ECF5u, .frame_blur_bot = 0xB6C9DEu,
+    .cap_focus = 0x10233Du, .cap_blur = 0x4D6480u, .client_edge = 0x5A7AA3u,
+    .desk_top = 0x6FB6F0u, .desk_bot = 0x0D3D78u,
+    .task_top = 0x33507Au, .task_bot = 0x0F1E36u, .task_line = 0x8FA9CCu,
+    .tbtn_focus_top = 0xA7CCF0u, .tbtn_focus_bot = 0x5B8CC6u, .tbtn_focus_text = 0x10233Du,
+    .tbtn_blur_top = 0x4D6E9Cu, .tbtn_blur_bot = 0x2C4870u,
+    .menu_rim = 0x2B4C7Eu, .menu_top = 0xF4F8FDu, .menu_bot = 0xDCE7F4u, .menu_strip = 0x1B3157u,
+    .menu_hi_top = 0xA7CCF0u, .menu_hi_bot = 0x6FA2DAu,
+    .track = 0xDDE4EEu, .thumb_top = 0xB8D6F2u, .thumb_bot = 0x5F93CFu,
+};
+
+/* The dark theme: dark glass and client areas, light text, and blues kept for accents. */
+static const theme_t g_theme_dark = {
+    .client = 0x1E2430u, .ink = 0xE6EAF0u, .muted = 0x8A94A6u, .heading = 0x7FB2FFu,
+    .face = 0x2C323Du, .edge = 0x4A5566u,
+    .frame_rim = 0x0A1220u, .frame_focus_top = 0x2D4A6Eu, .frame_focus_bot = 0x1A2F4Du,
+    .frame_blur_top = 0x27364Du, .frame_blur_bot = 0x18222Fu,
+    .cap_focus = 0xE6EEF8u, .cap_blur = 0x9AAABDu, .client_edge = 0x3A4A62u,
+    .desk_top = 0x1B2A44u, .desk_bot = 0x06101Fu,
+    .task_top = 0x1F2B3Du, .task_bot = 0x0B1220u, .task_line = 0x3A4C66u,
+    .tbtn_focus_top = 0x3D6FB0u, .tbtn_focus_bot = 0x274E82u, .tbtn_focus_text = 0xE6EEF8u,
+    .tbtn_blur_top = 0x2A3A52u, .tbtn_blur_bot = 0x1B2638u,
+    .menu_rim = 0x0A1220u, .menu_top = 0x1E2633u, .menu_bot = 0x161C27u, .menu_strip = 0x0F2440u,
+    .menu_hi_top = 0x35598Au, .menu_hi_bot = 0x274775u,
+    .track = 0x2C323Du, .thumb_top = 0x4A6A96u, .thumb_bot = 0x33507Au,
+};
+
+static bool g_dark_mode;              /* Settings > Appearance; in memory, so light at each boot */
+static const theme_t *g_th = &g_theme_light;
+
+/* A 0xRRGGBB colour, packed for the framebuffer. */
+static uint32_t rgb_hex(uint32_t v) {
+    return fb_rgb((uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v);
+}
+
+/* Make the current theme's colours the ones the drawing code uses. */
+static void theme_apply(void) {
+    g_th = g_dark_mode ? &g_theme_dark : &g_theme_light;
+    c_client = rgb_hex(g_th->client);
+    c_ink = rgb_hex(g_th->ink);
+    c_face = rgb_hex(g_th->face);
+    c_dark = rgb_hex(g_th->edge);
+    c_navy = rgb_hex(g_th->heading);
+    c_gray = rgb_hex(g_th->muted);
+    c_desk = rgb_hex(g_th->desk_top);
+}
+
+typedef enum { APP_MYCOMP, APP_ABOUT, APP_SHUTDOWN, APP_TERMINAL, APP_EDITOR, APP_BROWSER, APP_SETTINGS, APP_NETWORK, APP_COUNT } app_t;
+
+static const char *const g_app_names[APP_COUNT] = { "My Computer", "About Helix", "Shut Down", "Terminal", "Text Editor", "Browser", "Settings", "Network" };
 
 #define ICON_COUNT 5            /* icons on the desktop: My Computer, About Helix, Terminal, Text Editor, Browser */
-#define MENU_COUNT 4            /* Start menu items, in order; Shut Down is last (see g_menu_app) */
+#define MENU_COUNT 5            /* Start menu items, in order; Shut Down is last (see g_menu_app) */
 #define MAX_WIN 4
 #define MAX_LINES 16
 #define LINE_LEN 48
@@ -76,7 +150,7 @@ static const char *const g_app_names[APP_COUNT] = { "My Computer", "About Helix"
 static const app_t g_icon_app[ICON_COUNT] = { APP_MYCOMP, APP_ABOUT, APP_TERMINAL, APP_EDITOR, APP_BROWSER };
 
 /* The Start menu's items, top to bottom. */
-static const app_t g_menu_app[MENU_COUNT] = { APP_MYCOMP, APP_SETTINGS, APP_ABOUT, APP_SHUTDOWN };
+static const app_t g_menu_app[MENU_COUNT] = { APP_MYCOMP, APP_NETWORK, APP_SETTINGS, APP_ABOUT, APP_SHUTDOWN };
 
 typedef struct {
     bool used;
@@ -254,7 +328,9 @@ static void add_line(app_t app, const char *s) {
 #define EXP_PREV_LINES 14           /* lines of a previewed file */
 #define EXP_PREV_COLS  30           /* characters per preview line */
 #define EXP_PREV_BYTES 512u         /* bytes read for a preview */
-#define EXP_TOOL_H     26u          /* toolbar strip: the Up button and the path */
+#define EXP_TOOL_H     50u          /* toolbar: row 1 the Up button and the path, row 2 the actions */
+#define EXP_BTN_Y      28u          /* row 2 buttons: top edge and height */
+#define EXP_BTN_H      20u
 #define EXP_STAT_H     18u          /* status line at the bottom */
 #define EXP_LIST_W     230u         /* the list pane; the preview pane is to its right */
 
@@ -279,6 +355,8 @@ static struct {
     uint32_t prev_n;
     char prev[EXP_PREV_LINES][EXP_PREV_COLS + 1];
     char status[80];
+    bool del_armed;                   /* Delete was pressed once: the next press deletes */
+    uint64_t del_ino;                 /* the entry that press was for */
 } g_exp;
 
 static bool exp_same(const char *a, const char *b) {
@@ -347,6 +425,7 @@ static void exp_load(void) {
     g_exp.sel = 0;
     g_exp.top = 0;
     g_exp.previewing = false;
+    g_exp.del_armed = false;
     ext4_fs_t *fs = ext4_get_current();
     if (fs == NULL) {
         put_str(g_exp.status, sizeof g_exp.status, "No ext4 volume is mounted.");
@@ -406,6 +485,7 @@ static void exp_preview(uint32_t i) {
 
 static void exp_select(uint32_t i) {
     if (i >= g_exp.n) return;
+    g_exp.del_armed = false;
     g_exp.sel = i;
     if (g_exp.ent[i].dir) {
         g_exp.previewing = false;
@@ -454,6 +534,146 @@ static void exp_init(void) {
     g_exp.ino[0] = fs != NULL ? ext4_root(fs) : 0;
     g_exp.name[0][0] = '\0';
     exp_load();
+}
+
+/* The first name prefix+suffix that is free in dir: "prefix", then "prefix 2suffix", ... */
+static bool exp_unique_name(uint64_t dir, const char *prefix, const char *suffix, char *out, size_t cap) {
+    ext4_fs_t *fs = ext4_get_current();
+    if (fs == NULL) return false;
+    for (uint32_t n = 1; n <= 99; n++) {
+        size_t at = cat_str(out, cap, 0, prefix);
+        if (n > 1) {
+            at = cat_str(out, cap, at, " ");
+            at = cat_dec(out, cap, at, n);
+        }
+        cat_str(out, cap, at, suffix);
+        ext4_stat_t st;
+        if (!ext4_lookup(fs, dir, out, &st)) return true;
+    }
+    return false;
+}
+
+/* Select the entry called name (after a reload), previewing it if it is a file. */
+static void exp_select_name(const char *name) {
+    for (uint32_t i = 0; i < g_exp.n; i++) {
+        if (exp_same(g_exp.ent[i].name, name)) {
+            exp_select(i);
+            return;
+        }
+    }
+}
+
+/* New folder or New file in the current folder. */
+static void exp_new_item(bool folder) {
+    ext4_fs_t *fs = ext4_get_current();
+    if (fs == NULL) {
+        put_str(g_exp.status, sizeof g_exp.status, "No ext4 volume is mounted.");
+        return;
+    }
+    uint64_t dir = g_exp.ino[g_exp.depth];
+    char name[EXP_NAME];
+    if (!exp_unique_name(dir, folder ? "New folder" : "New file", folder ? "" : ".txt", name, sizeof name)) {
+        put_str(g_exp.status, sizeof g_exp.status, "No free name left here.");
+        return;
+    }
+    uint64_t ino = 0;
+    bool ok = folder ? ext4_mkdir(fs, dir, name, EXT4_S_IFDIR | 0755, &ino)
+                     : ext4_create(fs, dir, name, EXT4_S_IFREG | 0644, &ino);
+    if (!ok) {
+        put_str(g_exp.status, sizeof g_exp.status, "Could not create it.");
+        return;
+    }
+    exp_load();
+    exp_select_name(name);
+    cat_str(g_exp.status, sizeof g_exp.status, 0, "Created ");
+    cat_str(g_exp.status, sizeof g_exp.status, strlen(g_exp.status), name);
+}
+
+/* Copy the selected file into the current folder as "<name> copy". Folders are not copied. */
+static void exp_copy_selected(void) {
+    ext4_fs_t *fs = ext4_get_current();
+    if (fs == NULL || g_exp.n == 0) return;
+    const exp_entry_t *e = &g_exp.ent[g_exp.sel];
+    if (e->dir) {
+        put_str(g_exp.status, sizeof g_exp.status, "Copy works on files, not folders.");
+        return;
+    }
+    uint64_t dir = g_exp.ino[g_exp.depth];
+    uint64_t src = e->ino;
+    uint64_t size = e->size;
+    char prefix[24];
+    put_str(prefix, sizeof prefix, e->name);
+    cat_str(prefix, sizeof prefix, strlen(prefix), " copy");
+    char name[EXP_NAME];
+    if (!exp_unique_name(dir, prefix, "", name, sizeof name)) {
+        put_str(g_exp.status, sizeof g_exp.status, "No free name left here.");
+        return;
+    }
+    uint64_t dst = 0;
+    if (!ext4_create(fs, dir, name, EXT4_S_IFREG | 0644, &dst)) {
+        put_str(g_exp.status, sizeof g_exp.status, "Could not create the copy.");
+        return;
+    }
+    uint8_t buf[512];
+    for (uint64_t off = 0; off < size;) {
+        uint64_t want = size - off < sizeof buf ? size - off : sizeof buf;
+        uint64_t got = ext4_read(fs, src, off, buf, want);
+        if (got == 0 || ext4_write(fs, dst, off, buf, got) != got) {
+            exp_load();
+            put_str(g_exp.status, sizeof g_exp.status, "Copy stopped: a read or write failed.");
+            return;
+        }
+        off += got;
+    }
+    exp_load();
+    exp_select_name(name);
+    cat_str(g_exp.status, sizeof g_exp.status, 0, "Copied to ");
+    cat_str(g_exp.status, sizeof g_exp.status, strlen(g_exp.status), name);
+}
+
+/* Delete the selected entry. The first press asks for a second; the second deletes. */
+static void exp_delete_selected(void) {
+    ext4_fs_t *fs = ext4_get_current();
+    if (fs == NULL || g_exp.n == 0) return;
+    const exp_entry_t *e = &g_exp.ent[g_exp.sel];
+    char name[EXP_NAME];
+    put_str(name, sizeof name, e->name);
+    if (!g_exp.del_armed || g_exp.del_ino != e->ino) {
+        g_exp.del_armed = true;
+        g_exp.del_ino = e->ino;
+        cat_str(g_exp.status, sizeof g_exp.status, 0, "Press Delete again to delete ");
+        cat_str(g_exp.status, sizeof g_exp.status, strlen(g_exp.status), name);
+        return;
+    }
+    g_exp.del_armed = false;
+    bool dir = e->dir;
+    if (!ext4_unlink(fs, g_exp.ino[g_exp.depth], name, dir)) {
+        put_str(g_exp.status, sizeof g_exp.status,
+                dir ? "Not deleted: the folder is not empty." : "Not deleted.");
+        return;
+    }
+    exp_load();
+    cat_str(g_exp.status, sizeof g_exp.status, 0, "Deleted ");
+    cat_str(g_exp.status, sizeof g_exp.status, strlen(g_exp.status), name);
+}
+
+static void open_app(app_t app);
+
+/* Open the selected file in the Text Editor. The editor refuses while it holds unsaved text. */
+static void exp_edit_selected(void) {
+    if (g_exp.n == 0) return;
+    const exp_entry_t *e = &g_exp.ent[g_exp.sel];
+    if (e->dir) {
+        put_str(g_exp.status, sizeof g_exp.status, "Only files open in the editor.");
+        return;
+    }
+    char name[EXP_NAME];
+    put_str(name, sizeof name, e->name);
+    if (!editor_open_file(&g_ed, g_exp.ino[g_exp.depth], name)) {
+        put_str(g_exp.status, sizeof g_exp.status, "Save the open file in the editor first.");
+        return;
+    }
+    open_app(APP_EDITOR);
 }
 
 static void build_content(app_t app) {
@@ -688,10 +908,10 @@ static void ed_layout(uint32_t rows, uint32_t cols, char (*out)[ED_MAX_COLS + 1]
 static void ed_paint_row(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t r, const char *text,
                          bool has_caret, uint32_t caret_off) {
     uint32_t y = cy + 4u + r * 12u;
-    fb_draw_text(cx + 4, y, text, c_black, 0, false);
+    fb_draw_text(cx + 4, y, text, c_ink, 0, false);
     if (has_caret) {
         uint32_t px = cx + 4u + caret_off * 8u;
-        if (px < cx + cw - 4u) fb_fill_rect(px, y, 1, 10, c_black);   /* the caret */
+        if (px < cx + cw - 4u) fb_fill_rect(px, y, 1, 10, c_ink);   /* the caret */
     }
 }
 
@@ -699,12 +919,12 @@ static void ed_paint_row(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t r, cons
 static void ed_draw_strip(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
     uint32_t sy = cy + ch - ED_STRIP_H;
     fb_fill_rect(cx, sy, cw, ED_STRIP_H, c_face);
-    fb_draw_text(cx + 4, sy + 7, EDITOR_NAME, c_black, 0, false);
-    fb_draw_text(cx + 4 + (uint32_t)strlen(EDITOR_NAME) * 8u + 16u, sy + 7, g_ed.msg, c_black, 0, false);
+    fb_draw_text(cx + 4, sy + 7, editor_title(&g_ed), c_ink, 0, false);
+    fb_draw_text(cx + 4 + (uint32_t)strlen(editor_title(&g_ed)) * 8u + 16u, sy + 7, g_ed.msg, c_ink, 0, false);
     uint32_t bx = cx + cw - ED_SAVE_W - 4u, by = sy + 3u;
     fb_fill_rect(bx, by, ED_SAVE_W, 16, c_face);
     bevel(bx, by, ED_SAVE_W, 16, true);
-    fb_draw_text(bx + 12, by + 4, "Save", c_black, 0, false);
+    fb_draw_text(bx + 12, by + 4, "Save", c_ink, 0, false);
 }
 
 /* Paint the editor's client area: the visible lines, the caret, the status strip. */
@@ -712,7 +932,7 @@ static void draw_editor(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
     uint32_t rows = ed_row_count(ch);
     editor_scroll_to_cursor(&g_ed, rows);
     uint32_t cols = ed_col_count(cw);
-    fb_fill_rect(cx, cy, cw, ch - ED_STRIP_H, c_white);
+    fb_fill_rect(cx, cy, cw, ch - ED_STRIP_H, c_client);
 
     uint32_t caret_off;
     ed_layout(rows, cols, g_ed_shown.rows, &g_ed_shown.caret_row, &caret_off);
@@ -808,7 +1028,7 @@ static uint32_t br_layout(bool paint, uint32_t px, uint32_t py, uint32_t visible
                 char row[BR_COLS + 1];
                 for (uint32_t j = 0; j < take; j++) row[j] = g_br_text[start + k + j];
                 row[take] = '\0';
-                fb_draw_text(px, py + (r - g_br.top) * 12u, row, c_black, 0, false);
+                fb_draw_text(px, py + (r - g_br.top) * 12u, row, c_ink, 0, false);
             }
             r++;
             k += adv;
@@ -837,21 +1057,21 @@ static void br_bar_geometry(uint32_t by, uint32_t rows, uint32_t *track_y, uint3
 
 static void browser_scrollbar(uint32_t bx, uint32_t by, uint32_t rows) {
     uint32_t bar_h = BR_VISIBLE * 12u;
-    fb_fill_rect(bx, by, BR_BAR_W, bar_h, fb_rgb(0xDD, 0xE4, 0xEE));
+    fb_fill_rect(bx, by, BR_BAR_W, bar_h, rgb_hex(g_th->track));
     bevel(bx, by, BR_BAR_W, bar_h, false);
-    fb_draw_text(bx + 3u, by + 3u, "^", c_black, 0, false);
-    fb_draw_text(bx + 3u, by + bar_h - BR_ARROW + 3u, "v", c_black, 0, false);
+    fb_draw_text(bx + 3u, by + 3u, "^", c_ink, 0, false);
+    fb_draw_text(bx + 3u, by + bar_h - BR_ARROW + 3u, "v", c_ink, 0, false);
     uint32_t track_y, track_h, thumb_y, thumb_h;
     br_bar_geometry(by, rows, &track_y, &track_h, &thumb_y, &thumb_h);
-    fill_box(bx + 2u, thumb_y, BR_BAR_W - 4u, thumb_h, 3, 0xB8D6F2u, 0x5F93CFu, true);
+    fill_box(bx + 2u, thumb_y, BR_BAR_W - 4u, thumb_h, 3, g_th->thumb_top, g_th->thumb_bot, true);
 }
 
 static void browser_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
-    fb_fill_rect(cx, cy, cw, ch, c_white);
+    fb_fill_rect(cx, cy, cw, ch, c_client);
 
     /* Address bar: a sunken box holding the end of the address, with a caret. */
     uint32_t bx = cx + 4u, by = cy + 4u, bw = cw - 8u;
-    fb_fill_rect(bx, by, bw, BR_BAR_H, c_white);
+    fb_fill_rect(bx, by, bw, BR_BAR_H, c_client);
     bevel(bx, by, bw, BR_BAR_H, false);
     uint32_t fits = (bw - 8u) / 8u;
     uint32_t from = g_br.url_len > fits ? g_br.url_len - fits : 0;
@@ -859,8 +1079,8 @@ static void browser_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
     uint32_t k = 0;
     for (uint32_t i = from; i < g_br.url_len; i++) shown[k++] = g_br.url[i];
     shown[k] = '\0';
-    fb_draw_text(bx + 4u, by + 5u, shown, c_black, 0, false);
-    fb_fill_rect(bx + 4u + (g_br.url_len - from) * 8u, by + 3u, 1, 12, c_black);   /* caret */
+    fb_draw_text(bx + 4u, by + 5u, shown, c_ink, 0, false);
+    fb_fill_rect(bx + 4u + (g_br.url_len - from) * 8u, by + 3u, 1, 12, c_ink);   /* caret */
 
     /* Page: plain text rows below the address bar. */
     uint32_t py = cy + BR_BAR_H + 12u;
@@ -878,7 +1098,17 @@ static void browser_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
         sn++;
     }
     st[sn] = '\0';
-    fb_draw_text(cx + 4u, sy + 6u, st, c_black, 0, false);
+    fb_draw_text(cx + 4u, sy + 6u, st, c_ink, 0, false);
+}
+
+/* A raised button with its label centred; the label is grey when the button is off. */
+static void win_button(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const char *label, bool enabled) {
+    fb_fill_rect(x, y, w, h, c_face);
+    bevel(x, y, w, h, true);
+    uint32_t tw = (uint32_t)strlen(label) * 8u;
+    uint32_t tx = x + (w > tw ? (w - tw) / 2u : 2u);
+    uint32_t ty = y + (h > 8u ? (h - 8u) / 2u : 0u);
+    fb_draw_text(tx, ty, label, enabled ? c_ink : c_gray, 0, false);
 }
 
 /* Draw a line of text clipped to cols characters and to the bottom edge. */
@@ -890,22 +1120,145 @@ static void exp_text(uint32_t x, uint32_t y, uint32_t bottom, uint32_t cols, con
     fb_draw_text(x, y, t, color, 0, false);
 }
 
+/* ------------------------------------------------------------------ */
+/* Network window: ping and name lookup over the kernel's network stack. */
+/* Enter pings the host. A name is looked up first; a dotted address is */
+/* used as it is. Each call waits for the network, so the desktop waits too. */
+/* ------------------------------------------------------------------ */
+
+#define NET_HOST_CAP 40
+#define NET_LINES    12
+#define NET_COLS     52
+
+static struct {
+    char host[NET_HOST_CAP];
+    uint32_t host_len;
+    char out[NET_LINES][NET_COLS];
+    uint32_t out_n;
+} g_net;
+
+/* Add a line to the log; when it is full, the oldest line goes. */
+static void net_out(const char *s) {
+    if (g_net.out_n == NET_LINES) {
+        for (uint32_t i = 1; i < NET_LINES; i++) {
+            for (uint32_t k = 0; k < NET_COLS; k++) g_net.out[i - 1][k] = g_net.out[i][k];
+        }
+        g_net.out_n = NET_LINES - 1;
+    }
+    put_str(g_net.out[g_net.out_n++], NET_COLS, s);
+}
+
+/* "a.b.c.d" for an address, into out. */
+static void net_fmt_ip(char *out, size_t cap, const uint8_t ip[4]) {
+    size_t at = 0;
+    out[0] = '\0';
+    for (int i = 0; i < 4; i++) {
+        at = cat_dec(out, cap, at, ip[i]);
+        if (i < 3) at = cat_str(out, cap, at, ".");
+    }
+}
+
+/* Resolve the host (unless it is an address), then ping it four times if asked. */
+static void net_run(bool do_ping) {
+    if (g_net.host_len == 0) {
+        net_out("Type a host name or address first.");
+        return;
+    }
+    g_net.host[g_net.host_len] = '\0';
+    uint8_t ip[4];
+    char line[NET_COLS];
+    if (net_parse_ip(g_net.host, ip)) {
+        net_fmt_ip(line, sizeof line, ip);
+    } else {
+        if (net_dns_resolve(g_net.host, ip, 3000) != NET_DNS_OK) {
+            net_out("Lookup failed: no answer for that name.");
+            return;
+        }
+        size_t at = cat_str(line, sizeof line, 0, g_net.host);
+        at = cat_str(line, sizeof line, at, " is at ");
+        char addr[24];
+        net_fmt_ip(addr, sizeof addr, ip);
+        cat_str(line, sizeof line, at, addr);
+    }
+    net_out(line);
+    if (!do_ping) return;
+    for (uint16_t seq = 1; seq <= 4; seq++) {
+        uint32_t rtt_us = 0;
+        char addr[24];
+        net_fmt_ip(addr, sizeof addr, ip);
+        if (net_ping(ip, seq, 1000, &rtt_us)) {
+            size_t at = cat_str(line, sizeof line, 0, "Reply from ");
+            at = cat_str(line, sizeof line, at, addr);
+            at = cat_str(line, sizeof line, at, ": time ");
+            if (rtt_us < 1000u) {
+                cat_str(line, sizeof line, at, "under 1 ms");
+            } else {
+                at = cat_dec(line, sizeof line, at, rtt_us / 1000u);
+                cat_str(line, sizeof line, at, " ms");
+            }
+        } else {
+            size_t at = cat_str(line, sizeof line, 0, "No reply from ");
+            cat_str(line, sizeof line, at, addr);
+        }
+        net_out(line);
+    }
+}
+
+static void network_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
+    fb_fill_rect(cx, cy, cw, ch, c_client);
+
+    /* The host field: a sunken box with the end of the name and a caret. */
+    fb_draw_text(cx + 8u, cy + 11u, "Host", c_ink, 0, false);
+    uint32_t fx = cx + 52u, fy = cy + 6u, fw = cw - 60u;
+    fb_fill_rect(fx, fy, fw, 20, c_client);
+    bevel(fx, fy, fw, 20, false);
+    uint32_t fits = (fw - 8u) / 8u;
+    uint32_t from = g_net.host_len > fits ? g_net.host_len - fits : 0;
+    char shown[NET_HOST_CAP];
+    uint32_t k = 0;
+    for (uint32_t i = from; i < g_net.host_len; i++) shown[k++] = g_net.host[i];
+    shown[k] = '\0';
+    fb_draw_text(fx + 4u, fy + 6u, shown, c_ink, 0, false);
+    fb_fill_rect(fx + 4u + k * 8u, fy + 4u, 1, 12, c_ink);      /* caret */
+
+    win_button(cx + 52u, cy + 34u, 64u, 22u, "Ping", true);
+    win_button(cx + 124u, cy + 34u, 84u, 22u, "Lookup", true);
+
+    /* The log, newest last; the status bar says what Enter does. */
+    uint32_t bottom = cy + ch - 18u;
+    for (uint32_t i = 0; i < g_net.out_n; i++) {
+        uint32_t y = cy + 66u + i * 12u;
+        if (y + 10u > bottom) break;
+        exp_text(cx + 8u, y, bottom, (cw - 16u) / 8u, g_net.out[i], c_ink);
+    }
+    uint32_t sy = cy + ch - 18u;
+    fb_fill_rect(cx, sy, cw, 18, c_face);
+    exp_text(cx + 4u, sy + 5u, cy + ch, (cw - 8u) / 8u, "Enter pings. The desktop waits for the network.", c_ink);
+}
+
 /* My Computer's client area: toolbar, folder list, preview pane, status line. */
 static void exp_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
-    fb_fill_rect(cx, cy, cw, ch, c_white);
+    fb_fill_rect(cx, cy, cw, ch, c_client);
 
     /* Toolbar: the Up button (greyed at the root) and the path. */
     fb_fill_rect(cx, cy, cw, EXP_TOOL_H, c_face);
     fb_fill_rect(cx, cy + EXP_TOOL_H - 1u, cw, 1, c_dark);
     fb_fill_rect(cx + 4u, cy + 3u, 40, 20, c_face);
     bevel(cx + 4u, cy + 3u, 40, 20, true);
-    fb_draw_text(cx + 12u, cy + 9u, "Up", g_exp.depth > 0 ? c_black : c_gray, 0, false);
+    fb_draw_text(cx + 12u, cy + 9u, "Up", g_exp.depth > 0 ? c_ink : c_gray, 0, false);
     char path[160];
     exp_path(path, sizeof path);
     uint32_t pcols = (cw - 56u) / 8u;
     if (pcols >= sizeof path) pcols = sizeof path - 1u;
     if (strlen(path) > pcols) path[pcols] = '\0';
-    fb_draw_text(cx + 52u, cy + 9u, path, c_black, 0, false);
+    fb_draw_text(cx + 52u, cy + 9u, path, c_ink, 0, false);
+    bool file_sel = g_exp.n > 0 && !g_exp.ent[g_exp.sel].dir;
+    uint32_t by = cy + EXP_BTN_Y;
+    win_button(cx + 4u, by, 84u, EXP_BTN_H, "New folder", true);
+    win_button(cx + 92u, by, 76u, EXP_BTN_H, "New file", true);
+    win_button(cx + 172u, by, 56u, EXP_BTN_H, "Copy", file_sel);
+    win_button(cx + 232u, by, 56u, EXP_BTN_H, "Edit", file_sel);
+    win_button(cx + 292u, by, 64u, EXP_BTN_H, "Delete", g_exp.n > 0);
 
     /* The list pane: keep the selected entry on screen, then draw the visible rows. */
     uint32_t rows = exp_rows(ch);
@@ -917,7 +1270,7 @@ static void exp_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
     uint32_t list_y = body_y + 2u;
     fb_fill_rect(cx + EXP_LIST_W, body_y, 1, body_h, c_dark);      /* divider */
     if (g_exp.n == 0) {
-        fb_draw_text(cx + 6u, list_y, "This folder is empty.", c_black, 0, false);
+        fb_draw_text(cx + 6u, list_y, "This folder is empty.", c_ink, 0, false);
     }
     for (uint32_t r = 0; r < rows; r++) {
         uint32_t i = g_exp.top + r;
@@ -928,7 +1281,7 @@ static void exp_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
         if (sel) fb_fill_rect(cx + 2u, y, EXP_LIST_W - 4u, 12, fb_rgb(0x2F, 0x6E, 0xB8));
         char label[19];
         put_str(label, sizeof label, e->name);
-        fb_draw_text(cx + 6u, y + 2u, label, sel ? c_white : c_black, 0, false);
+        fb_draw_text(cx + 6u, y + 2u, label, sel ? c_white : c_ink, 0, false);
         char info[12];
         if (e->dir) {
             put_str(info, sizeof info, "<DIR>");
@@ -936,7 +1289,7 @@ static void exp_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
             size_t at = cat_dec(info, sizeof info, 0, e->size);
             cat_str(info, sizeof info, at, " B");
         }
-        fb_draw_text(cx + EXP_LIST_W - 72u, y + 2u, info, sel ? c_white : c_black, 0, false);
+        fb_draw_text(cx + EXP_LIST_W - 72u, y + 2u, info, sel ? c_white : c_ink, 0, false);
     }
 
     /* The preview pane: a file's name, size and first lines, or a folder's hint. */
@@ -949,28 +1302,40 @@ static void exp_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
         size_t at = cat_dec(info, sizeof info, 0, g_exp.prev_size);
         at = cat_str(info, sizeof info, at, " bytes");
         if (g_exp.prev_size > EXP_PREV_BYTES) cat_str(info, sizeof info, at, ", first 512 shown");
-        exp_text(px, list_y + 14u, pbottom, prev_cols, info, c_black);
+        exp_text(px, list_y + 14u, pbottom, prev_cols, info, c_ink);
         uint32_t ty = list_y + 32u;
         if (g_exp.prev_size == 0) {
-            exp_text(px, ty, pbottom, prev_cols, "(empty file)", c_black);
+            exp_text(px, ty, pbottom, prev_cols, "(empty file)", c_ink);
         } else {
             for (uint32_t r = 0; r < g_exp.prev_n; r++) {
-                exp_text(px, ty + r * 12u, pbottom, prev_cols, g_exp.prev[r], c_black);
+                exp_text(px, ty + r * 12u, pbottom, prev_cols, g_exp.prev[r], c_ink);
             }
         }
     } else if (g_exp.n > 0 && g_exp.ent[g_exp.sel].dir) {
         exp_text(px, list_y, pbottom, prev_cols, g_exp.ent[g_exp.sel].name, c_navy);
-        exp_text(px, list_y + 16u, pbottom, prev_cols, "Folder. Press Enter, or click", c_black);
-        exp_text(px, list_y + 28u, pbottom, prev_cols, "it again, to open it.", c_black);
+        exp_text(px, list_y + 16u, pbottom, prev_cols, "Folder. Press Enter, or click", c_ink);
+        exp_text(px, list_y + 28u, pbottom, prev_cols, "it again, to open it.", c_ink);
     }
 
     /* Status line. */
     uint32_t sy = cy + ch - EXP_STAT_H;
     fb_fill_rect(cx, sy, cw, EXP_STAT_H, c_face);
-    exp_text(cx + 4u, sy + 4u, cy + ch, (cw - 8u) / 8u, g_exp.status, c_black);
+    exp_text(cx + 4u, sy + 4u, cy + ch, (cw - 8u) / 8u, g_exp.status, c_ink);
 }
 
 /* One line of the Settings page; advances y to the next line. */
+#define SET_THEME_W 240u
+#define SET_THEME_H 22u
+
+/* The Appearance button: a raised button whose label names the theme it switches to. */
+static void settings_theme_button(uint32_t bx, uint32_t by) {
+    fb_fill_rect(bx, by, SET_THEME_W, SET_THEME_H, c_face);
+    bevel(bx, by, SET_THEME_W, SET_THEME_H, true);
+    fb_draw_text(bx + 8u, by + 7u,
+                 g_dark_mode ? "Theme: Dark (click for Light)" : "Theme: Light (click for Dark)",
+                 c_ink, 0, false);
+}
+
 static void settings_line(uint32_t x, uint32_t *y, uint32_t color, const char *s) {
     fb_draw_text(x, *y, s, color, 0, false);
     *y += 14u;
@@ -980,20 +1345,24 @@ static void settings_line(uint32_t x, uint32_t *y, uint32_t color, const char *s
 static void settings_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
     (void)cw;
     (void)ch;
-    fb_fill_rect(cx, cy, cw, ch, c_white);
+    fb_fill_rect(cx, cy, cw, ch, c_client);
     uint32_t x = cx + 10u;
     uint32_t y = cy + 8u;
     char line[80];
+
+    settings_line(x, &y, c_navy, "Appearance");
+    settings_theme_button(x, y + 2u);
+    y += 30u;
 
     settings_line(x, &y, c_navy, "Account");
     const char *who = accounts_session();
     put_str(line, sizeof line, "Signed in as: ");
     cat_str(line, sizeof line, strlen(line), (who != NULL && who[0] != '\0') ? who : "(nobody)");
-    settings_line(x, &y, c_black, line);
+    settings_line(x, &y, c_ink, line);
     put_str(line, sizeof line, "Accounts on this system: ");
     cat_dec(line, sizeof line, strlen(line), accounts_count());
-    settings_line(x, &y, c_black, line);
-    settings_line(x, &y, c_black, accounts_persistent() ? "Saved to /etc/users."
+    settings_line(x, &y, c_ink, line);
+    settings_line(x, &y, c_ink, accounts_persistent() ? "Saved to /etc/users."
                                                        : "Kept in memory only, not saved.");
     y += 8u;
 
@@ -1002,32 +1371,32 @@ static void settings_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
     size_t at = cat_dec(line, sizeof line, strlen(line), fb_width());
     at = cat_str(line, sizeof line, at, " x ");
     cat_dec(line, sizeof line, at, fb_height());
-    settings_line(x, &y, c_black, line);
-    settings_line(x, &y, c_black, "Wallpaper: sky blue (the only choice).");
+    settings_line(x, &y, c_ink, line);
+    settings_line(x, &y, c_ink, "Wallpaper: sky blue (the only choice).");
     y += 8u;
 
     settings_line(x, &y, c_navy, "System");
     put_str(line, sizeof line, "Version: ");
     cat_str(line, sizeof line, strlen(line), HELIX_VERSION);
-    settings_line(x, &y, c_black, line);
-    settings_line(x, &y, c_black, "Clock: UTC.");
+    settings_line(x, &y, c_ink, line);
+    settings_line(x, &y, c_ink, "Clock: UTC.");
     y += 8u;
-    settings_line(x, &y, c_gray, "Read-only for now: nothing here can be changed yet.");
+    settings_line(x, &y, c_gray, "The theme: press t, or use the button.");
 }
 
 static void draw_window(const window_t *w, bool focused) {
     /* Glass frame with a darker outline. */
-    fill_box(w->x, w->y, w->w, w->h, 6, 0x1E4C86u, 0x1E4C86u, false);
+    fill_box(w->x, w->y, w->w, w->h, 6, g_th->frame_rim, g_th->frame_rim, false);
     if (focused) {
-        fill_box(w->x + 1, w->y + 1, w->w - 2, w->h - 2, 5, 0xC4DDF5u, 0x7FA9D6u, false);
+        fill_box(w->x + 1, w->y + 1, w->w - 2, w->h - 2, 5, g_th->frame_focus_top, g_th->frame_focus_bot, false);
     } else {
-        fill_box(w->x + 1, w->y + 1, w->w - 2, w->h - 2, 5, 0xE4ECF5u, 0xB6C9DEu, false);
+        fill_box(w->x + 1, w->y + 1, w->w - 2, w->h - 2, 5, g_th->frame_blur_top, g_th->frame_blur_bot, false);
     }
 
     /* Caption: the title on the glass, and a red close button. */
     uint32_t tx = w->x + 3, ty = w->y + 3, tw = w->w - 6;
     fb_draw_text(tx + 8, ty + 5, g_app_names[w->app],
-                 focused ? fb_rgb(0x10, 0x23, 0x3D) : fb_rgb(0x4D, 0x64, 0x80), 0, false);
+                 focused ? rgb_hex(g_th->cap_focus) : rgb_hex(g_th->cap_blur), 0, false);
 
     uint32_t bx = tx + tw - 18;
     fill_box(bx, ty + 2, 16, 14, 3, 0xE8A38Cu, 0xC2472Cu, true);
@@ -1036,8 +1405,8 @@ static void draw_window(const window_t *w, bool focused) {
     /* Client area: white with a thin blue-grey edge. */
     uint32_t cx = w->x + 6, cy = w->y + 26;
     uint32_t cw = w->w - 12, ch = w->h - 32;
-    uint32_t edge = fb_rgb(0x5A, 0x7A, 0xA3);
-    fb_fill_rect(cx, cy, cw, ch, c_white);
+    uint32_t edge = rgb_hex(g_th->client_edge);
+    fb_fill_rect(cx, cy, cw, ch, c_client);
     fb_fill_rect(cx, cy, cw, 1, edge);
     fb_fill_rect(cx, cy + ch - 1, cw, 1, edge);
     fb_fill_rect(cx, cy, 1, ch, edge);
@@ -1062,6 +1431,10 @@ static void draw_window(const window_t *w, bool focused) {
         settings_draw(cx, cy, cw, ch);
         return;
     }
+    if (w->app == APP_NETWORK) {
+        network_draw(cx, cy, cw, ch);
+        return;
+    }
     uint32_t cols = chars_in(cw - 8);
     for (int i = 0; i < g_nlines[w->app]; i++) {
         uint32_t row_y = cy + 6 + (uint32_t)i * 12u;
@@ -1069,7 +1442,7 @@ static void draw_window(const window_t *w, bool focused) {
         char line[LINE_LEN];
         put_str(line, sizeof(line), g_text[w->app][i]);
         if (cols < sizeof(line)) line[cols] = '\0';
-        fb_draw_text(cx + 4, row_y, line, c_black, 0, false);
+        fb_draw_text(cx + 4, row_y, line, c_ink, 0, false);
     }
 }
 
@@ -1128,8 +1501,8 @@ static void draw_icon(int idx, uint32_t x, uint32_t y, bool selected) {
 
 static void draw_taskbar(uint32_t sw, uint32_t sh) {
     uint32_t ty = sh - TASK_H;
-    fill_box(0, ty, sw, TASK_H, 0, 0x33507Au, 0x0F1E36u, false);   /* dark glass */
-    fb_fill_rect(0, ty, sw, 1, fb_rgb(0x8F, 0xA9, 0xCC));
+    fill_box(0, ty, sw, TASK_H, 0, g_th->task_top, g_th->task_bot, false);   /* dark glass */
+    fb_fill_rect(0, ty, sw, 1, rgb_hex(g_th->task_line));
 
     draw_orb(24, ty + 18, 14, g_menu_open);
 
@@ -1139,15 +1512,15 @@ static void draw_taskbar(uint32_t sw, uint32_t sh) {
         if (!g_win[i].used) continue;
         bool focused = (i == g_focus);
         if (focused) {
-            fill_box(bx, ty + TB_BTN_Y, TB_BTN_W, TB_BTN_H, 4, 0xA7CCF0u, 0x5B8CC6u, true);
+            fill_box(bx, ty + TB_BTN_Y, TB_BTN_W, TB_BTN_H, 4, g_th->tbtn_focus_top, g_th->tbtn_focus_bot, true);
         } else {
-            fill_box(bx, ty + TB_BTN_Y, TB_BTN_W, TB_BTN_H, 4, 0x4D6E9Cu, 0x2C4870u, true);
+            fill_box(bx, ty + TB_BTN_Y, TB_BTN_W, TB_BTN_H, 4, g_th->tbtn_blur_top, g_th->tbtn_blur_bot, true);
         }
         char title[20];
         put_str(title, sizeof(title), g_app_names[g_win[i].app]);
         title[chars_in(TB_BTN_W - 20u)] = '\0';
         fb_draw_text(bx + 10, ty + TB_BTN_Y + 9, title,
-                     focused ? fb_rgb(0x10, 0x23, 0x3D) : fb_rgb(0xFF, 0xFF, 0xFF), 0, false);
+                     focused ? rgb_hex(g_th->tbtn_focus_text) : fb_rgb(0xFF, 0xFF, 0xFF), 0, false);
         bx += TB_BTN_STEP;
     }
 
@@ -1167,16 +1540,16 @@ static void draw_taskbar(uint32_t sw, uint32_t sh) {
 static void draw_start_menu(uint32_t sh) {
     uint32_t mh = MENU_COUNT * 22u + 8u;
     uint32_t my = sh - TASK_H - mh;
-    fill_box(2, my, 180, mh, 6, 0x2B4C7Eu, 0x2B4C7Eu, false);          /* outline */
-    fill_box(3, my + 1, 178, mh - 2, 5, 0xF4F8FDu, 0xDCE7F4u, false);  /* light panel */
-    fill_box(4, my + 4, 22, mh - 8, 0, 0x2B4C7Eu, 0x1B3157u, false);   /* dark strip */
+    fill_box(2, my, 180, mh, 6, g_th->menu_rim, g_th->menu_rim, false);          /* outline */
+    fill_box(3, my + 1, 178, mh - 2, 5, g_th->menu_top, g_th->menu_bot, false);  /* light panel */
+    fill_box(4, my + 4, 22, mh - 8, 0, g_th->menu_rim, g_th->menu_strip, false);   /* dark strip */
     fb_draw_text(9, my + 8, "Helix", fb_rgb(0xFF, 0xFF, 0xFF), 0, false);
     for (int i = 0; i < MENU_COUNT; i++) {
         uint32_t iy = my + 4 + (uint32_t)i * 22u;
         bool sel = (i == g_menu_sel);
-        if (sel) fill_box(28, iy, 152, 20, 3, 0xA7CCF0u, 0x6FA2DAu, true);
+        if (sel) fill_box(28, iy, 152, 20, 3, g_th->menu_hi_top, g_th->menu_hi_bot, true);
         fb_draw_text(36, iy + 6, g_app_names[g_menu_app[i]],
-                     sel ? fb_rgb(0x10, 0x23, 0x3D) : c_black, 0, false);
+                     sel ? rgb_hex(g_th->tbtn_focus_text) : c_ink, 0, false);
     }
 }
 
@@ -1300,17 +1673,27 @@ static void drag_move(int nx, int ny) {
     cursor_show();
 }
 
+/* Stacking order: the windows are drawn in slot order, except that the focused window is
+ * drawn last, so it is on top. Clicks test the same order from the top down. k is the
+ * position in that order (0 is the bottom). */
+static int z_slot(int k) {
+    if (g_focus < 0 || g_focus == MAX_WIN - 1) return k;
+    if (k == MAX_WIN - 1) return g_focus;
+    return k < g_focus ? k : k + 1;
+}
+
 static void redraw(void) {
     uint32_t sw = fb_width(), sh = fb_height();
     g_cur_shown = false;                        /* the frame below wipes the old arrow */
     g_outline_shown = false;
-    if (!fb_draw_wallpaper(0x6FB6F0u, 0x0D3D78u)) {          /* sky-blue wallpaper */
-        fill_box(0, 0, sw, sh, 0, 0x6FB6F0u, 0x0D3D78u, false);
+    if (!fb_draw_wallpaper(g_th->desk_top, g_th->desk_bot)) {          /* sky-blue wallpaper */
+        fill_box(0, 0, sw, sh, 0, g_th->desk_top, g_th->desk_bot, false);
     }
     for (int i = 0; i < ICON_COUNT; i++) {
         draw_icon(i, 16, 16u + (uint32_t)i * 72u, i == g_icon_sel && !g_menu_open);
     }
-    for (int i = 0; i < MAX_WIN; i++) {
+    for (int k = 0; k < MAX_WIN; k++) {
+        int i = z_slot(k);
         if (g_win[i].used) draw_window(&g_win[i], i == g_focus);
     }
     if (g_drag >= 0 && g_win[g_drag].used) {   /* a drag in progress: keep its outline */
@@ -1405,12 +1788,14 @@ static void open_app(app_t app) {
         g_win[i].x = 120u + n * 28u;
         g_win[i].y = 40u + n * 28u;
         g_win[i].w = app == APP_TERMINAL ? 480 : app == APP_EDITOR ? 420 : app == APP_BROWSER ? 460 :
-                     app == APP_MYCOMP ? 520 : 380;
+                     app == APP_MYCOMP ? 520 : app == APP_NETWORK ? 420 : 380;
         g_win[i].h = app == APP_TERMINAL ? 330 : app == APP_EDITOR ? 280 : app == APP_BROWSER ? 340 :
-                     app == APP_MYCOMP ? 320 : app == APP_SETTINGS ? 270 : 250;
+                     app == APP_MYCOMP ? 320 : app == APP_SETTINGS ? 300 :
+                     app == APP_NETWORK ? 280 : 250;
         g_focus = i;
         build_content(app);
         if (app == APP_MYCOMP) exp_init();   /* opens at the root of the volume */
+    if (app == APP_NETWORK && g_net.out_n == 0) net_out("Type a host name or address, then press Enter.");
         if (app == APP_EDITOR) editor_load_file(&g_ed);   /* once; the text survives reopening */
         if (app == APP_TERMINAL && !g_term_started) {
             g_term_started = true;
@@ -1449,8 +1834,17 @@ static bool inside(int x, int y, uint32_t rx, uint32_t ry, uint32_t rw, uint32_t
 static void exp_click(const window_t *w, int x, int y) {
     uint32_t cx = w->x + 6u, cy = w->y + 26u, cw = w->w - 12u, ch = w->h - 32u;
     (void)cw;
-    if (y < (int)(cy + EXP_TOOL_H)) {
+    if (y < (int)(cy + 26u)) {
         if (inside(x, y, cx + 4u, cy + 3u, 40u, 20u)) exp_up();
+        return;
+    }
+    if (y < (int)(cy + EXP_TOOL_H)) {
+        uint32_t by = cy + EXP_BTN_Y;
+        if (inside(x, y, cx + 4u, by, 84u, EXP_BTN_H)) exp_new_item(true);
+        else if (inside(x, y, cx + 92u, by, 76u, EXP_BTN_H)) exp_new_item(false);
+        else if (inside(x, y, cx + 172u, by, 56u, EXP_BTN_H)) exp_copy_selected();
+        else if (inside(x, y, cx + 232u, by, 56u, EXP_BTN_H)) exp_edit_selected();
+        else if (inside(x, y, cx + 292u, by, 64u, EXP_BTN_H)) exp_delete_selected();
         return;
     }
     uint32_t list_y = cy + EXP_TOOL_H + 2u;
@@ -1463,6 +1857,25 @@ static void exp_click(const window_t *w, int x, int y) {
         exp_open(i);
     } else {
         exp_select(i);
+    }
+}
+
+/* A click in the Network window: Ping, or Lookup alone. */
+static void network_click(const window_t *w, int x, int y) {
+    uint32_t cx = w->x + 6u, cy = w->y + 26u;
+    if (inside(x, y, cx + 52u, cy + 34u, 64u, 22u)) {
+        net_run(true);
+    } else if (inside(x, y, cx + 124u, cy + 34u, 84u, 22u)) {
+        net_run(false);
+    }
+}
+
+/* A click on the Settings page: the Appearance button flips the theme. */
+static void settings_click(const window_t *w, int x, int y) {
+    uint32_t cx = w->x + 6u, cy = w->y + 26u;
+    if (inside(x, y, cx + 10u, cy + 24u, SET_THEME_W, SET_THEME_H)) {
+        g_dark_mode = !g_dark_mode;
+        theme_apply();
     }
 }
 
@@ -1485,6 +1898,12 @@ static bool exp_key(int c) {
         exp_up();
         return true;
     }
+    /* The toolbar's buttons, by key: n new folder, f new file, c copy, d delete (press twice), e edit. */
+    if (c == 'n' || c == 'N') { exp_new_item(true); return true; }
+    if (c == 'f' || c == 'F') { exp_new_item(false); return true; }
+    if (c == 'c' || c == 'C') { exp_copy_selected(); return true; }
+    if (c == 'd' || c == 'D') { exp_delete_selected(); return true; }
+    if (c == 'e' || c == 'E') { exp_edit_selected(); return true; }
     return false;
 }
 
@@ -1576,7 +1995,8 @@ static int handle_click(int x, int y, uint32_t sh) {
     }
 
     /* Windows: the close box first, then the body (which brings the window forward). */
-    for (int i = MAX_WIN - 1; i >= 0; i--) {
+    for (int k = MAX_WIN - 1; k >= 0; k--) {
+        int i = z_slot(k);
         if (!g_win[i].used) continue;
         window_t *w = &g_win[i];
         if (inside(x, y, w->x + w->w - 21, w->y + 5, 16, 14)) {
@@ -1602,6 +2022,14 @@ static int handle_click(int x, int y, uint32_t sh) {
                 bool full = g_repaint;
                 g_repaint = false;
                 return full ? PTR_REDRAW : PTR_NONE;
+            }
+            if (w->app == APP_NETWORK && !refocus && !menu_was_open) {
+                network_click(w, x, y);
+                return PTR_REDRAW;
+            }
+            if (w->app == APP_SETTINGS && !refocus && !menu_was_open) {
+                settings_click(w, x, y);
+                return PTR_REDRAW;                 /* the theme changed: repaint everything */
             }
             if (w->app == APP_MYCOMP && !refocus && !menu_was_open) {
                 exp_click(w, x, y);                /* the list or Up changed: repaint the window */
@@ -1700,7 +2128,7 @@ static bool editor_update_rows(const window_t *w) {
         bool text_changed = strcmp(now[r], g_ed_shown.rows[r]) != 0;
         bool caret_here = (int)r == caret_row || (int)r == g_ed_shown.caret_row;
         if (!text_changed && !(caret_moved && caret_here)) continue;
-        fb_fill_rect(cx, cy + 4u + r * 12u, cw, 12u, c_white);      /* just this row's band */
+        fb_fill_rect(cx, cy + 4u + r * 12u, cw, 12u, c_client);      /* just this row's band */
         ed_paint_row(cx, cy, cw, r, now[r], (int)r == caret_row, caret_off);
         memcpy(g_ed_shown.rows[r], now[r], sizeof now[r]);
     }
@@ -1993,6 +2421,32 @@ static bool handle_key(int c) {
         return false;
     }
 
+    if (g_focus >= 0 && g_win[g_focus].used && g_win[g_focus].app == APP_SETTINGS &&
+        (c == 't' || c == 'T' || c == '\n')) {
+        g_dark_mode = !g_dark_mode;         /* the keyboard way to the Appearance button */
+        theme_apply();
+        return false;
+    }
+
+    if (g_focus >= 0 && g_win[g_focus].used && g_win[g_focus].app == APP_NETWORK) {
+        /* The host field takes typing; Enter pings. Tab and Esc keep their meaning below. */
+        if (c >= 0x20 && c < 0x7f) {
+            if (g_net.host_len + 1 < NET_HOST_CAP) {
+                g_net.host[g_net.host_len++] = (char)c;
+                g_net.host[g_net.host_len] = '\0';
+            }
+            return false;
+        }
+        if (c == 0x08 || c == 0x7f) {
+            if (g_net.host_len > 0) g_net.host[--g_net.host_len] = '\0';
+            return false;
+        }
+        if (c == '\n') {
+            net_run(true);
+            return false;
+        }
+    }
+
     if (g_focus >= 0 && g_win[g_focus].used && g_win[g_focus].app == APP_MYCOMP && exp_key(c)) {
         return false;                  /* Up/Down/Enter/Backspace went to the folder list */
     }
@@ -2033,13 +2487,9 @@ bool desktop_run(void) {
         return false;
     }
 
-    c_desk  = fb_rgb(0x00, 0x80, 0x80);
-    c_face  = fb_rgb(0xC0, 0xC0, 0xC0);
-    c_white = fb_rgb(0xFF, 0xFF, 0xFF);
-    c_dark  = fb_rgb(0x80, 0x80, 0x80);
-    c_black = fb_rgb(0x00, 0x00, 0x00);
-    c_navy  = fb_rgb(0x00, 0x00, 0x80);
-    c_gray  = fb_rgb(0x80, 0x80, 0x80);
+    c_white = fb_rgb(0xFF, 0xFF, 0xFF);   /* fixed: bevels, terminal text */
+    c_black = fb_rgb(0x00, 0x00, 0x00);   /* fixed: terminal background, cursor */
+    theme_apply();
     c_outline = fb_rgb(0xFF, 0xFF, 0xFF);     /* XOR mask for the drag outline */
 
     g_mx = (int)sw / 2;

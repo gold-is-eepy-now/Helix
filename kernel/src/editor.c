@@ -41,7 +41,7 @@ void editor_load_file(editor_t *e) {
         return;
     }
     ext4_stat_t st;
-    if (!ext4_lookup(fs, ext4_root(fs), EDITOR_NAME, &st)) {
+    if (!ext4_lookup(fs, e->targeted ? e->dir : ext4_root(fs), editor_title(e), &st)) {
         set_msg(e, "New file");
         return;
     }
@@ -54,6 +54,28 @@ void editor_load_file(editor_t *e) {
     set_msg(e, "Loaded");
 }
 
+const char *editor_title(const editor_t *e) {
+    return e->targeted ? e->file : EDITOR_NAME;
+}
+
+bool editor_open_file(editor_t *e, uint64_t dir, const char *name) {
+    if (e->dirty) {
+        set_msg(e, "Save the open file first");
+        return false;
+    }
+    uint32_t k = 0;
+    while (name[k] != '\0' && k + 1 < sizeof e->file) {
+        e->file[k] = name[k];
+        k++;
+    }
+    e->file[k] = '\0';
+    e->targeted = true;
+    e->dir = dir;
+    e->loaded = false;
+    editor_load_file(e);
+    return true;
+}
+
 bool editor_save(editor_t *e) {
     ext4_fs_t *fs = ext4_get_current();
     if (!fs) {
@@ -61,16 +83,16 @@ bool editor_save(editor_t *e) {
         return false;
     }
     /* Replace the file's contents: truncate to zero, then write the whole buffer. */
-    uint64_t dir = ext4_root(fs);
+    uint64_t dir = e->targeted ? e->dir : ext4_root(fs);
     uint64_t ino;
     ext4_stat_t st;
-    if (ext4_lookup(fs, dir, EDITOR_NAME, &st)) {
+    if (ext4_lookup(fs, dir, editor_title(e), &st)) {
         ino = st.ino;
         if (!ext4_truncate(fs, ino, 0)) {
             set_msg(e, "Not saved: truncate failed");
             return false;
         }
-    } else if (!ext4_create(fs, dir, EDITOR_NAME, EXT4_S_IFREG | 0644, &ino)) {
+    } else if (!ext4_create(fs, dir, editor_title(e), EXT4_S_IFREG | 0644, &ino)) {
         set_msg(e, "Not saved: create failed");
         return false;
     }

@@ -274,6 +274,7 @@ not implemented.
   QEMU-tested only. Stage 5 (ping to internet addresses) is blocked here: the host
   disables unprivileged ICMP. HTTPS (TLS 1.3, crypto primitives, certificate checks) is not started.
 - 🚧 Graphics: a virtio 1.0 transport and the virtio-gpu display list (`gpu`, `docs/12-graphics.md`, step 1 of 4). Resources, scanout and flushes are next.
+- 🚧 Desktop apps with windows: My Computer, Network, Settings, Terminal, Text Editor, Browser, About. The userspace `/bin` tools are still text-only, except that My Computer covers ls, cat, mkdir, touch, cp, rm and rmdir, Text Editor covers edit, and Network covers ping and nslookup. `find`, `echo`, `args`, `env`, `true` and `false` stay in the Terminal. A light and dark theme is set in Settings (in memory, so it resets at boot). QEMU-tested (screenshots) only.
 - 🚧 My Computer is an Explorer-style window over the ext4 volume: an Up button and the path, folders listed first, a click or Enter opens a folder, Backspace goes up, and a file's first 512 bytes show in a preview pane (binary files show as dots). A Settings window shows read-only information (signed-in user, accounts, screen size, version); nothing can be changed there yet. QEMU-tested (screenshots) only.
 - 🚧 A basic graphical desktop (`desktop` command): teal desktop, My Computer and
   About windows, taskbar with clock, Start menu, a pointer driven by a PS/2

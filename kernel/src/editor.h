@@ -24,7 +24,17 @@ typedef struct {
     bool dirty;         /* changed since the last save */
     bool loaded;        /* the file has been read (once per session) */
     char msg[48];       /* status line text: "Saved", "Modified", an error */
+    bool targeted;      /* a file chosen from My Computer, not note.txt in the root */
+    uint64_t dir;       /* that file's folder */
+    char file[32];      /* that file's name */
 } editor_t;
+
+/* Open a file of the volume in the editor (read now, saved to the same place). Returns
+ * false while the buffer holds unsaved text, so the open file's changes are not lost. */
+bool editor_open_file(editor_t *e, uint64_t dir, const char *name);
+
+/* The name shown in the editor's strip: the chosen file, or note.txt. */
+const char *editor_title(const editor_t *e);
 
 /* Read note.txt into the buffer the first time the window opens. A missing
  * file gives an empty buffer; the window keeps unsaved text across close and
