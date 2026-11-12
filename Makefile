@@ -132,13 +132,19 @@ linux-drivers-virtio: linux-submodule
 userspace-apps:
 	@$(MAKE) -C runtime LIB_SRCDIR="$(LINUX_SUBMODULE_DIR)" userspace-apps
 
-image: kernel deps
+ICON_PACK := $(BUILD_DIR)/icons/oxygen-32.pak
+
+icons:
+	@mkdir -p $(BUILD_DIR)/icons && python3 tools/gen-oxygen-icons.py $(ICON_PACK)
+
+image: kernel deps icons
 	@BUILD_DIR="$(BUILD_DIR)" \
 	 KERNEL="$(BUILD_DIR)/kernel" \
 	 LIMINE_DIR="$(LIMINE_DIR)" \
 	 IMAGE="$(IMAGE)" \
 	 LIMINE_CONF="$(CURDIR)/limine.conf" \
 	 DOOM_WAD="$(DOOM_WAD)" \
+	 ICON_PACK="$(ICON_PACK)" \
 	 sh tools/mkimage.sh
 
 # Bootable UEFI CD/DVD image (attach as an optical drive).

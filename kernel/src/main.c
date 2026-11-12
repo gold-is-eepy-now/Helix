@@ -18,6 +18,7 @@
 #include "usermode.h"
 #include "userbin.h"
 #include "doom_wad.h"
+#include "icon_pack.h"
 #include "filesystem.h"
 #include "apic.h"
 #include "fb.h"
@@ -189,6 +190,13 @@ static void kernel_main_continue(void) {
                     if (*p == '/' || *p == '\\') name = p + 1;
                 }
                 if (name[0] != '\0') {
+                    /* The Oxygen icon pack, installed by mkimage at boot/icons/. */
+                    const char icon_pack_name[] = "oxygen-32.pak";
+                    size_t k = 0;
+                    while (icon_pack_name[k] != '\0' && name[k] == icon_pack_name[k]) ++k;
+                    if (icon_pack_name[k] == '\0' && name[k] == '\0') {
+                        icon_pack_set(module->address, (size_t)module->size);
+                    }
                     /* mkimage installs the optional module at this path. */
                     const char expected[] = "doom1.wad";
                     size_t n = 0;

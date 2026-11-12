@@ -122,6 +122,34 @@ uint32_t fb_get_pixel(uint32_t x, uint32_t y) {
     return color;
 }
 
+/* One colour channel of a packed framebuffer pixel, scaled to 0..255. */
+static uint32_t channel8(uint32_t color, uint8_t size, uint8_t shift) {
+    if (size == 0 || size > 16) return 0;
+    uint32_t max = (1u << size) - 1u;
+    return ((color >> shift) & max) * 255u / max;
+}
+
+/* Draws a w x h picture of straight-alpha B,G,R,A pixels at (x, y), blended over
+ * what is already on screen. Transparent pixels leave the screen alone. */
+void fb_blit_bgra(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint8_t *px) {
+    if (!fb_ready() || px == NULL) return;
+    for (uint32_t j = 0; j < h; j++) {
+        for (uint32_t i = 0; i < w; i++) {
+            const uint8_t *s = px + 4u * (j * w + i);
+            uint32_t a = s[3];
+            if (a == 0) continue;
+            uint32_t under = fb_get_pixel(x + i, y + j);
+            uint32_t ur = channel8(under, g_fb->red_mask_size, g_fb->red_mask_shift);
+            uint32_t ug = channel8(under, g_fb->green_mask_size, g_fb->green_mask_shift);
+            uint32_t ub = channel8(under, g_fb->blue_mask_size, g_fb->blue_mask_shift);
+            uint32_t r = (s[2] * a + ur * (255u - a)) / 255u;
+            uint32_t g = (s[1] * a + ug * (255u - a)) / 255u;
+            uint32_t b = (s[0] * a + ub * (255u - a)) / 255u;
+            put_pixel(x + i, y + j, fb_rgb((uint8_t)r, (uint8_t)g, (uint8_t)b));
+        }
+    }
+}
+
 void fb_clear(uint32_t color) {
     if (!fb_ready()) {
         return;

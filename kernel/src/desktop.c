@@ -34,6 +34,7 @@
 #include "editor.h"
 #include "ext4.h"
 #include "fb.h"
+#include "icon_pack.h"
 #include "input.h"
 #include "login.h"
 #include "ui.h"
@@ -554,7 +555,9 @@ static void draw_editor(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
 #define BR_URL_CAP   240
 #define BR_RAW_CAP   (256u * 1024u)   /* the response, then its body in place */
 #define BR_TEXT_CAP  (64u * 1024u)    /* the page as plain text */
-#define BR_COLS      54               /* characters per page row */
+#define BR_COLS      52               /* characters per page row (leaves room for the scrollbar) */
+#define BR_BAR_W     14u              /* scrollbar width, drawn at the right of the page */
+#define BR_ARROW     14u              /* height of each scrollbar arrow button */
 #define BR_VISIBLE   21               /* page rows shown: the window is 340 px high, see open_app */
 #define BR_BAR_H     18u
 #define BR_STATUS_H  20u
@@ -634,6 +637,33 @@ static uint32_t br_layout(bool paint, uint32_t px, uint32_t py, uint32_t visible
     return r;
 }
 
+/* Scrollbar geometry for a page of rows rows, whose bar starts at by: the track sits
+ * between the two arrow buttons and the thumb's size and place show how much of the
+ * page is on screen and where it is. */
+static void br_bar_geometry(uint32_t by, uint32_t rows, uint32_t *track_y, uint32_t *track_h,
+                            uint32_t *thumb_y, uint32_t *thumb_h) {
+    *track_y = by + BR_ARROW;
+    *track_h = BR_VISIBLE * 12u - 2u * BR_ARROW;
+    uint32_t th = rows > BR_VISIBLE ? (*track_h * BR_VISIBLE) / rows : *track_h;
+    if (th < 14u) th = 14u;                  /* always grabbable */
+    if (th > *track_h) th = *track_h;
+    *thumb_h = th;
+    uint32_t max_top = rows > BR_VISIBLE ? rows - BR_VISIBLE : 0;
+    uint32_t room = *track_h - th;
+    *thumb_y = *track_y + (max_top > 0 ? (room * g_br.top) / max_top : 0u);
+}
+
+static void browser_scrollbar(uint32_t bx, uint32_t by, uint32_t rows) {
+    uint32_t bar_h = BR_VISIBLE * 12u;
+    fb_fill_rect(bx, by, BR_BAR_W, bar_h, fb_rgb(0xDD, 0xE4, 0xEE));
+    bevel(bx, by, BR_BAR_W, bar_h, false);
+    fb_draw_text(bx + 3u, by + 3u, "^", c_black, 0, false);
+    fb_draw_text(bx + 3u, by + bar_h - BR_ARROW + 3u, "v", c_black, 0, false);
+    uint32_t track_y, track_h, thumb_y, thumb_h;
+    br_bar_geometry(by, rows, &track_y, &track_h, &thumb_y, &thumb_h);
+    fill_box(bx + 2u, thumb_y, BR_BAR_W - 4u, thumb_h, 3, 0xB8D6F2u, 0x5F93CFu, true);
+}
+
 static void browser_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
     fb_fill_rect(cx, cy, cw, ch, c_white);
 
@@ -652,7 +682,8 @@ static void browser_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
 
     /* Page: plain text rows below the address bar. */
     uint32_t py = cy + BR_BAR_H + 12u;
-    br_layout(true, cx + 6u, py, BR_VISIBLE);
+    uint32_t rows = br_layout(true, cx + 6u, py, BR_VISIBLE);
+    browser_scrollbar(cx + cw - 6u - BR_BAR_W, py, rows);
 
     /* Status line at the bottom. */
     uint32_t sy = cy + ch - BR_STATUS_H;
@@ -718,9 +749,18 @@ static void draw_window(const window_t *w, bool focused) {
     }
 }
 
+/* Oxygen icon name for each desktop icon, from the icon pack (see icon_pack.h). */
+static const char *const g_icon_name[ICON_COUNT] = {
+    "computer", "help-about", "utilities-terminal", "accessories-text-editor", "internet-web-browser",
+};
+
 static void draw_icon(int idx, uint32_t x, uint32_t y, bool selected) {
-    /* A 32x32 picture per icon: a monitor, a page, a terminal. idx is the icon, see g_icon_app. */
-    if (idx == 0) {
+    /* A 32x32 picture per icon. The Oxygen picture is used when the pack has it; the
+     * drawn fallbacks below (a monitor, a page, a terminal) keep the desktop usable without it. */
+    const uint8_t *picture = icon_pack_find(g_icon_name[idx]);
+    if (picture != NULL) {
+        fb_blit_bgra(x, y, 32, 32, picture);
+    } else if (idx == 0) {
         fb_fill_rect(x + 4, y + 2, 24, 18, c_gray);
         fb_fill_rect(x + 7, y + 5, 18, 12, c_navy);
         fb_fill_rect(x + 12, y + 22, 8, 4, c_gray);
@@ -1095,6 +1135,36 @@ static void editor_click(const window_t *w, int x, int y) {
 
 static void editor_redraw(void);
 
+static void browser_redraw(void);
+
+/* A click on the browser's scrollbar: an arrow steps one row, the track above or below
+ * the thumb pages, and the thumb itself is not dragged yet. Returns true when the click
+ * was on the bar, so the caller stops there. */
+static bool browser_bar_click(const window_t *w, int x, int y) {
+    uint32_t cx = w->x + 6u, cy = w->y + 26u, cw = w->w - 12u;
+    uint32_t py = cy + BR_BAR_H + 12u;
+    uint32_t bx = cx + cw - 6u - BR_BAR_W;
+    uint32_t bar_h = BR_VISIBLE * 12u;
+    if (x < (int)bx || x >= (int)(bx + BR_BAR_W) || y < (int)py || y >= (int)(py + bar_h)) return false;
+
+    uint32_t rows = br_layout(false, 0, 0, 0);
+    uint32_t max_top = rows > BR_VISIBLE ? rows - BR_VISIBLE : 0;
+    uint32_t track_y, track_h, thumb_y, thumb_h;
+    br_bar_geometry(py, rows, &track_y, &track_h, &thumb_y, &thumb_h);
+    uint32_t uy = (uint32_t)y;
+    if (uy < py + BR_ARROW) {
+        if (g_br.top > 0) g_br.top--;
+    } else if (uy >= py + bar_h - BR_ARROW) {
+        if (g_br.top < max_top) g_br.top++;
+    } else if (uy < thumb_y) {
+        g_br.top = g_br.top > BR_VISIBLE ? g_br.top - BR_VISIBLE : 0;
+    } else if (uy >= thumb_y + thumb_h) {
+        uint32_t next = g_br.top + BR_VISIBLE;
+        g_br.top = next < max_top ? next : max_top;
+    }
+    return true;
+}
+
 /* A click at (x, y). Returns PTR_EXIT for Shut Down, PTR_REDRAW when the picture
  * needs a full repaint, and PTR_NONE when nothing visible changed (or it was
  * already repainted in place). */
@@ -1156,6 +1226,12 @@ static int handle_click(int x, int y, uint32_t sh) {
             bool refocus = g_focus != i;
             g_focus = i;
             if (w->app == APP_EDITOR) editor_click(w, x, y);
+            if (w->app == APP_BROWSER && !refocus && !menu_was_open && browser_bar_click(w, x, y)) {
+                browser_redraw();                 /* repaints the window, or asks for a full repaint */
+                bool full = g_repaint;
+                g_repaint = false;
+                return full ? PTR_REDRAW : PTR_NONE;
+            }
             if (refocus || menu_was_open) return PTR_REDRAW;   /* title colours or the menu changed */
             if (w->app == APP_EDITOR) {                        /* caret moved or Save pressed */
                 editor_redraw();

@@ -23,6 +23,9 @@ void fb_set_colors(uint32_t fg, uint32_t bg);
 /* Fill the whole screen with one packed colour and home the cursor. */
 void fb_clear(uint32_t color);
 
+/* Alpha-blended picture: w x h straight-alpha B,G,R,A pixels at (x, y). */
+void fb_blit_bgra(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint8_t *px);
+
 /* Present packed 0x00RRGGBB pixels, scaling them to fit while preserving the
  * source aspect ratio. This switches the framebuffer into graphics mode and
  * disables text cursor updates until fb_graphics_end(). */
