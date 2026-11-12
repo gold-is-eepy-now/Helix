@@ -171,6 +171,7 @@ test: image
 	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/tls13-record-unit" tests/tls13-record-unit.c kernel/src/tls13_record.c kernel/src/tls13_hello.c kernel/src/chacha20poly1305.c && "$(BUILD_DIR)/test/tls13-record-unit"
 	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/tls13-server-unit" tests/tls13-server-unit.c kernel/src/tls13_server.c && "$(BUILD_DIR)/test/tls13-server-unit"
 	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/tls13-client-unit" tests/tls13-client-unit.c kernel/src/tls13_client.c kernel/src/tls13.c kernel/src/tls13_record.c kernel/src/tls13_hello.c kernel/src/tls13_server.c kernel/src/hkdf.c kernel/src/sha256.c kernel/src/chacha20poly1305.c kernel/src/x25519.c && "$(BUILD_DIR)/test/tls13-client-unit"
+	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/x509-unit" tests/x509-unit.c kernel/src/x509.c kernel/src/trust_roots.c && "$(BUILD_DIR)/test/x509-unit"
 	@$(MAKE) -C runtime test
 	@$(MAKE) -C mac-darwin-compat test
 	@$(MAKE) -C donejs-compat test
