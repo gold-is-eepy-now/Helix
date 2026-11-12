@@ -17,8 +17,9 @@ OPTIONAL_DRIVERS_LIB := $(OPTIONAL_DRIVERS_DIR)/build/optional_drivers.a
 OPTIONAL_DRIVERS_SRCS := $(OPTIONAL_DRIVERS_DIR)/ethernet.c \
                          $(OPTIONAL_DRIVERS_DIR)/wifi.c \
                          $(OPTIONAL_DRIVERS_DIR)/graphics.c \
-                         $(OPTIONAL_DRIVERS_DIR)/sound.c \
-                         $(OPTIONAL_DRIVERS_DIR)/kvm/kvm_driver.c
+                         $(OPTIONAL_DRIVERS_DIR)/sound.c
+# kvm/kvm_driver.c is not listed: it needs Linux headers (sys/ioctl.h) and is
+# skipped for Helix, as the `kvm` target below explains.
 OPTIONAL_DRIVERS_OBJS := $(OPTIONAL_DRIVERS_SRCS:.c=.o)
 
 # KVM driver
@@ -71,7 +72,7 @@ $(OPTIONAL_DRIVERS_LIB): $(OPTIONAL_DRIVERS_OBJS)
 # Build individual driver objects
 $(OPTIONAL_DRIVERS_DIR)/%.o: $(OPTIONAL_DRIVERS_DIR)/%.c $(OPTIONAL_DRIVERS_DIR)/transport/*.h
 	@mkdir -p $(OPTIONAL_DRIVERS_DIR)/build
-	$(CC) $(CFLAGS) -I$(OPTIONAL_DRIVERS_DIR)/transport -c $< -o $@
+	$(CC) $(CFLAGS) -I$(OPTIONAL_DRIVERS_DIR)/transport -I$(LIBHELIX_DIR)/include -c $< -o $@
 
 # KVM driver build targets
 # The KVM driver is a Linux-host wrapper: it calls glibc ioctl() on /dev/kvm, which
