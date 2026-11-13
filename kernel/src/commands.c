@@ -45,6 +45,7 @@
 #include "pci.h"
 #include "intel_lpss_gspi.h"
 #include "apple_topcase_spi.h"
+#include "xhci.h"
 #include "spi.h"
 #include "net_tcp.h"
 #include "net_icmp.h"
@@ -886,6 +887,23 @@ static void cmd_topcase(int argc, char **argv) {
     kprintf("\n");
     kprintf("topcase: crc stored 0x%04x, computed 0x%04x, %s\n", (unsigned)p.crc_stored,
             (unsigned)p.crc_computed, p.crc_stored == p.crc_computed ? "MATCH" : "no match");
+}
+
+/* xhci: the xHCI controller found by discovery (read-only). */
+static void cmd_xhci(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    xhci_info_t x;
+    xhci_get_info(&x);
+    if (!x.found) {
+        kprintf("xhci: no xHCI controller found on this machine\n");
+        return;
+    }
+    kprintf("xhci: at %02x:%02x.%u, BAR0 0x%llx, version 0x%04x\n", x.bus, x.device, x.function,
+            (unsigned long long)x.bar_phys, (unsigned)x.hci_version);
+    kprintf("xhci: slots %u, interrupters %u, ports %u, ports connected %u, powered %u\n",
+            (unsigned)x.max_slots, (unsigned)x.max_intrs, (unsigned)x.max_ports,
+            (unsigned)x.ports_connected, (unsigned)x.ports_powered);
 }
 
 /* spi: report the Intel LPSS GSPI controller's state. Read only: no transfers. */
@@ -2472,6 +2490,7 @@ const command_t helix_commands[] = {
     {"gpu", "list the display outputs of the virtio-gpu device", cmd_gpu},
     {"acpi", "list the firmware's ACPI tables", cmd_acpi},
     {"spi", "Intel LPSS GSPI controller state (MacBook Air SPI)", cmd_spi},
+    {"xhci", "xHCI (USB 3) controller discovery, read-only", cmd_xhci},
     {"topcase", "read-only probe of the Apple top-case keyboard over SPI", cmd_topcase},
     {"pci", "list every PCI function: vendor:device, class, BAR0", cmd_pci},
     {"dhcp",    "get a network address from a DHCP server (replaces the static address)", cmd_dhcp},

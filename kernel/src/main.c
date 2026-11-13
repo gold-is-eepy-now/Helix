@@ -48,6 +48,7 @@
 #include "usb_host.h"
 #include "acpi.h"
 #include "intel_lpss_gspi.h"
+#include "xhci.h"
 #include "e1000.h"
 #include "net.h"
 #include "klog.h"
@@ -257,6 +258,17 @@ static void kernel_main_continue(void) {
     } else {
         kprintf("[spi] Intel LPSS GSPI 8086:9CE6 at %02x:%02x.%u, ready %s\n", gspi.bus,
                 gspi.device, gspi.function, gspi_ready ? "yes" : "no");
+    }
+
+    /* xHCI (USB 3): read-only discovery. Logged only; nothing is written to the controller. */
+    if (xhci_init()) {
+        xhci_info_t x;
+        xhci_get_info(&x);
+        kprintf("[xhci] found at %02x:%02x.%u, version 0x%04x, %u ports, %u connected\n",
+                x.bus, x.device, x.function, (unsigned)x.hci_version, (unsigned)x.max_ports,
+                (unsigned)x.ports_connected);
+    } else {
+        kprintf("[xhci] no xHCI controller found\n");
     }
 
     if (!usb_host_init(hhdm_request.response->offset)) {
