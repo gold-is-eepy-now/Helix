@@ -21,6 +21,9 @@ void usb_host_print_status(void);
  * device is attached. Called from the keyboard input path, so it is polled. */
 void usb_host_poll(void);
 
+/* Boot diagnostic: list every USB controller in PCI config space (read-only). */
+void usb_report_pci_controllers(void);
+
 /* What the USB stack found, for the sign-in screen: controllers, devices, HID keyboards
  * and mice, and how many reports and errors each HID interface has produced. */
 typedef struct {

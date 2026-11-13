@@ -240,3 +240,12 @@ Run by `make test`:
 - **Function keys** (F1–F12) and keypad keys are not mapped.
 - **Storage** is not on this stack. The earlier xHCI/EHCI storage code from the
   other tree has not been merged into this one.
+
+## Boot diagnostic: controllers in PCI config space
+
+At boot, `[usb] pci` lines list every USB controller in PCI config space (class 0C/03,
+prog_if 00 UHCI, 10 OHCI, 20 EHCI, 30 xHCI) with its vendor and device IDs and BAR0. The
+listing is read-only and does not depend on which controllers Helix drives.
+UHCI controllers keep their registers in an I/O BAR (BAR4), not BAR0, so their BAR0 column
+shows 0. That is expected, not a fault. Use it to
+confirm the iMac 11,2's real controller IDs before changing anything.

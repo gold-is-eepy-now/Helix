@@ -271,6 +271,8 @@ static void kernel_main_continue(void) {
         kprintf("[xhci] no xHCI controller found\n");
     }
 
+    usb_report_pci_controllers();
+
     if (!usb_host_init(hhdm_request.response->offset)) {
         console_write("no UHCI controller found or started\n");
     }

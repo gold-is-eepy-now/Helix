@@ -31,6 +31,7 @@
 #include "io.h"
 #include "kstring.h"
 #include "pci.h"
+#include "panic.h"
 #include "pmm.h"
 #include "vmm.h"
 #include "time.h"
@@ -951,4 +952,28 @@ bool usb_host_init(uint64_t hhdm_offset) {
         for (unsigned n = 0; n < 2; n++) root_port(hc, n);
     }
     return g_hc_count != 0;
+}
+
+/* Boot diagnostic: every USB controller in PCI config space, whether or not we drive it.
+ * Read-only. The vendor and device IDs are what the iMac's real controllers need, since the
+ * hardware leads in the spec were not confirmed. prog_if picks the interface: 00 UHCI,
+ * 10 OHCI, 20 EHCI, 30 xHCI. */
+#define USB_PCI_MAX 16u
+
+void usb_report_pci_controllers(void) {
+    static const uint8_t progs[4] = {0x00u, 0x10u, 0x20u, 0x30u};
+    static const char *names[4] = {"UHCI", "OHCI", "EHCI", "xHCI"};
+    unsigned total = 0;
+    for (unsigned k = 0; k < 4u; k++) {
+        for (size_t i = 0; i < USB_PCI_MAX; i++) {
+            pci_function_t f;
+            if (!pci_find_class(0x0Cu, 0x03u, progs[k], i, &f)) break;
+            uint32_t bar0 = pci_config_read32(f.bus, f.device, f.function, 0x10u);
+            kprintf("[usb] pci %02x:%02x.%u %s  %04x:%04x  bar0 0x%08x\n", f.bus, f.device,
+                    f.function, names[k], (unsigned)f.vendor_id, (unsigned)f.device_id,
+                    (unsigned)bar0);
+            total++;
+        }
+    }
+    if (total == 0) kprintf("[usb] no USB controllers in PCI config space\n");
 }
