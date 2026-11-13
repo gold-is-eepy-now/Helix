@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "accounts.h"
+#include "usb_host.h"
 #include "fb.h"
 #include "input.h"
 #include "keyboard.h"
@@ -151,6 +152,56 @@ static void draw_panel(const login_state_t *st) {
     draw_button(px + PANEL_W - 2u * BTN_W - 36u, py + PANEL_H - BTN_H - 20u, "Cancel", false);
 }
 
+static size_t cat_str(char *dst, size_t cap, size_t at, const char *src) {
+    while (*src != '\0' && at + 1 < cap) {
+        dst[at++] = *src++;
+    }
+    dst[at] = '\0';
+    return at;
+}
+
+static size_t cat_dec(char *dst, size_t cap, size_t at, uint64_t v) {
+    char tmp[24];
+    size_t n = 0;
+    do {
+        tmp[n++] = (char)('0' + (v % 10u));
+        v /= 10u;
+    } while (v != 0 && n < sizeof(tmp));
+    while (n > 0 && at + 1 < cap) {
+        dst[at++] = tmp[--n];
+    }
+    dst[at] = '\0';
+    return at;
+}
+
+/* A status line at the foot of the screen: what USB found, and what it has received.
+ * On a machine with no PS/2 port this is the way to see whether the keyboard and mouse
+ * were found at all. Pressing a key or moving the mouse should raise the report counts. */
+static void draw_usb_line(void) {
+    usb_summary_t u;
+    usb_host_summary(&u);
+    uint32_t sw = fb_width(), sh = fb_height();
+    uint32_t y = sh - 22u;
+    fb_fill_rect(0, y, sw, 22, c_face);
+    char line[160];
+    size_t at = cat_str(line, sizeof line, 0, "USB: ");
+    at = cat_dec(line, sizeof line, at, u.controllers);
+    at = cat_str(line, sizeof line, at, " controller(s), ");
+    at = cat_dec(line, sizeof line, at, u.devices);
+    at = cat_str(line, sizeof line, at, " device(s).  Keyboards ");
+    at = cat_dec(line, sizeof line, at, u.keyboards);
+    at = cat_str(line, sizeof line, at, " (reports ");
+    at = cat_dec(line, sizeof line, at, u.keyboard_reports);
+    at = cat_str(line, sizeof line, at, ", errors ");
+    at = cat_dec(line, sizeof line, at, u.keyboard_errors);
+    at = cat_str(line, sizeof line, at, ").  Mice ");
+    at = cat_dec(line, sizeof line, at, u.mice);
+    at = cat_str(line, sizeof line, at, " (reports ");
+    at = cat_dec(line, sizeof line, at, u.mouse_reports);
+    cat_str(line, sizeof line, at, ").");
+    fb_draw_text(12, y + 7, line, c_text, c_face, true);
+}
+
 static void wipe(login_state_t *st) {
     secure_zero(st->pass, sizeof st->pass);
     st->plen = 0;
@@ -219,18 +270,27 @@ bool login_run(void) {
     draw_backdrop();
     bool redraw = true;
     int prev = 0;
+    uint64_t usb_next = 0;
 
     for (;;) {
         if (redraw) {
             draw_panel(&st);
+            draw_usb_line();
             fb_present();
             redraw = false;
         }
 
         int c = input_getchar();
         if (c < 0) {
+            /* Idle: refresh only the USB line, twice a second, as the counts change. */
+            uint64_t now = time_uptime_ms();
+            if (now >= usb_next) {
+                usb_next = now + 500;
+                draw_usb_line();
+                fb_present();
+            }
             __asm__ volatile("pause");
-            continue;               /* idle: nothing changed, so draw nothing */
+            continue;
         }
         if (c == '\n' && prev == '\r') {      /* the second half of a CR LF pair */
             prev = 0;

@@ -21,4 +21,13 @@ void usb_host_print_status(void);
  * device is attached. Called from the keyboard input path, so it is polled. */
 void usb_host_poll(void);
 
+/* What the USB stack found, for the sign-in screen: controllers, devices, HID keyboards
+ * and mice, and how many reports and errors each HID interface has produced. */
+typedef struct {
+    unsigned controllers, devices, keyboards, mice;
+    uint32_t keyboard_reports, keyboard_errors, mouse_reports, mouse_errors;
+} usb_summary_t;
+
+void usb_host_summary(usb_summary_t *out);
+
 #endif /* HELIX_USB_HOST_H */

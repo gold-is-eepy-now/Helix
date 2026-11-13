@@ -15,7 +15,7 @@ shell.
 | Hubs on a root port, devices behind them (nested hubs supported by the code; QEMU-tested one level only) | ✅ QEMU-tested |
 | EHCI handoff: EHCI reset so its ports belong to the companions | ✅ QEMU-tested |
 | HID boot keyboard: interrupt endpoint, report decoding, key events | ✅ QEMU-tested (plus host unit tests) |
-| HID boot mouse: report decoding | ✅ host unit tests; enumerated in QEMU; no consumer yet |
+| HID boot mouse: report decoding | ✅ host unit tests; enumerated in QEMU; drives the desktop pointer (`usb_hid_get_mouse_event`) |
 | Apple iMac 11,2 hardware | ⛔ **not tested** (no hardware here) |
 | Hot-plug, hub status-change interrupts | ⛔ not implemented; devices are found at boot only |
 | USB storage | ⛔ not implemented on this stack |
@@ -232,9 +232,11 @@ Run by `make test`:
 - **Full-speed only.** Because EHCI is reset, high-speed devices run at full
   speed, and there is no transaction translator support.
 - **Nested hubs** are written but only one hub level is tested in QEMU.
-- **Mouse consumer.** Motion and buttons are decoded but no cursor or scroll
-  handler uses them. Deciding what the pointer should do is a design choice for
-  the owner.
+- **Mouse scrolling.** Motion and buttons drive the desktop pointer; the wheel
+  byte is not used.
+- **Sign-in status line.** The sign-in screen shows controllers, devices and
+  HID report/error counts, refreshed twice a second. Use it to check the iMac
+  without a keyboard.
 - **Function keys** (F1–F12) and keypad keys are not mapped.
 - **Storage** is not on this stack. The earlier xHCI/EHCI storage code from the
   other tree has not been merged into this one.

@@ -833,6 +833,29 @@ static void root_port(uhci_hc_t *hc, unsigned n) {
 
 /* ------------------------------------------------------------- status */
 
+void usb_host_summary(usb_summary_t *out) {
+    out->controllers = g_hc_count;
+    out->devices = g_dev_count;
+    out->keyboards = out->mice = 0;
+    out->keyboard_reports = out->keyboard_errors = 0;
+    out->mouse_reports = out->mouse_errors = 0;
+    for (unsigned i = 0; i < g_dev_count; i++) {
+        const usb_device_t *d = &g_dev[i];
+        for (unsigned k = 0; k < d->ep_count; k++) {
+            const usb_ep_t *e = &d->eps[k];
+            if (e->kind == KIND_KEYBOARD) {
+                out->keyboards++;
+                out->keyboard_reports += e->reports;
+                out->keyboard_errors += e->errors;
+            } else if (e->kind == KIND_MOUSE) {
+                out->mice++;
+                out->mouse_reports += e->reports;
+                out->mouse_errors += e->errors;
+            }
+        }
+    }
+}
+
 void usb_host_print_status(void) {
     console_write("usb: ");
     console_write_dec(g_hc_count);
