@@ -177,12 +177,11 @@ static size_t cat_dec(char *dst, size_t cap, size_t at, uint64_t v) {
 /* A status line at the foot of the screen: what USB found, and what it has received.
  * On a machine with no PS/2 port this is the way to see whether the keyboard and mouse
  * were found at all. Pressing a key or moving the mouse should raise the report counts. */
-static void draw_usb_line(void) {
+static void draw_usb_line(bool force) {
     usb_summary_t u;
     usb_host_summary(&u);
     uint32_t sw = fb_width(), sh = fb_height();
     uint32_t y = sh - 22u;
-    fb_fill_rect(0, y, sw, 22, c_face);
     char line[160];
     size_t at = cat_str(line, sizeof line, 0, "USB: ");
     at = cat_dec(line, sizeof line, at, u.controllers);
@@ -199,6 +198,12 @@ static void draw_usb_line(void) {
     at = cat_str(line, sizeof line, at, " (reports ");
     at = cat_dec(line, sizeof line, at, u.mouse_reports);
     cat_str(line, sizeof line, at, ").");
+    /* Redraw only when the text changed. Clearing and redrawing a strip twice a
+     * second is what made the iMac's screen flicker. */
+    static char last[160];
+    if (!force && strcmp(last, line) == 0) return;
+    strcpy(last, line);
+    fb_fill_rect(0, y, sw, 22, c_face);
     fb_draw_text(12, y + 7, line, c_text, c_face, true);
 }
 
@@ -275,7 +280,7 @@ bool login_run(void) {
     for (;;) {
         if (redraw) {
             draw_panel(&st);
-            draw_usb_line();
+            draw_usb_line(true);      /* the panel repaint wiped the strip */
             fb_present();
             redraw = false;
         }
@@ -286,7 +291,7 @@ bool login_run(void) {
             uint64_t now = time_uptime_ms();
             if (now >= usb_next) {
                 usb_next = now + 500;
-                draw_usb_line();
+                draw_usb_line(false);
                 fb_present();
             }
             __asm__ volatile("pause");
