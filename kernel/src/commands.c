@@ -44,6 +44,8 @@
 #include "acpi.h"
 #include "pci.h"
 #include "intel_lpss_gspi.h"
+#include "apple_topcase_spi.h"
+#include "spi.h"
 #include "net_tcp.h"
 #include "net_icmp.h"
 #include "net_interface.h"
@@ -865,6 +867,25 @@ static void cmd_pci(int argc, char **argv) {
         }
     }
     if (shown == 0) kprintf("pci: no devices found (is the PCI config port available?)\n");
+}
+
+/* topcase: a read-only probe of the Apple top-case keyboard on the GSPI bus. It clocks one
+ * 256-byte frame out and reports the bytes and whether the CRC matches. Writes nothing. */
+static void cmd_topcase(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    topcase_probe_t p;
+    int st = topcase_probe(&p);
+    if (st != 0) {
+        kprintf("topcase: probe did not run: %s\n", spi_status_name((spi_status_t)st));
+        return;
+    }
+    kprintf("topcase: read 256 bytes: %u zero, %u 0xFF\n", (unsigned)p.zeros, (unsigned)p.ones);
+    kprintf("topcase: head");
+    for (unsigned i = 0; i < 16u; i++) kprintf(" %02x", (unsigned)p.head[i]);
+    kprintf("\n");
+    kprintf("topcase: crc stored 0x%04x, computed 0x%04x, %s\n", (unsigned)p.crc_stored,
+            (unsigned)p.crc_computed, p.crc_stored == p.crc_computed ? "MATCH" : "no match");
 }
 
 /* spi: report the Intel LPSS GSPI controller's state. Read only: no transfers. */
@@ -2451,6 +2472,7 @@ const command_t helix_commands[] = {
     {"gpu", "list the display outputs of the virtio-gpu device", cmd_gpu},
     {"acpi", "list the firmware's ACPI tables", cmd_acpi},
     {"spi", "Intel LPSS GSPI controller state (MacBook Air SPI)", cmd_spi},
+    {"topcase", "read-only probe of the Apple top-case keyboard over SPI", cmd_topcase},
     {"pci", "list every PCI function: vendor:device, class, BAR0", cmd_pci},
     {"dhcp",    "get a network address from a DHCP server (replaces the static address)", cmd_dhcp},
     {"halt",    "halt the machine",                     cmd_halt},

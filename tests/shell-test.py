@@ -468,6 +468,9 @@ def main():
         # SPI: QEMU has no LPSS GSPI controller, so the driver must report that and carry on.
         ser.send("spi\n")
         check("spi reports the GSPI controller absent on QEMU", "spi: Intel LPSS GSPI 8086:9CE6 not found", timeout=60)
+        # The top-case probe needs the controller, so on QEMU it must refuse to run.
+        ser.send("topcase\n")
+        check("topcase probe refuses to run without the controller", "topcase: probe did not run: controller not ready", timeout=60)
         ser.send("fetch http://10.0.2.2:9/\n")
         check("fetch reports a failed connect", "fetch: connect failed", timeout=60)
         ser.send("fetch http://nonexistent.invalid/\n")
