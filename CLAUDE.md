@@ -169,7 +169,7 @@ Also, in the same change:
   `passwd`, `whoami`) and a graphical sign-in screen that `desktop` shows first.
   SHA-256 checked against published vectors on the host (`tests/sha256-unit.c`).
 - **Implemented (boot to sign-in, QEMU-tested only):** with a framebuffer, boot goes
-  straight to the sign-in screen (`ui.c`). Ctrl+Alt+T (Ctrl+T on serial) opens the TUI
+  to the sign-in screen (`ui.c`) after holding the boot log on screen for 15 seconds, so it can be read on a machine with no keyboard. Ctrl+Alt+T (Ctrl+T on serial) opens the TUI
   shell on screen and returns. Esc on the desktop signs out. Without a framebuffer, the
   serial shell runs as before.
 - **Implemented (ACPI tables and PCI listing, QEMU-tested only):** the RSDP from Limine, the XSDT/RSDT and FADT (with the DSDT), each table's checksum; `acpi` and `pci` shell commands. No AML interpreter yet. See docs/16-acpi.md.
