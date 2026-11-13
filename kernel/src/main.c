@@ -242,10 +242,22 @@ static void kernel_main_continue(void) {
     } else {
         console_write("[acpi] no RSDP from the bootloader\n");
     }
+    if (acpi_table_count() > 0) {
+        kprintf("[acpi] ACPI revision %u, %u tables\n", (unsigned)acpi_revision() + 1u,
+                acpi_table_count());
+    }
 
     /* The Intel LPSS GSPI controller (MacBook Air 7,2). Optional: absent on QEMU, and the
      * system runs without it. See docs/17-spi.md. */
-    (void)intel_lpss_gspi_init();
+    bool gspi_ready = intel_lpss_gspi_init();
+    intel_lpss_gspi_info_t gspi;
+    intel_lpss_gspi_info(&gspi);
+    if (!gspi.found) {
+        kprintf("[spi] Intel LPSS GSPI 8086:9CE6 not found\n");
+    } else {
+        kprintf("[spi] Intel LPSS GSPI 8086:9CE6 at %02x:%02x.%u, ready %s\n", gspi.bus,
+                gspi.device, gspi.function, gspi_ready ? "yes" : "no");
+    }
 
     if (!usb_host_init(hhdm_request.response->offset)) {
         console_write("no UHCI controller found or started\n");
