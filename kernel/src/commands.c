@@ -41,6 +41,8 @@
 #include "net_dns.h"
 #include "net_http.h"
 #include "virtio_gpu.h"
+#include "acpi.h"
+#include "pci.h"
 #include "net_tcp.h"
 #include "net_icmp.h"
 #include "net_interface.h"
@@ -832,6 +834,54 @@ static void cmd_gpu(int argc, char **argv) {
         if (!virtio_gpu_scanout(i, &w, &h, &on)) continue;
         if (on) kprintf("gpu: scanout %u: %ux%u\n", i, w, h);
         else kprintf("gpu: scanout %u: off\n", i);
+    }
+}
+
+/* pci: every PCI function the firmware left us, with its IDs, class and BAR0. Used to find
+ * a device's real vendor and device IDs (for example the Air's GSPI controller) before a driver
+ * matches on them. Empty slots (vendor 0xFFFF) are skipped; functions 1-7 are only probed on
+ * multi-function devices. */
+static void cmd_pci(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    unsigned shown = 0;
+    for (unsigned bus = 0; bus < 256; bus++) {
+        for (unsigned dev = 0; dev < 32; dev++) {
+            uint32_t first = pci_config_read32((uint8_t)bus, (uint8_t)dev, 0, 0);
+            if ((first & 0xFFFFu) == 0xFFFFu) continue;
+            uint32_t hdr = pci_config_read32((uint8_t)bus, (uint8_t)dev, 0, 0x0C);
+            unsigned nfn = (hdr & 0x00800000u) ? 8u : 1u;
+            for (unsigned fn = 0; fn < nfn; fn++) {
+                uint32_t id = pci_config_read32((uint8_t)bus, (uint8_t)dev, (uint8_t)fn, 0);
+                if ((id & 0xFFFFu) == 0xFFFFu) continue;
+                uint32_t cls = pci_config_read32((uint8_t)bus, (uint8_t)dev, (uint8_t)fn, 0x08);
+                uint32_t bar0 = pci_config_read32((uint8_t)bus, (uint8_t)dev, (uint8_t)fn, 0x10);
+                kprintf("pci %02x:%02x.%u  %04x:%04x  class %02x/%02x  prog_if %02x  bar0 0x%08x\n",
+                        bus, dev, fn, id & 0xFFFFu, id >> 16, (cls >> 24) & 0xFFu,
+                        (cls >> 16) & 0xFFu, (cls >> 8) & 0xFFu, bar0);
+                shown++;
+            }
+        }
+    }
+    if (shown == 0) kprintf("pci: no devices found (is the PCI config port available?)\n");
+}
+
+/* acpi: list the firmware's ACPI tables, with the length and checksum status of each. */
+static void cmd_acpi(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    unsigned n = acpi_table_count();
+    if (n == 0) {
+        kprintf("acpi: no firmware tables (the bootloader gave no RSDP, or it failed its checksum)\n");
+        return;
+    }
+    kprintf("acpi: ACPI revision %u, %u table(s)\n", (unsigned)acpi_revision() + 1u, n);
+    for (unsigned i = 0; i < n; i++) {
+        acpi_table_t t;
+        if (!acpi_table_at(i, &t)) continue;
+        kprintf("acpi: %s  length %u  at 0x%llx  checksum %s%s\n", t.sig, (unsigned)t.length,
+                (unsigned long long)t.phys, t.checksum_ok ? "ok" : "BAD",
+                t.from_fadt ? "  (via FADT)" : "");
     }
 }
 
@@ -2382,6 +2432,8 @@ const command_t helix_commands[] = {
     {"tcpget", "fetch a path over TCP: tcpget <a.b.c.d> <port> <path>", cmd_tcpget},
     {"fetch", "HTTP GET of an http:// address: fetch <http://host[:port]/path>", cmd_fetch},
     {"gpu", "list the display outputs of the virtio-gpu device", cmd_gpu},
+    {"acpi", "list the firmware's ACPI tables", cmd_acpi},
+    {"pci", "list every PCI function: vendor:device, class, BAR0", cmd_pci},
     {"dhcp",    "get a network address from a DHCP server (replaces the static address)", cmd_dhcp},
     {"halt",    "halt the machine",                     cmd_halt},
     {"reboot",  "restart the machine",                  cmd_reboot},

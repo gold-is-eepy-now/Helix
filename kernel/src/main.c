@@ -46,6 +46,7 @@
 #include "usb_hid.h"
 #include "syscall.h"
 #include "usb_host.h"
+#include "acpi.h"
 #include "e1000.h"
 #include "net.h"
 #include "klog.h"
@@ -96,6 +97,13 @@ static volatile struct limine_firmware_type_request firmware_type_request = {
 __attribute__((used, section(".limine_requests")))
 static volatile struct limine_date_at_boot_request date_at_boot_request = {
     .id = LIMINE_DATE_AT_BOOT_REQUEST_ID,
+    .revision = 0,
+};
+
+/* Ask where the ACPI root pointer (RSDP) is, for the firmware tables (acpi.c). */
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_rsdp_request rsdp_request = {
+    .id = LIMINE_RSDP_REQUEST_ID,
     .revision = 0,
 };
 
@@ -225,6 +233,15 @@ static void kernel_main_continue(void) {
 
     /* USB needs our page tables (vmm_init ran in kmain) to map the EHCI registers,
      * so it starts here, before the shell takes the keyboard. See docs/07-usb.md. */
+    /* Firmware tables first: they are read-only and do not depend on the devices. */
+    if (rsdp_request.response != NULL && rsdp_request.response->address != NULL) {
+        if (!acpi_init(hhdm_request.response->offset, (uint64_t)(uintptr_t)rsdp_request.response->address)) {
+            console_write("[acpi] RSDP or root table failed its checksum\n");
+        }
+    } else {
+        console_write("[acpi] no RSDP from the bootloader\n");
+    }
+
     if (!usb_host_init(hhdm_request.response->offset)) {
         console_write("no UHCI controller found or started\n");
     }

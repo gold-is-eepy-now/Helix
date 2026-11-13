@@ -457,6 +457,14 @@ def main():
         # HTTP client error paths: each fails at a different step, without needing a server.
         ser.send("gpu\n")
         check("gpu lists the virtio-gpu scanout", "gpu: scanout 0: ", timeout=60)
+        # ACPI: QEMU's firmware provides these tables; each must pass its checksum.
+        ser.send("acpi\n")
+        check("acpi lists the FADT with a valid checksum", "acpi: FACP  length", timeout=60)
+        check("acpi lists the MADT (APIC) table", "acpi: APIC  length", timeout=60)
+        check("acpi reports a valid checksum", "checksum ok", timeout=60)
+        # PCI: the host bridge at 00:00.0 is always present on q35.
+        ser.send("pci\n")
+        check("pci lists the host bridge at 00:00.0", "pci 00:00.0  8086:", timeout=60)
         ser.send("fetch http://10.0.2.2:9/\n")
         check("fetch reports a failed connect", "fetch: connect failed", timeout=60)
         ser.send("fetch http://nonexistent.invalid/\n")

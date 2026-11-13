@@ -172,6 +172,7 @@ Also, in the same change:
   straight to the sign-in screen (`ui.c`). Ctrl+Alt+T (Ctrl+T on serial) opens the TUI
   shell on screen and returns. Esc on the desktop signs out. Without a framebuffer, the
   serial shell runs as before.
+- **Implemented (ACPI tables and PCI listing, QEMU-tested only):** the RSDP from Limine, the XSDT/RSDT and FADT (with the DSDT), each table's checksum; `acpi` and `pci` shell commands. No AML interpreter yet. See docs/16-acpi.md.
 - **Implemented (desktop, basic, QEMU-tested only):** `desktop` command: blue
   Windows-7-style wallpaper (cached gradient), glass window frames with rounded
   corners, taskbar with Start orb, desktop, My Computer (an Explorer-style window: folders, a file preview, Up, New folder, New file, Copy, Edit, Delete), Network (ping and name lookup), Settings (a light and dark theme, in memory), About, Terminal, Text Editor and Browser windows (the Browser loads plain http:// pages and shows them as text; the Terminal runs kernel shell
