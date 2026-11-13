@@ -75,6 +75,7 @@ typedef struct {
     uint32_t task_top, task_bot, task_line;
     uint32_t tbtn_focus_top, tbtn_focus_bot, tbtn_focus_text, tbtn_blur_top, tbtn_blur_bot;
     uint32_t menu_rim, menu_top, menu_bot, menu_strip, menu_hi_top, menu_hi_bot;
+    uint32_t menu_hi_text;      /* text on a highlighted Start menu row */
     uint32_t track, thumb_top, thumb_bot;
 } theme_t;
 
@@ -90,7 +91,7 @@ static const theme_t g_theme_light = {
     .tbtn_focus_top = 0xA7CCF0u, .tbtn_focus_bot = 0x5B8CC6u, .tbtn_focus_text = 0x10233Du,
     .tbtn_blur_top = 0x4D6E9Cu, .tbtn_blur_bot = 0x2C4870u,
     .menu_rim = 0x2B4C7Eu, .menu_top = 0xF4F8FDu, .menu_bot = 0xDCE7F4u, .menu_strip = 0x1B3157u,
-    .menu_hi_top = 0xA7CCF0u, .menu_hi_bot = 0x6FA2DAu,
+    .menu_hi_top = 0xA7CCF0u, .menu_hi_bot = 0x6FA2DAu, .menu_hi_text = 0x10233Du,
     .track = 0xDDE4EEu, .thumb_top = 0xB8D6F2u, .thumb_bot = 0x5F93CFu,
 };
 
@@ -106,12 +107,72 @@ static const theme_t g_theme_dark = {
     .tbtn_focus_top = 0x3D6FB0u, .tbtn_focus_bot = 0x274E82u, .tbtn_focus_text = 0xE6EEF8u,
     .tbtn_blur_top = 0x2A3A52u, .tbtn_blur_bot = 0x1B2638u,
     .menu_rim = 0x0A1220u, .menu_top = 0x1E2633u, .menu_bot = 0x161C27u, .menu_strip = 0x0F2440u,
-    .menu_hi_top = 0x35598Au, .menu_hi_bot = 0x274775u,
+    .menu_hi_top = 0x35598Au, .menu_hi_bot = 0x274775u, .menu_hi_text = 0xE6EEF8u,
     .track = 0x2C323Du, .thumb_top = 0x4A6A96u, .thumb_bot = 0x33507Au,
 };
 
-static bool g_dark_mode;              /* Settings > Appearance; in memory, so light at each boot */
-static const theme_t *g_th = &g_theme_light;
+/* Helix Aero Blue: the default. Glass with a brighter sky-blue desktop and a lighter taskbar
+ * than Helix Light, so the title bars and taskbar read as glossy blue. The values are new and
+ * were chosen by hand; they have not been compared with Windows 7 pixels. */
+static const theme_t g_theme_aero_blue = {
+    .client = 0xFFFFFFu, .ink = 0x000000u, .muted = 0x6A7A8Cu, .heading = 0x1B4F8Au,
+    .face = 0xD9E4F1u, .edge = 0x7F98B5u,
+    .frame_rim = 0x1E4C86u, .frame_focus_top = 0xD2E6FAu, .frame_focus_bot = 0x6FA0D6u,
+    .frame_blur_top = 0xEAF1F9u, .frame_blur_bot = 0xBCD0E6u,
+    .cap_focus = 0x10233Du, .cap_blur = 0x4D6480u, .client_edge = 0x5A7AA3u,
+    .desk_top = 0x8FD0FFu, .desk_bot = 0x124E96u,
+    .task_top = 0x4C7AB0u, .task_bot = 0x163A6Cu, .task_line = 0xA9C6E6u,
+    .tbtn_focus_top = 0xBFDDF8u, .tbtn_focus_bot = 0x5F95D2u, .tbtn_focus_text = 0x10233Du,
+    .tbtn_blur_top = 0x5E84B5u, .tbtn_blur_bot = 0x345E94u,
+    .menu_rim = 0x2B4C7Eu, .menu_top = 0xF6FAFFu, .menu_bot = 0xDDE9F7u, .menu_strip = 0x1B3157u,
+    .menu_hi_top = 0xBFDDF8u, .menu_hi_bot = 0x6FA2DAu, .menu_hi_text = 0x10233Du,
+    .track = 0xDDE4EEu, .thumb_top = 0xB8D6F2u, .thumb_bot = 0x5F93CFu,
+};
+
+/* Helix Aero Dark: the dark glass with blue accents, so it still reads as the Aero family. */
+static const theme_t g_theme_aero_dark = {
+    .client = 0x1B2330u, .ink = 0xE6EEF8u, .muted = 0x8FA3BD, .heading = 0x8CC4FFu,
+    .face = 0x27334Au, .edge = 0x40557Au,
+    .frame_rim = 0x081A36u, .frame_focus_top = 0x2F5C94u, .frame_focus_bot = 0x163767u,
+    .frame_blur_top = 0x22324Du, .frame_blur_bot = 0x16233Au,
+    .cap_focus = 0xEAF3FFu, .cap_blur = 0x9FB4CFu, .client_edge = 0x34507Cu,
+    .desk_top = 0x1E4C8Au, .desk_bot = 0x061C3Eu,
+    .task_top = 0x24406Cu, .task_bot = 0x0A1B36u, .task_line = 0x3E5F8Eu,
+    .tbtn_focus_top = 0x4B82C4u, .tbtn_focus_bot = 0x2A5A98u, .tbtn_focus_text = 0xEAF3FFu,
+    .tbtn_blur_top = 0x2E4D7Au, .tbtn_blur_bot = 0x1B3257u,
+    .menu_rim = 0x081A36u, .menu_top = 0x1F2B40u, .menu_bot = 0x18233Au, .menu_strip = 0x0C2A52u,
+    .menu_hi_top = 0x3D6AA5u, .menu_hi_bot = 0x2A5490u, .menu_hi_text = 0xEAF3FFu,
+    .track = 0x27334Au, .thumb_top = 0x4A6A96u, .thumb_bot = 0x33507Au,
+};
+
+/* Helix Classic: flat Windows 9x grey and navy, no gradients. Every top and bottom pair is
+ * the same colour, so the glass drawing code just draws solid fills. */
+static const theme_t g_theme_classic = {
+    .client = 0xFFFFFFu, .ink = 0x000000u, .muted = 0x808080u, .heading = 0x000080u,
+    .face = 0xC0C0C0u, .edge = 0x808080u,
+    .frame_rim = 0x000000u, .frame_focus_top = 0x000080u, .frame_focus_bot = 0x000080u,
+    .frame_blur_top = 0x808080u, .frame_blur_bot = 0x808080u,
+    .cap_focus = 0xFFFFFFu, .cap_blur = 0xC0C0C0u, .client_edge = 0x808080u,
+    .desk_top = 0x008080u, .desk_bot = 0x008080u,
+    .task_top = 0xC0C0C0u, .task_bot = 0xC0C0C0u, .task_line = 0xFFFFFFu,
+    .tbtn_focus_top = 0xC0C0C0u, .tbtn_focus_bot = 0xC0C0C0u, .tbtn_focus_text = 0x000000u,
+    .tbtn_blur_top = 0xC0C0C0u, .tbtn_blur_bot = 0xC0C0C0u,
+    .menu_rim = 0x000000u, .menu_top = 0xC0C0C0u, .menu_bot = 0xC0C0C0u, .menu_strip = 0x000080u,
+    .menu_hi_top = 0x000080u, .menu_hi_bot = 0x000080u, .menu_hi_text = 0xFFFFFFu,
+    .track = 0xC0C0C0u, .thumb_top = 0xC0C0C0u, .thumb_bot = 0xC0C0C0u,
+};
+
+/* The themes in the order Settings cycles through them. Aero Blue is the default. */
+#define THEME_COUNT 5u
+static const theme_t *const g_theme_list[THEME_COUNT] = {
+    &g_theme_aero_blue, &g_theme_aero_dark, &g_theme_classic, &g_theme_light, &g_theme_dark,
+};
+static const char *const g_theme_names[THEME_COUNT] = {
+    "Helix Aero Blue", "Helix Aero Dark", "Helix Classic", "Helix Light", "Helix Dark",
+};
+
+static unsigned g_theme_idx;          /* Settings > Appearance; in memory, so Aero Blue at each boot */
+static const theme_t *g_th = &g_theme_aero_blue;
 
 /* A 0xRRGGBB colour, packed for the framebuffer. */
 static uint32_t rgb_hex(uint32_t v) {
@@ -120,7 +181,7 @@ static uint32_t rgb_hex(uint32_t v) {
 
 /* Make the current theme's colours the ones the drawing code uses. */
 static void theme_apply(void) {
-    g_th = g_dark_mode ? &g_theme_dark : &g_theme_light;
+    g_th = g_theme_list[g_theme_idx];
     c_client = rgb_hex(g_th->client);
     c_ink = rgb_hex(g_th->ink);
     c_face = rgb_hex(g_th->face);
@@ -135,7 +196,6 @@ typedef enum { APP_MYCOMP, APP_ABOUT, APP_SHUTDOWN, APP_TERMINAL, APP_EDITOR, AP
 static const char *const g_app_names[APP_COUNT] = { "My Computer", "About Helix", "Shut Down", "Terminal", "Text Editor", "Browser", "Settings", "Network" };
 
 #define ICON_COUNT 5            /* icons on the desktop: My Computer, About Helix, Terminal, Text Editor, Browser */
-#define MENU_COUNT 5            /* Start menu items, in order; Shut Down is last (see g_menu_app) */
 #define MAX_WIN 4
 #define MAX_LINES 16
 #define LINE_LEN 48
@@ -145,17 +205,39 @@ static const char *const g_app_names[APP_COUNT] = { "My Computer", "About Helix"
 #define TB_BTN_H    26u
 #define TB_BTN_W    150u
 #define TB_BTN_STEP 156u
+#define HOVER_NONE (-1)         /* what the pointer is over: a window button index, or one of these */
+#define HOVER_ORB 10
+#define HOVER_SHOW 11           /* Show Desktop strip at the far right of the taskbar */
+#define HOVER_MENU 100          /* Start menu rows: HOVER_MENU + column * 50 + row */
+#define MENU_W 402u             /* the Start menu panel */
+#define MENU_H 320u
+#define MENU_ROW_H 20u
+#define MENU_ROWS_MAX 16
+#define MENU_LEFT_X 4u          /* programs column (search and pinned/recent/all) */
+#define MENU_LEFT_CW 192u
+#define MENU_RIGHT_X 208u       /* places column */
+#define MENU_RIGHT_CW 188u
+#define CTX_W 150u              /* the desktop's right-click menu */
+#define CTX_ROW 20u
+#define CTX_COUNT 3
 
 /* The app each desktop icon opens (icon i is not app i, since Shut Down is an app too). */
 static const app_t g_icon_app[ICON_COUNT] = { APP_MYCOMP, APP_ABOUT, APP_TERMINAL, APP_EDITOR, APP_BROWSER };
 
-/* The Start menu's items, top to bottom. */
-static const app_t g_menu_app[MENU_COUNT] = { APP_MYCOMP, APP_NETWORK, APP_SETTINGS, APP_ABOUT, APP_SHUTDOWN };
+/* Start menu contents. The left column lists programs: pinned, recently opened, all. The right
+ * column lists the places, then Shut Down. Desktop folders for User and Documents do not exist
+ * yet, so they are not listed. */
+static const app_t g_pinned_apps[4] = { APP_MYCOMP, APP_TERMINAL, APP_EDITOR, APP_BROWSER };
+static const app_t g_all_apps[3] = { APP_ABOUT, APP_SETTINGS, APP_NETWORK };
+static const app_t g_place_apps[4] = { APP_MYCOMP, APP_NETWORK, APP_SETTINGS, APP_ABOUT };
 
 typedef struct {
     bool used;
     app_t app;
     uint32_t x, y, w, h;
+    bool minimised;            /* hidden; its taskbar button restores it */
+    bool maximised;            /* fills the screen above the taskbar */
+    uint32_t rx, ry, rw, rh;   /* where it goes back to when restored */
 } window_t;
 
 static window_t g_win[MAX_WIN];
@@ -164,6 +246,15 @@ static int g_focus = -1;
 static int g_icon_sel;
 static int g_menu_sel;
 static bool g_menu_open;
+static char g_menu_query[16];   /* typed into the Start menu's search box */
+static int g_menu_query_len;
+static int g_menu_col;          /* 0 = programs column, 1 = places column (keyboard focus) */
+static app_t g_recent[3];       /* recently opened apps, newest first */
+static int g_recent_n;
+static bool g_ctx_open;         /* the desktop's right-click menu */
+static int g_ctx_x, g_ctx_y;
+static int g_hover = HOVER_NONE;   /* the taskbar or menu item under the pointer */
+static bool g_right_was_down;
 
 /* The pointer position in screen pixels, and the left button from the last poll. */
 static int g_mx, g_my;
@@ -1331,9 +1422,14 @@ static void exp_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
 static void settings_theme_button(uint32_t bx, uint32_t by) {
     fb_fill_rect(bx, by, SET_THEME_W, SET_THEME_H, c_face);
     bevel(bx, by, SET_THEME_W, SET_THEME_H, true);
-    fb_draw_text(bx + 8u, by + 7u,
-                 g_dark_mode ? "Theme: Dark (click for Light)" : "Theme: Light (click for Dark)",
-                 c_ink, 0, false);
+    char label[40];
+    put_str(label, sizeof(label), "Theme: ");
+    size_t n = 0;
+    while (label[n] != '\0') n++;
+    const char *name = g_theme_names[g_theme_idx];
+    for (size_t i = 0; name[i] != '\0' && n + 1 < sizeof(label); i++) label[n++] = name[i];
+    label[n] = '\0';
+    fb_draw_text(bx + 8u, by + 7u, label, c_ink, 0, false);
 }
 
 static void settings_line(uint32_t x, uint32_t *y, uint32_t color, const char *s) {
@@ -1385,6 +1481,12 @@ static void settings_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
 }
 
 static void draw_window(const window_t *w, bool focused) {
+    /* Shadow: two dark offset boxes under the window. They are solid, not blurred, because the
+     * framebuffer has no backbuffer to blur from. A maximised window casts none. */
+    if (!w->maximised) {
+        fill_box(w->x + 1, w->y + 2, w->w + 2, w->h + 2, 6, 0x1E2B3Cu, 0x1E2B3Cu, false);
+        fill_box(w->x + 3, w->y + 5, w->w + 2, w->h + 2, 6, 0x0B1424u, 0x0B1424u, false);
+    }
     /* Glass frame with a darker outline. */
     fill_box(w->x, w->y, w->w, w->h, 6, g_th->frame_rim, g_th->frame_rim, false);
     if (focused) {
@@ -1393,10 +1495,20 @@ static void draw_window(const window_t *w, bool focused) {
         fill_box(w->x + 1, w->y + 1, w->w - 2, w->h - 2, 5, g_th->frame_blur_top, g_th->frame_blur_bot, false);
     }
 
-    /* Caption: the title on the glass, and a red close button. */
+    /* Caption: the title on the glass, then minimise, maximise and a red close button. */
     uint32_t tx = w->x + 3, ty = w->y + 3, tw = w->w - 6;
-    fb_draw_text(tx + 8, ty + 5, g_app_names[w->app],
-                 focused ? rgb_hex(g_th->cap_focus) : rgb_hex(g_th->cap_blur), 0, false);
+    uint32_t cap = focused ? rgb_hex(g_th->cap_focus) : rgb_hex(g_th->cap_blur);
+    fb_draw_text(tx + 8, ty + 5, g_app_names[w->app], cap, 0, false);
+
+    uint32_t glyph = rgb_hex(g_th->tbtn_focus_text);
+    uint32_t mnx = w->x + w->w - 57u, mxx = w->x + w->w - 39u;
+    fill_box(mnx, ty + 2, 16, 14, 3, g_th->tbtn_focus_top, g_th->tbtn_focus_bot, true);
+    fb_fill_rect(mnx + 4u, ty + 11u, 8, 2, glyph);                       /* _ */
+    fill_box(mxx, ty + 2, 16, 14, 3, g_th->tbtn_focus_top, g_th->tbtn_focus_bot, true);
+    fb_fill_rect(mxx + 4u, ty + 5u, 8, 1, glyph);                        /* [] */
+    fb_fill_rect(mxx + 4u, ty + 9u, 8, 1, glyph);
+    fb_fill_rect(mxx + 4u, ty + 5u, 1, 5, glyph);
+    fb_fill_rect(mxx + 11u, ty + 5u, 1, 5, glyph);
 
     uint32_t bx = tx + tw - 18;
     fill_box(bx, ty + 2, 16, 14, 3, 0xE8A38Cu, 0xC2472Cu, true);
@@ -1499,19 +1611,169 @@ static void draw_icon(int idx, uint32_t x, uint32_t y, bool selected) {
     draw_text_shadow(label_x, y + 38, name, fb_rgb(0xFF, 0xFF, 0xFF), fb_rgb(0x0B, 0x1F, 0x3A));
 }
 
+/* Start menu rows are built the same way for drawing and for clicks. A row is a section
+ * title, a rule, or a choice that runs a program. */
+enum { MROW_ITEM, MROW_HEADER, MROW_SEP };
+typedef struct {
+    int kind;
+    app_t app;
+    const char *label;
+} menu_row_t;
+
+static int menu_add(menu_row_t *rows, int n, int kind, app_t app, const char *label) {
+    if (n < MENU_ROWS_MAX) {
+        rows[n].kind = kind;
+        rows[n].app = app;
+        rows[n].label = label;
+        n++;
+    }
+    return n;
+}
+
+/* Case-insensitive: does `hay` contain `needle`. */
+static bool ci_contains(const char *hay, const char *needle) {
+    size_t nl = strlen(needle), hl = strlen(hay);
+    for (size_t i = 0; i + nl <= hl; i++) {
+        size_t k = 0;
+        while (k < nl && exp_lower(hay[i + k]) == exp_lower(needle[k])) k++;
+        if (k == nl) return true;
+    }
+    return false;
+}
+
+/* The programs column. A search replaces the sections with the matching programs. */
+static int menu_left_rows(menu_row_t *rows) {
+    int n = 0;
+    if (g_menu_query_len > 0) {
+        for (int a = 0; a < APP_COUNT; a++) {
+            if ((app_t)a == APP_SHUTDOWN) continue;
+            if (ci_contains(g_app_names[a], g_menu_query)) {
+                n = menu_add(rows, n, MROW_ITEM, (app_t)a, g_app_names[a]);
+            }
+        }
+        return n;
+    }
+    n = menu_add(rows, n, MROW_HEADER, APP_MYCOMP, "Pinned");
+    for (unsigned k = 0; k < 4; k++) n = menu_add(rows, n, MROW_ITEM, g_pinned_apps[k], g_app_names[g_pinned_apps[k]]);
+    if (g_recent_n > 0) {
+        n = menu_add(rows, n, MROW_HEADER, APP_MYCOMP, "Recent");
+        for (int k = 0; k < g_recent_n; k++) n = menu_add(rows, n, MROW_ITEM, g_recent[k], g_app_names[g_recent[k]]);
+    }
+    n = menu_add(rows, n, MROW_HEADER, APP_MYCOMP, "All Programs");
+    for (unsigned k = 0; k < 3; k++) n = menu_add(rows, n, MROW_ITEM, g_all_apps[k], g_app_names[g_all_apps[k]]);
+    return n;
+}
+
+/* The places column, then a rule and Shut Down. */
+static int menu_right_rows(menu_row_t *rows) {
+    int n = 0;
+    for (unsigned k = 0; k < 4; k++) n = menu_add(rows, n, MROW_ITEM, g_place_apps[k], g_app_names[g_place_apps[k]]);
+    n = menu_add(rows, n, MROW_SEP, APP_MYCOMP, "");
+    n = menu_add(rows, n, MROW_ITEM, APP_SHUTDOWN, g_app_names[APP_SHUTDOWN]);
+    return n;
+}
+
+static int menu_rows_for(int col, menu_row_t *rows) {
+    return col == 0 ? menu_left_rows(rows) : menu_right_rows(rows);
+}
+
+static uint32_t menu_col_x(int col) { return col == 0 ? MENU_LEFT_X : MENU_RIGHT_X; }
+static uint32_t menu_col_w(int col) { return col == 0 ? MENU_LEFT_CW : MENU_RIGHT_CW; }
+static uint32_t menu_top_y(uint32_t sh) { return sh - TASK_H - MENU_H; }
+static uint32_t menu_row_y(uint32_t sh, int row) { return menu_top_y(sh) + 8u + (uint32_t)row * MENU_ROW_H; }
+
+/* The k-th choice of a column (headers and rules do not count), as a row index, or -1. */
+static int menu_choice_row(const menu_row_t *rows, int n, int k) {
+    int seen = 0;
+    for (int i = 0; i < n; i++) {
+        if (rows[i].kind != MROW_ITEM) continue;
+        if (seen == k) return i;
+        seen++;
+    }
+    return -1;
+}
+
+static int menu_choice_count(const menu_row_t *rows, int n) {
+    int seen = 0;
+    for (int i = 0; i < n; i++) if (rows[i].kind == MROW_ITEM) seen++;
+    return seen;
+}
+
+static void draw_menu_column(const menu_row_t *rows, int n, int col, uint32_t sh) {
+    uint32_t x0 = menu_col_x(col), w = menu_col_w(col);
+    int choice = 0;
+    for (int i = 0; i < n; i++) {
+        uint32_t iy = menu_row_y(sh, i);
+        if (rows[i].kind == MROW_HEADER) {
+            fb_draw_text(x0 + 6u, iy + 5u, rows[i].label, rgb_hex(g_th->heading), 0, false);
+            continue;
+        }
+        if (rows[i].kind == MROW_SEP) {
+            fb_fill_rect(x0 + 4u, iy + 9u, w - 8u, 1, rgb_hex(g_th->menu_rim));
+            continue;
+        }
+        bool sel = (col == g_menu_col && choice == g_menu_sel);
+        bool hov = (g_hover == HOVER_MENU + col * 50 + i);
+        choice++;
+        if (sel || hov) fill_box(x0, iy, w, MENU_ROW_H, 3, g_th->menu_hi_top, g_th->menu_hi_bot, true);
+        fb_draw_text(x0 + 10u, iy + 5u, rows[i].label,
+                     (sel || hov) ? rgb_hex(g_th->menu_hi_text) : c_ink, 0, false);
+    }
+}
+
+static void draw_start_menu(uint32_t sh) {
+    uint32_t my = menu_top_y(sh);
+    fill_box(2, my, MENU_W, MENU_H, 6, g_th->menu_rim, g_th->menu_rim, false);          /* outline */
+    fill_box(3, my + 1, MENU_W - 2, MENU_H - 2, 5, g_th->menu_top, g_th->menu_bot, false);  /* light panel */
+    fb_fill_rect(MENU_LEFT_X + MENU_LEFT_CW + 6u, my + 8u, 1, MENU_H - 16u, rgb_hex(g_th->menu_rim));
+
+    menu_row_t left[MENU_ROWS_MAX], right[MENU_ROWS_MAX];
+    int ln = menu_left_rows(left);
+    int rn = menu_right_rows(right);
+    draw_menu_column(left, ln, 0, sh);
+    draw_menu_column(right, rn, 1, sh);
+
+    /* The search box at the foot of the programs column. Typing goes here while the menu is open. */
+    uint32_t sy = my + MENU_H - 30u;
+    fill_box(MENU_LEFT_X, sy, MENU_LEFT_CW, 22, 3, g_th->menu_rim, g_th->menu_rim, false);
+    fill_box(MENU_LEFT_X + 1u, sy + 1u, MENU_LEFT_CW - 2u, 20, 2, c_white, c_white, false);
+    if (g_menu_query_len > 0) {
+        fb_draw_text(MENU_LEFT_X + 6u, sy + 6u, g_menu_query, c_ink, 0, false);
+    } else {
+        fb_draw_text(MENU_LEFT_X + 6u, sy + 6u, "Search programs", c_gray, 0, false);
+    }
+}
+
+/* The desktop's right-click menu: Refresh repaints the desktop; the others open an app. */
+static const char *const g_ctx_names[CTX_COUNT] = { "Refresh", "Settings", "About Helix" };
+
+static void draw_context_menu(void) {
+    uint32_t h = CTX_COUNT * CTX_ROW + 8u;
+    fill_box((uint32_t)g_ctx_x, (uint32_t)g_ctx_y, CTX_W, h, 4, g_th->menu_rim, g_th->menu_rim, false);
+    fill_box((uint32_t)g_ctx_x + 1u, (uint32_t)g_ctx_y + 1u, CTX_W - 2u, h - 2u, 3,
+             g_th->menu_top, g_th->menu_bot, false);
+    for (int i = 0; i < CTX_COUNT; i++) {
+        uint32_t iy = (uint32_t)g_ctx_y + 4u + (uint32_t)i * CTX_ROW;
+        fb_draw_text((uint32_t)g_ctx_x + 10u, iy + 6u, g_ctx_names[i], c_ink, 0, false);
+    }
+}
+
 static void draw_taskbar(uint32_t sw, uint32_t sh) {
     uint32_t ty = sh - TASK_H;
     fill_box(0, ty, sw, TASK_H, 0, g_th->task_top, g_th->task_bot, false);   /* dark glass */
     fb_fill_rect(0, ty, sw, 1, rgb_hex(g_th->task_line));
 
-    draw_orb(24, ty + 18, 14, g_menu_open);
+    draw_orb(24, ty + 18, 14, g_menu_open || g_hover == HOVER_ORB);
 
-    /* One rounded button per open window, lit for the focused one. */
+    /* One button per open window, minimised ones too so they can be brought back. The focused
+     * or hovered one is lit; a dot under each button shows the app is running (dim if hidden). */
     uint32_t bx = TB_BTN_X;
     for (int i = 0; i < MAX_WIN; i++) {
         if (!g_win[i].used) continue;
-        bool focused = (i == g_focus);
-        if (focused) {
+        bool shown = !g_win[i].minimised;
+        bool focused = shown && i == g_focus;
+        bool hot = g_hover == i;
+        if (focused || hot) {
             fill_box(bx, ty + TB_BTN_Y, TB_BTN_W, TB_BTN_H, 4, g_th->tbtn_focus_top, g_th->tbtn_focus_bot, true);
         } else {
             fill_box(bx, ty + TB_BTN_Y, TB_BTN_W, TB_BTN_H, 4, g_th->tbtn_blur_top, g_th->tbtn_blur_bot, true);
@@ -1519,12 +1781,21 @@ static void draw_taskbar(uint32_t sw, uint32_t sh) {
         char title[20];
         put_str(title, sizeof(title), g_app_names[g_win[i].app]);
         title[chars_in(TB_BTN_W - 20u)] = '\0';
-        fb_draw_text(bx + 10, ty + TB_BTN_Y + 9, title,
-                     focused ? rgb_hex(g_th->tbtn_focus_text) : fb_rgb(0xFF, 0xFF, 0xFF), 0, false);
+        uint32_t tcol = (focused || hot) ? rgb_hex(g_th->tbtn_focus_text)
+                                         : (shown ? fb_rgb(0xFF, 0xFF, 0xFF) : fb_rgb(0xB8, 0xC8, 0xDC));
+        fb_draw_text(bx + 10, ty + TB_BTN_Y + 9, title, tcol, 0, false);
+        fb_fill_rect(bx + TB_BTN_W / 2u - 2u, ty + TB_BTN_Y + TB_BTN_H + 2u, 4, 2, shown ? c_white : c_gray);
         bx += TB_BTN_STEP;
     }
 
-    /* The clock, shadowed on the glass at the right. */
+    /* Tray: a network and a volume glyph. They are drawn only; they do not read any state yet. */
+    uint32_t tray = sw - 150u;
+    fb_fill_rect(tray, ty + 11u, 12, 8, c_white);
+    fb_fill_rect(tray + 4u, ty + 20u, 4, 2, c_white);
+    fb_fill_rect(tray + 22u, ty + 13u, 3, 6, c_white);
+    fb_fill_rect(tray + 27u, ty + 11u, 3, 10, c_white);
+
+    /* The clock, shadowed on the glass. */
     int year, month, day, hour, minute, second, weekday;
     time_now_utc(&year, &month, &day, &hour, &minute, &second, &weekday);
     char clock[8];
@@ -1534,22 +1805,13 @@ static void draw_taskbar(uint32_t sw, uint32_t sh) {
     clock[3] = (char)('0' + minute / 10);
     clock[4] = (char)('0' + minute % 10);
     clock[5] = '\0';
-    draw_text_shadow(sw - 60, ty + 14, clock, fb_rgb(0xFF, 0xFF, 0xFF), fb_rgb(0x0B, 0x1F, 0x3A));
-}
+    draw_text_shadow(sw - 92, ty + 14, clock, fb_rgb(0xFF, 0xFF, 0xFF), fb_rgb(0x0B, 0x1F, 0x3A));
 
-static void draw_start_menu(uint32_t sh) {
-    uint32_t mh = MENU_COUNT * 22u + 8u;
-    uint32_t my = sh - TASK_H - mh;
-    fill_box(2, my, 180, mh, 6, g_th->menu_rim, g_th->menu_rim, false);          /* outline */
-    fill_box(3, my + 1, 178, mh - 2, 5, g_th->menu_top, g_th->menu_bot, false);  /* light panel */
-    fill_box(4, my + 4, 22, mh - 8, 0, g_th->menu_rim, g_th->menu_strip, false);   /* dark strip */
-    fb_draw_text(9, my + 8, "Helix", fb_rgb(0xFF, 0xFF, 0xFF), 0, false);
-    for (int i = 0; i < MENU_COUNT; i++) {
-        uint32_t iy = my + 4 + (uint32_t)i * 22u;
-        bool sel = (i == g_menu_sel);
-        if (sel) fill_box(28, iy, 152, 20, 3, g_th->menu_hi_top, g_th->menu_hi_bot, true);
-        fb_draw_text(36, iy + 6, g_app_names[g_menu_app[i]],
-                     sel ? rgb_hex(g_th->tbtn_focus_text) : c_ink, 0, false);
+    /* Show Desktop: a thin strip at the far right; lit on hover. */
+    uint32_t sx = sw - 12u;
+    fb_fill_rect(sx - 1u, ty + 4u, 1, TASK_H - 8u, rgb_hex(g_th->task_line));
+    if (g_hover == HOVER_SHOW) {
+        fill_box(sx, ty, 12, TASK_H, 0, g_th->tbtn_blur_top, g_th->tbtn_blur_bot, false);
     }
 }
 
@@ -1694,7 +1956,7 @@ static void redraw(void) {
     }
     for (int k = 0; k < MAX_WIN; k++) {
         int i = z_slot(k);
-        if (g_win[i].used) draw_window(&g_win[i], i == g_focus);
+        if (g_win[i].used && !g_win[i].minimised) draw_window(&g_win[i], i == g_focus);
     }
     if (g_drag >= 0 && g_win[g_drag].used) {   /* a drag in progress: keep its outline */
         outline_xor(g_out_x, g_out_y, g_win[g_drag].w, g_win[g_drag].h);
@@ -1702,6 +1964,7 @@ static void redraw(void) {
     }
     draw_taskbar(sw, sh);
     if (g_menu_open) draw_start_menu(sh);
+    if (g_ctx_open) draw_context_menu();
     cursor_show();
 }
 
@@ -1766,17 +2029,31 @@ static void term_redraw_input(int old_len) {
 static void focus_next(void) {
     for (int step = 1; step <= MAX_WIN; step++) {
         int i = (g_focus + step) % MAX_WIN;
-        if (g_win[i].used) {
+        if (g_win[i].used && !g_win[i].minimised) {
             g_focus = i;
             return;
         }
     }
 }
 
+/* Remember the app as the most recent, newest first, at most three. */
+static void record_recent(app_t app) {
+    int at = -1;
+    for (int k = 0; k < g_recent_n; k++) if (g_recent[k] == app) at = k;
+    if (at < 0) {                       /* a new app: make room at the front, dropping the oldest */
+        if (g_recent_n < 3) g_recent_n++;
+        at = g_recent_n - 1;
+    }
+    for (int k = at; k > 0; k--) g_recent[k] = g_recent[k - 1];
+    g_recent[0] = app;
+}
+
 static void open_app(app_t app) {
+    record_recent(app);
     for (int i = 0; i < MAX_WIN; i++) {
         if (g_win[i].used && g_win[i].app == app) {
-            g_focus = i;               /* already open: bring it forward */
+            g_win[i].minimised = false;   /* already open: bring it back and forward */
+            g_focus = i;
             return;
         }
     }
@@ -1785,6 +2062,8 @@ static void open_app(app_t app) {
         uint32_t n = (uint32_t)i;
         g_win[i].used = true;
         g_win[i].app = app;
+        g_win[i].minimised = false;
+        g_win[i].maximised = false;
         g_win[i].x = 120u + n * 28u;
         g_win[i].y = 40u + n * 28u;
         g_win[i].w = app == APP_TERMINAL ? 480 : app == APP_EDITOR ? 420 : app == APP_BROWSER ? 460 :
@@ -1814,7 +2093,7 @@ static void close_window(int i) {
     g_win[i].used = false;
     g_focus = -1;
     for (int k = 0; k < MAX_WIN; k++) {
-        if (g_win[k].used) {
+        if (g_win[k].used && !g_win[k].minimised) {
             g_focus = k;
             break;
         }
@@ -1874,7 +2153,7 @@ static void network_click(const window_t *w, int x, int y) {
 static void settings_click(const window_t *w, int x, int y) {
     uint32_t cx = w->x + 6u, cy = w->y + 26u;
     if (inside(x, y, cx + 10u, cy + 24u, SET_THEME_W, SET_THEME_H)) {
-        g_dark_mode = !g_dark_mode;
+        g_theme_idx = (g_theme_idx + 1u) % THEME_COUNT;
         theme_apply();
     }
 }
@@ -1958,53 +2237,245 @@ static bool browser_bar_click(const window_t *w, int x, int y) {
 /* A click at (x, y). Returns PTR_EXIT for Shut Down, PTR_REDRAW when the picture
  * needs a full repaint, and PTR_NONE when nothing visible changed (or it was
  * already repainted in place). */
+/* The topmost window that is shown (not minimised), or -1. */
+static int pick_focus(void) {
+    for (int k = MAX_WIN - 1; k >= 0; k--) {
+        int i = z_slot(k);
+        if (g_win[i].used && !g_win[i].minimised) return i;
+    }
+    return -1;
+}
+
+static void window_minimise(int i) {
+    g_win[i].minimised = true;
+    klog_note(KLOG_DESKTOP, "[desktop] minimised %s\n", g_app_names[g_win[i].app]);
+    g_focus = pick_focus();
+}
+
+/* Maximise fills the screen above the taskbar; a second press puts the window back. */
+static void window_toggle_max(int i) {
+    window_t *w = &g_win[i];
+    if (w->maximised) {
+        w->x = w->rx;
+        w->y = w->ry;
+        w->w = w->rw;
+        w->h = w->rh;
+        w->maximised = false;
+    } else {
+        w->rx = w->x;
+        w->ry = w->y;
+        w->rw = w->w;
+        w->rh = w->h;
+        w->x = 0;
+        w->y = 0;
+        w->w = fb_width();
+        w->h = fb_height() - TASK_H;
+        w->maximised = true;
+    }
+    g_focus = i;
+}
+
+/* A taskbar button: restores a hidden window, hides the focused one, or focuses another. */
+static int taskbar_button(int i) {
+    if (g_win[i].minimised) {
+        g_win[i].minimised = false;
+        g_focus = i;
+        return PTR_REDRAW;
+    }
+    if (g_focus == i) {
+        window_minimise(i);
+        return PTR_REDRAW;
+    }
+    g_focus = i;
+    return PTR_REDRAW;
+}
+
+/* Show Desktop: hides every shown window; when none is shown, brings them all back. */
+static void show_desktop(void) {
+    bool any_shown = false;
+    for (int i = 0; i < MAX_WIN; i++) if (g_win[i].used && !g_win[i].minimised) any_shown = true;
+    if (any_shown) {
+        for (int i = 0; i < MAX_WIN; i++) {
+            if (g_win[i].used && !g_win[i].minimised) g_win[i].minimised = true;
+        }
+        g_focus = -1;
+    } else {
+        for (int i = 0; i < MAX_WIN; i++) if (g_win[i].used) g_win[i].minimised = false;
+        g_focus = pick_focus();
+    }
+}
+
+/* Runs a Start menu choice. Returns true when it is Shut Down (the desktop should stop). */
+static bool menu_run_item(app_t app) {
+    g_menu_open = false;
+    g_menu_query_len = 0;
+    g_menu_query[0] = '\0';
+    if (app == APP_SHUTDOWN) return true;
+    open_app(app);
+    return false;
+}
+
+/* The keyboard's current choice in the column that has focus. */
+static bool menu_selected_app(app_t *out) {
+    menu_row_t rows[MENU_ROWS_MAX];
+    int n = menu_rows_for(g_menu_col, rows);
+    int r = menu_choice_row(rows, n, g_menu_sel);
+    if (r < 0) return false;
+    *out = rows[r].app;
+    return true;
+}
+
+/* Arrow keys move through the choices of the column, wrapping at the ends. */
+static void menu_move(int d) {
+    menu_row_t rows[MENU_ROWS_MAX];
+    int n = menu_choice_count(rows, menu_rows_for(g_menu_col, rows));
+    if (n == 0) {
+        g_menu_sel = 0;
+        return;
+    }
+    g_menu_sel = (g_menu_sel + d + n) % n;
+}
+
+/* The Start menu row under (x, y): HOVER_MENU + column * 50 + row, or HOVER_NONE. */
+static int menu_row_at(int x, int y, uint32_t sh, app_t *app_out) {
+    for (int col = 0; col < 2; col++) {
+        menu_row_t rows[MENU_ROWS_MAX];
+        int n = menu_rows_for(col, rows);
+        for (int i = 0; i < n; i++) {
+            if (rows[i].kind != MROW_ITEM) continue;
+            if (inside(x, y, menu_col_x(col), menu_row_y(sh, i), menu_col_w(col), MENU_ROW_H)) {
+                *app_out = rows[i].app;
+                return HOVER_MENU + col * 50 + i;
+            }
+        }
+    }
+    return HOVER_NONE;
+}
+
+static int ctx_item_at(int x, int y) {
+    if (!g_ctx_open) return -1;
+    for (int i = 0; i < CTX_COUNT; i++) {
+        if (inside(x, y, (uint32_t)g_ctx_x, (uint32_t)g_ctx_y + 4u + (uint32_t)i * CTX_ROW, CTX_W, CTX_ROW)) return i;
+    }
+    return -1;
+}
+
+/* Refresh (item 0) only repaints; Settings and About Helix open their windows. */
+static int ctx_run(int item) {
+    if (item == 1) open_app(APP_SETTINGS);
+    if (item == 2) open_app(APP_ABOUT);
+    return PTR_REDRAW;
+}
+
+/* A right click on empty desktop opens the desktop menu. Over a window, an icon, the taskbar
+ * or while the Start menu is open, it only closes the menu. */
+static int handle_right_click(int x, int y, uint32_t sh) {
+    uint32_t sw = fb_width();
+    if (g_menu_open) {
+        g_menu_open = false;
+        return PTR_REDRAW;
+    }
+    if (y >= (int)(sh - TASK_H)) return PTR_NONE;
+    for (int k = MAX_WIN - 1; k >= 0; k--) {
+        int i = z_slot(k);
+        if (g_win[i].used && !g_win[i].minimised &&
+            inside(x, y, g_win[i].x, g_win[i].y, g_win[i].w, g_win[i].h)) return PTR_NONE;
+    }
+    for (int i = 0; i < ICON_COUNT; i++) {
+        if (inside(x, y, 12, 16u + (uint32_t)i * 72u, 100, 52)) return PTR_NONE;
+    }
+    int maxx = (int)sw - (int)CTX_W - 2;
+    int maxy = (int)(sh - TASK_H) - (int)(CTX_COUNT * CTX_ROW + 8u) - 2;
+    g_ctx_x = x > maxx ? maxx : x;
+    g_ctx_y = y > maxy ? maxy : y;
+    g_ctx_open = true;
+    return PTR_REDRAW;
+}
+
+/* What the pointer is over, for the hover highlight. */
+static int hover_at(int x, int y, uint32_t sw, uint32_t sh) {
+    if (g_ctx_open) return HOVER_NONE;
+    if (g_menu_open) {
+        app_t app;
+        int r = menu_row_at(x, y, sh, &app);
+        if (r != HOVER_NONE) return r;
+    }
+    uint32_t ty = sh - TASK_H;
+    if (y < (int)ty) return HOVER_NONE;
+    if (inside(x, y, 4, ty + 3, 40, 30)) return HOVER_ORB;
+    if (inside(x, y, sw - 12u, ty, 12, TASK_H)) return HOVER_SHOW;
+    uint32_t bx = TB_BTN_X;
+    for (int i = 0; i < MAX_WIN; i++) {
+        if (!g_win[i].used) continue;
+        if (inside(x, y, bx, ty + TB_BTN_Y, TB_BTN_W, TB_BTN_H)) return i;
+        bx += TB_BTN_STEP;
+    }
+    return HOVER_NONE;
+}
+
 static int handle_click(int x, int y, uint32_t sh) {
+    uint32_t sw = fb_width();
     uint32_t ty = sh - TASK_H;
     bool menu_was_open = g_menu_open;
 
+    if (g_ctx_open) {                  /* a click closes the desktop menu; a choice in it runs */
+        int item = ctx_item_at(x, y);
+        g_ctx_open = false;
+        if (item >= 0) return ctx_run(item);
+        return PTR_REDRAW;
+    }
     if (g_menu_open) {
-        uint32_t mh = MENU_COUNT * 22u + 8u;
-        uint32_t my = sh - TASK_H - mh;
-        for (int i = 0; i < MENU_COUNT; i++) {
-            uint32_t iy = my + 4 + (uint32_t)i * 22u;
-            if (inside(x, y, 28, iy, 152, 20)) {
-                g_menu_open = false;
-                if (g_menu_app[i] == APP_SHUTDOWN) return PTR_EXIT;
-                open_app(g_menu_app[i]);
-                return PTR_REDRAW;
-            }
+        app_t app;
+        if (menu_row_at(x, y, sh, &app) != HOVER_NONE) {
+            return menu_run_item(app) ? PTR_EXIT : PTR_REDRAW;
         }
-        if (inside(x, y, 2, my, 180, mh)) return PTR_NONE;     /* a click on the panel itself: no change */
+        if (inside(x, y, 2, menu_top_y(sh), MENU_W, MENU_H)) return PTR_NONE;   /* the panel itself */
         g_menu_open = false;                                   /* any other click closes it */
+        g_menu_query_len = 0;
+        g_menu_query[0] = '\0';
     }
 
     if (inside(x, y, 4, ty + 3, 40, 30)) {                     /* Start orb */
         g_menu_open = !g_menu_open;
         g_menu_sel = 0;
+        g_menu_col = 0;
+        g_menu_query_len = 0;
+        g_menu_query[0] = '\0';
+        return PTR_REDRAW;
+    }
+    if (inside(x, y, sw - 12u, ty, 12, TASK_H)) {              /* Show Desktop */
+        show_desktop();
         return PTR_REDRAW;
     }
 
     uint32_t bx = TB_BTN_X;                                    /* taskbar window buttons */
     for (int i = 0; i < MAX_WIN; i++) {
         if (!g_win[i].used) continue;
-        if (inside(x, y, bx, ty + TB_BTN_Y, TB_BTN_W, TB_BTN_H)) {
-            g_focus = i;
-            return PTR_REDRAW;
-        }
+        if (inside(x, y, bx, ty + TB_BTN_Y, TB_BTN_W, TB_BTN_H)) return taskbar_button(i);
         bx += TB_BTN_STEP;
     }
+    if (y >= (int)ty) return menu_was_open ? PTR_REDRAW : PTR_NONE;   /* the rest of the taskbar */
 
-    /* Windows: the close box first, then the body (which brings the window forward). */
+    /* Windows, topmost first: the title buttons, then the title bar (drag), then the body. */
     for (int k = MAX_WIN - 1; k >= 0; k--) {
         int i = z_slot(k);
-        if (!g_win[i].used) continue;
+        if (!g_win[i].used || g_win[i].minimised) continue;
         window_t *w = &g_win[i];
         if (inside(x, y, w->x + w->w - 21, w->y + 5, 16, 14)) {
             close_window(i);
             return PTR_REDRAW;
         }
-        if (inside(x, y, w->x, w->y, w->w, 24)) {          /* title bar: start a drag */
+        if (inside(x, y, w->x + w->w - 39, w->y + 5, 16, 14)) {
+            window_toggle_max(i);
+            return PTR_REDRAW;
+        }
+        if (inside(x, y, w->x + w->w - 57, w->y + 5, 16, 14)) {
+            window_minimise(i);
+            return PTR_REDRAW;
+        }
+        if (inside(x, y, w->x, w->y, w->w, 24)) {          /* title bar: drag, unless maximised */
             g_focus = i;
+            if (w->maximised) return PTR_REDRAW;
             g_drag = i;
             g_drag_dx = x - (int)w->x;
             g_drag_dy = y - (int)w->y;
@@ -2069,6 +2540,8 @@ static int poll_pointer(void) {
     /* The button state comes from the packet. With no new packet, m is not written,
      * so keep the last state rather than reading stale bytes as a release. */
     bool down = moved ? ((m.buttons & 1u) != 0) : g_button_was_down;
+    bool right = moved ? ((m.buttons & 2u) != 0) : g_right_was_down;
+    bool hover_changed = false;
 
     if (moved) {
         int nx = g_mx + m.dx;
@@ -2083,6 +2556,11 @@ static int poll_pointer(void) {
             drag_move(nx, ny);                 /* only the outline moves; no repaint */
         } else {
             cursor_move(nx, ny);               /* plain move: only the arrow changes */
+            int hv = hover_at(g_mx, g_my, sw, sh);
+            if (hv != g_hover) {
+                g_hover = hv;
+                hover_changed = true;
+            }
         }
     }
 
@@ -2100,7 +2578,21 @@ static int poll_pointer(void) {
         klog_event(KLOG_INPUT, "click at %d,%d", g_mx, g_my);
         result = handle_click(g_mx, g_my, sh);
     }
+    if (right && !g_right_was_down) {
+        int r = handle_right_click(g_mx, g_my, sh);
+        if (r != PTR_NONE) result = r;
+    }
     g_button_was_down = down;
+    g_right_was_down = right;
+
+    if (hover_changed && result == PTR_NONE) {
+        /* Only the taskbar and the open menus show hover: repaint those, not the desktop. */
+        cursor_restore();
+        draw_taskbar(sw, sh);
+        if (g_menu_open) draw_start_menu(sh);
+        if (g_ctx_open) draw_context_menu();
+        cursor_show();
+    }
     return result;
 }
 
@@ -2376,17 +2868,34 @@ static void editor_key(int c) {
 static bool handle_key(int c) {
     klog_event(KLOG_INPUT, "key %d", c);
     g_repaint = true;
+    if (g_ctx_open) {                  /* any key closes the desktop menu; Esc only closes it */
+        g_ctx_open = false;
+        if (c == 0x1b) return false;
+    }
     if (g_menu_open) {
         if (c == SHELL_KEY_UP) {
-            g_menu_sel = (g_menu_sel + MENU_COUNT - 1) % MENU_COUNT;
+            menu_move(-1);
         } else if (c == SHELL_KEY_DOWN) {
-            g_menu_sel = (g_menu_sel + 1) % MENU_COUNT;
+            menu_move(1);
+        } else if (c == SHELL_KEY_LEFT || c == SHELL_KEY_RIGHT) {
+            g_menu_col = c == SHELL_KEY_LEFT ? 0 : 1;
+            g_menu_sel = 0;
         } else if (c == '\n') {
+            app_t app;
+            if (menu_selected_app(&app)) return menu_run_item(app);
+        } else if (c == 0x1b) {
             g_menu_open = false;
-            if (g_menu_app[g_menu_sel] == APP_SHUTDOWN) return true;
-            open_app(g_menu_app[g_menu_sel]);
-        } else if (c == 0x1b || c == 's' || c == 'S') {
-            g_menu_open = false;
+            g_menu_query_len = 0;
+            g_menu_query[0] = '\0';
+        } else if (c == 0x08 || c == 0x7f) {
+            if (g_menu_query_len > 0) g_menu_query[--g_menu_query_len] = '\0';
+            g_menu_sel = 0;
+            g_menu_col = 0;
+        } else if (c >= 0x20 && c < 0x7f && g_menu_query_len < 15) {
+            g_menu_query[g_menu_query_len++] = (char)c;
+            g_menu_query[g_menu_query_len] = '\0';
+            g_menu_sel = 0;
+            g_menu_col = 0;
         }
         return false;
     }
@@ -2423,7 +2932,7 @@ static bool handle_key(int c) {
 
     if (g_focus >= 0 && g_win[g_focus].used && g_win[g_focus].app == APP_SETTINGS &&
         (c == 't' || c == 'T' || c == '\n')) {
-        g_dark_mode = !g_dark_mode;         /* the keyboard way to the Appearance button */
+        g_theme_idx = (g_theme_idx + 1u) % THEME_COUNT;   /* the keyboard way to the Appearance button */
         theme_apply();
         return false;
     }
@@ -2465,6 +2974,9 @@ static bool handle_key(int c) {
     } else if (c == 's' || c == 'S') {
         g_menu_open = true;
         g_menu_sel = 0;
+        g_menu_col = 0;
+        g_menu_query_len = 0;
+        g_menu_query[0] = '\0';
     } else if (c == '\t') {
         focus_next();
     } else if (c == 'x' || c == 'X') {
@@ -2512,6 +3024,13 @@ bool desktop_run(void) {
     g_icon_sel = 0;
     g_menu_sel = 0;
     g_menu_open = false;
+    g_menu_col = 0;
+    g_menu_query_len = 0;
+    g_menu_query[0] = '\0';
+    g_recent_n = 0;
+    g_ctx_open = false;
+    g_hover = HOVER_NONE;
+    g_right_was_down = false;
 
     fb_graphics_begin();   /* the text console stays quiet while the desktop is up */
     if (g_login_pending) {  /* the desktop starts only after a sign-in */

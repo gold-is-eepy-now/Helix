@@ -41,3 +41,13 @@ changed rectangle after each draw. Without virtio-gpu the GOP framebuffer is use
 - One request at a time, polled, with a two-second timeout. No interrupts.
 - Only the control queue is set up. The cursor queue is not used yet.
 - Drawing goes through virtio only when virtio-gpu is present and the GOP format is 32-bit B8G8R8X8.
+
+## Desktop redesign, slice 2 (0.5.58, QEMU-tested only)
+
+- **Themes:** `theme_t` holds every colour the desktop uses. Five palettes: Helix Aero Blue (default), Helix Aero Dark, Helix Classic, Helix Light, Helix Dark. Settings and the `t` key cycle them.
+- **Taskbar:** one button per window, including minimised ones. The focused or hovered button is lit, and a dot shows that the app is running. The tray glyphs are drawn only. A thin strip at the far right is Show Desktop (hides every window, or restores them all).
+- **Start menu:** two columns. The programs column has Pinned, Recent and All Programs, plus a search box that filters by name. The places column has My Computer, Network, Settings, About Helix, and Shut Down. Arrow keys move within a column and switch columns with Left and Right. Typing searches; Esc closes.
+- **Desktop menu:** right-click on empty desktop opens Refresh, Settings and About Helix. Any key or click closes it.
+- **Windows:** minimise, maximise and restore buttons in the title bar. Maximise fills the screen above the taskbar. Each window casts a solid two-layer shadow.
+- **Not done:** blur and translucency (no backbuffer), a configurable wallpaper, User and Documents places, window resizing, glossy application icons, and per-application styling beyond the window chrome.
+- **Checked:** QEMU screendumps of each theme, the Start menu, the desktop menu, minimise, maximise and Show Desktop. The shell suite (133), USB suite (19/19) and HID unit tests pass.
