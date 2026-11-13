@@ -43,6 +43,7 @@
 #include "virtio_gpu.h"
 #include "acpi.h"
 #include "pci.h"
+#include "intel_lpss_gspi.h"
 #include "net_tcp.h"
 #include "net_icmp.h"
 #include "net_interface.h"
@@ -864,6 +865,22 @@ static void cmd_pci(int argc, char **argv) {
         }
     }
     if (shown == 0) kprintf("pci: no devices found (is the PCI config port available?)\n");
+}
+
+/* spi: report the Intel LPSS GSPI controller's state. Read only: no transfers. */
+static void cmd_spi(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    intel_lpss_gspi_info_t s;
+    intel_lpss_gspi_info(&s);
+    if (!s.found) {
+        kprintf("spi: Intel LPSS GSPI 8086:9CE6 not found on this machine\n");
+        return;
+    }
+    kprintf("spi: Intel LPSS GSPI 8086:9CE6 at %02x:%02x.%u, BAR0 0x%llx\n",
+            s.bus, s.device, s.function, (unsigned long long)s.bar_phys);
+    kprintf("spi: ready %s, SCR %u, SSCR0 readback 0x%08x, SSSR 0x%08x\n",
+            s.ready ? "yes" : "no", (unsigned)s.scr, s.sscr0_readback, s.sssr);
 }
 
 /* acpi: list the firmware's ACPI tables, with the length and checksum status of each. */
@@ -2433,6 +2450,7 @@ const command_t helix_commands[] = {
     {"fetch", "HTTP GET of an http:// address: fetch <http://host[:port]/path>", cmd_fetch},
     {"gpu", "list the display outputs of the virtio-gpu device", cmd_gpu},
     {"acpi", "list the firmware's ACPI tables", cmd_acpi},
+    {"spi", "Intel LPSS GSPI controller state (MacBook Air SPI)", cmd_spi},
     {"pci", "list every PCI function: vendor:device, class, BAR0", cmd_pci},
     {"dhcp",    "get a network address from a DHCP server (replaces the static address)", cmd_dhcp},
     {"halt",    "halt the machine",                     cmd_halt},

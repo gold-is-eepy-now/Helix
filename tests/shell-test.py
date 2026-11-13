@@ -465,6 +465,9 @@ def main():
         # PCI: the host bridge at 00:00.0 is always present on q35.
         ser.send("pci\n")
         check("pci lists the host bridge at 00:00.0", "pci 00:00.0  8086:", timeout=60)
+        # SPI: QEMU has no LPSS GSPI controller, so the driver must report that and carry on.
+        ser.send("spi\n")
+        check("spi reports the GSPI controller absent on QEMU", "spi: Intel LPSS GSPI 8086:9CE6 not found", timeout=60)
         ser.send("fetch http://10.0.2.2:9/\n")
         check("fetch reports a failed connect", "fetch: connect failed", timeout=60)
         ser.send("fetch http://nonexistent.invalid/\n")

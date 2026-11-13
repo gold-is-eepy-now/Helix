@@ -47,6 +47,7 @@
 #include "syscall.h"
 #include "usb_host.h"
 #include "acpi.h"
+#include "intel_lpss_gspi.h"
 #include "e1000.h"
 #include "net.h"
 #include "klog.h"
@@ -241,6 +242,10 @@ static void kernel_main_continue(void) {
     } else {
         console_write("[acpi] no RSDP from the bootloader\n");
     }
+
+    /* The Intel LPSS GSPI controller (MacBook Air 7,2). Optional: absent on QEMU, and the
+     * system runs without it. See docs/17-spi.md. */
+    (void)intel_lpss_gspi_init();
 
     if (!usb_host_init(hhdm_request.response->offset)) {
         console_write("no UHCI controller found or started\n");
