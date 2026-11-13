@@ -174,37 +174,89 @@ static size_t cat_dec(char *dst, size_t cap, size_t at, uint64_t v) {
     return at;
 }
 
-/* A status line at the foot of the screen: what USB found, and what it has received.
+/* A device list above the foot strip: what USB found and what it has received.
  * On a machine with no PS/2 port this is the way to see whether the keyboard and mouse
- * were found at all. Pressing a key or moving the mouse should raise the report counts. */
+ * were found at all, and where each device is attached. Redrawn only when the text changes. */
+#define USB_PANEL_ROWS  9u
+#define USB_PANEL_ROW_H 14u
+
+static void hex_put(char *buf, size_t cap, size_t *at, uint32_t v, unsigned digits) {
+    static const char hx[] = "0123456789abcdef";
+    for (unsigned k = digits; k-- > 0;) {
+        if (*at + 1 < cap) buf[(*at)++] = hx[(v >> (k * 4u)) & 0xFu];
+    }
+    buf[*at] = '\0';
+}
+
 static void draw_usb_line(bool force) {
     usb_summary_t u;
     usb_host_summary(&u);
+
+    /* Build every row first, so the redraw check compares the whole panel. */
+    static char rows[USB_PANEL_ROWS][96];
+    unsigned nrows = 0;
+    size_t at = 0;
+    rows[nrows][0] = '\0';
+    at = cat_str(rows[nrows], sizeof rows[0], 0, "USB: ");
+    at = cat_dec(rows[nrows], sizeof rows[0], at, u.controllers);
+    at = cat_str(rows[nrows], sizeof rows[0], at, " controller(s), ");
+    at = cat_dec(rows[nrows], sizeof rows[0], at, u.devices);
+    cat_str(rows[nrows], sizeof rows[0], at, " device(s)");
+    nrows++;
+    at = 0;
+    rows[nrows][0] = '\0';
+    at = cat_str(rows[nrows], sizeof rows[0], 0, "Keyboards ");
+    at = cat_dec(rows[nrows], sizeof rows[0], at, u.keyboards);
+    at = cat_str(rows[nrows], sizeof rows[0], at, " (reports ");
+    at = cat_dec(rows[nrows], sizeof rows[0], at, u.keyboard_reports);
+    at = cat_str(rows[nrows], sizeof rows[0], at, ", errors ");
+    at = cat_dec(rows[nrows], sizeof rows[0], at, u.keyboard_errors);
+    at = cat_str(rows[nrows], sizeof rows[0], at, ").  Mice ");
+    at = cat_dec(rows[nrows], sizeof rows[0], at, u.mice);
+    at = cat_str(rows[nrows], sizeof rows[0], at, " (reports ");
+    at = cat_dec(rows[nrows], sizeof rows[0], at, u.mouse_reports);
+    cat_str(rows[nrows], sizeof rows[0], at, ").");
+    nrows++;
+
+    for (unsigned i = 0; i < u.devices && nrows < USB_PANEL_ROWS; i++) {
+        usb_device_info_t d;
+        if (!usb_host_device_info(i, &d)) break;
+        char *r = rows[nrows];
+        size_t n = 0;
+        r[0] = '\0';
+        n = cat_str(r, sizeof rows[0], 0, "  ");
+        hex_put(r, sizeof rows[0], &n, d.vid, 4);
+        n = cat_str(r, sizeof rows[0], n, ":");
+        hex_put(r, sizeof rows[0], &n, d.pid, 4);
+        n = cat_str(r, sizeof rows[0], n, "  class ");
+        hex_put(r, sizeof rows[0], &n, d.dev_class, 2);
+        n = cat_str(r, sizeof rows[0], n, d.is_hub ? " hub" : "");
+        n = cat_str(r, sizeof rows[0], n, "  port ");
+        for (unsigned k = 0; k < d.path_len; k++) {
+            if (k != 0) n = cat_str(r, sizeof rows[0], n, ".");
+            n = cat_dec(r, sizeof rows[0], n, d.path[k]);
+        }
+        n = cat_str(r, sizeof rows[0], n, "  io ");
+        hex_put(r, sizeof rows[0], &n, d.controller_io, 4);
+        if (d.keyboard) n = cat_str(r, sizeof rows[0], n, "  KEYBOARD");
+        if (d.mouse) n = cat_str(r, sizeof rows[0], n, "  MOUSE");
+        nrows++;
+    }
+
+    static char last[USB_PANEL_ROWS][96];
+    bool changed = force;
+    for (unsigned k = 0; k < nrows && !changed; k++) {
+        if (strcmp(last[k], rows[k]) != 0) changed = true;
+    }
+    if (!changed) return;
+    for (unsigned k = 0; k < USB_PANEL_ROWS; k++) strcpy(last[k], k < nrows ? rows[k] : "");
+
     uint32_t sw = fb_width(), sh = fb_height();
-    uint32_t y = sh - 22u;
-    char line[160];
-    size_t at = cat_str(line, sizeof line, 0, "USB: ");
-    at = cat_dec(line, sizeof line, at, u.controllers);
-    at = cat_str(line, sizeof line, at, " controller(s), ");
-    at = cat_dec(line, sizeof line, at, u.devices);
-    at = cat_str(line, sizeof line, at, " device(s).  Keyboards ");
-    at = cat_dec(line, sizeof line, at, u.keyboards);
-    at = cat_str(line, sizeof line, at, " (reports ");
-    at = cat_dec(line, sizeof line, at, u.keyboard_reports);
-    at = cat_str(line, sizeof line, at, ", errors ");
-    at = cat_dec(line, sizeof line, at, u.keyboard_errors);
-    at = cat_str(line, sizeof line, at, ").  Mice ");
-    at = cat_dec(line, sizeof line, at, u.mice);
-    at = cat_str(line, sizeof line, at, " (reports ");
-    at = cat_dec(line, sizeof line, at, u.mouse_reports);
-    cat_str(line, sizeof line, at, ").");
-    /* Redraw only when the text changed. Clearing and redrawing a strip twice a
-     * second is what made the iMac's screen flicker. */
-    static char last[160];
-    if (!force && strcmp(last, line) == 0) return;
-    strcpy(last, line);
-    fb_fill_rect(0, y, sw, 22, c_face);
-    fb_draw_text(12, y + 7, line, c_text, c_face, true);
+    uint32_t top = sh - 22u - USB_PANEL_ROWS * USB_PANEL_ROW_H - 4u;
+    fb_fill_rect(0, top, sw, USB_PANEL_ROWS * USB_PANEL_ROW_H + 4u, c_face);
+    for (unsigned k = 0; k < nrows; k++) {
+        fb_draw_text(12, top + 2u + k * USB_PANEL_ROW_H, rows[k], c_text, c_face, true);
+    }
 }
 
 static void wipe(login_state_t *st) {

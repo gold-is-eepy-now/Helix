@@ -30,4 +30,18 @@ typedef struct {
 
 void usb_host_summary(usb_summary_t *out);
 
+/* One enumerated device, for the sign-in screen's device list. */
+#define USB_INFO_PATH_MAX 8u
+typedef struct {
+    uint16_t vid, pid;
+    uint8_t dev_class;
+    bool is_hub, keyboard, mouse;
+    uint16_t controller_io;               /* I/O base of the UHCI companion it hangs off */
+    uint8_t path_len;
+    uint8_t path[USB_INFO_PATH_MAX];      /* root port, then hub ports */
+} usb_device_info_t;
+
+/* Fill out for device i (0 <= i < usb_summary().devices). False when i is out of range. */
+bool usb_host_device_info(unsigned i, usb_device_info_t *out);
+
 #endif /* HELIX_USB_HOST_H */

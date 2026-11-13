@@ -856,6 +856,24 @@ void usb_host_summary(usb_summary_t *out) {
     }
 }
 
+bool usb_host_device_info(unsigned i, usb_device_info_t *out) {
+    if (i >= g_dev_count) return false;
+    const usb_device_t *d = &g_dev[i];
+    memset(out, 0, sizeof *out);
+    out->vid = d->vid;
+    out->pid = d->pid;
+    out->dev_class = d->dev_class;
+    out->is_hub = d->is_hub;
+    out->controller_io = d->hc != NULL ? d->hc->io : 0;
+    out->path_len = d->path.len > USB_INFO_PATH_MAX ? USB_INFO_PATH_MAX : d->path.len;
+    for (unsigned k = 0; k < out->path_len; k++) out->path[k] = d->path.ports[k];
+    for (unsigned k = 0; k < d->ep_count; k++) {
+        if (d->eps[k].kind == KIND_KEYBOARD) out->keyboard = true;
+        if (d->eps[k].kind == KIND_MOUSE) out->mouse = true;
+    }
+    return true;
+}
+
 void usb_host_print_status(void) {
     console_write("usb: ");
     console_write_dec(g_hc_count);
