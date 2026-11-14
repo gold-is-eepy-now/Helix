@@ -43,6 +43,9 @@ block_device_t *block_device_register(const char *name, uint64_t block_size,
                                       uint64_t block_count);
 void block_device_unregister(block_device_t *dev);
 
+/* Find a registered device by its name (for example "sata1"). NULL if there is none. */
+block_device_t *block_device_find(const char *name);
+
 /* Get a block device object handle */
 object_t *block_device_get_object(block_device_t *dev);
 

@@ -12,6 +12,7 @@
 #include "console.h"
 
 #include "heap.h"
+#include "kstring.h"
 
 #define MAX_BLOCK_DEVICES 8
 
@@ -46,6 +47,17 @@ void block_device_unregister(block_device_t *dev) {
             return;
         }
     }
+}
+
+block_device_t *block_device_find(const char *name) {
+    if (name == NULL) return NULL;
+    for (uint8_t i = 0; i < g_block_device_count; i++) {
+        if (g_block_devices[i] != NULL && g_block_devices[i]->name != NULL &&
+            strcmp(g_block_devices[i]->name, name) == 0) {
+            return g_block_devices[i];
+        }
+    }
+    return NULL;
 }
 
 object_t *block_device_get_object(block_device_t *dev) {
