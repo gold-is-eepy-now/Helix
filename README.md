@@ -320,6 +320,15 @@ boots.
 
 ## License
 
-TBD by the project owner. Third-party components retain their own licenses:
-`limine.h` is 0BSD, and the embedded 8×8 font (`kernel/src/font8x8.h`) is
-public domain.
+Helix is released under the BSD 3-Clause License (see `LICENSE`). Anyone may use,
+modify, redistribute and sell it, including in closed products, as long as the
+copyright notice and licence text are kept.
+
+Third-party components keep their own licenses: `limine.h` is 0BSD, and the embedded
+8×8 font (`kernel/src/font8x8.h`) is public domain.
+
+Because Helix is permissive, Linux code (GPLv2) must not be copied into it. Linux
+ideas are reimplemented from specifications instead. Code under `experiments/` is not
+part of Helix: `experiments/gnumach/` is GNU Mach (GPL, see its `COPYING`), and
+`experiments/linux-on-helix/` is a Linux kernel config and build script. Those
+experiments stay on their branch and are not merged into the main line.
