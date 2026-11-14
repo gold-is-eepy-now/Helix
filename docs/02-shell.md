@@ -308,6 +308,7 @@ shows it; typing `myprog arg1 arg2` runs it.
 | `time` | current wall-clock time in UTC (`21:34:26`) |
 | `version` | name, version, codename |
 | `usb` | USB controllers, hubs, and HID devices with their reports |
+| `disk` | list SATA disks on the AHCI controller, with model and size, and print the signature of sector 0 (read-only; see docs/20-ahci.md) |
 | `echo` | prints its arguments |
 | `history` | lists the lines typed so far, numbered (Up/Down recall them) |
 | `usermode` | runs a built-in test program in ring 3; it writes a line through the syscall gate and exits with status 7 |

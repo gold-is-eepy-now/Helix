@@ -474,6 +474,10 @@ def main():
         # xHCI: discovery is read-only; on QEMU it finds nothing unless the test adds -device qemu-xhci.
         ser.send("xhci\n")
         check("xhci reports discovery status", "xhci: ", timeout=60)
+        # AHCI: the q35 machine has an AHCI controller, and the IDE boot disk sits on it.
+        ser.send("disk\n")
+        check("disk lists a SATA disk", "sata0:", timeout=60)
+        check("disk reads sector 0 and finds the signature", "sector 0 signature 55aa", timeout=60)
         ser.send("fetch http://10.0.2.2:9/\n")
         check("fetch reports a failed connect", "fetch: connect failed", timeout=60)
         ser.send("fetch http://nonexistent.invalid/\n")

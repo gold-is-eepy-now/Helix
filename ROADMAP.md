@@ -256,8 +256,10 @@ Isolation and a real device driver are still to do.
 - ⛔ FAT32: not implemented (no FAT code in the kernel).
 - 🚧 Installer script: `tools/install.sh` exists; its population of /etc, /var and /home was not re-verified in this audit.
 
+- 🚧 AHCI (SATA) stage 1: read-only disk access, QEMU-tested only (`disk` command, docs/20-ahci.md). Writes and hardware tests are still to do.
+
 **M11 exit gate:** partly passed. ext4 read/write and root mount work. FAT32 is
-not implemented.
+not implemented. AHCI reads work under QEMU only.
 
 ## M12 — Networking and graphics 🚧
 

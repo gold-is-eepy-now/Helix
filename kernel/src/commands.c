@@ -46,6 +46,7 @@
 #include "intel_lpss_gspi.h"
 #include "apple_topcase_spi.h"
 #include "xhci.h"
+#include "ahci.h"
 #include "spi.h"
 #include "net_tcp.h"
 #include "net_icmp.h"
@@ -890,6 +891,29 @@ static void cmd_topcase(int argc, char **argv) {
 }
 
 /* xhci: the xHCI controller found by discovery (read-only). */
+static void cmd_disk(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    int n = ahci_disk_count();
+    if (n == 0) {
+        kprintf("disk: no SATA disk found on an AHCI controller\n");
+        return;
+    }
+    for (int i = 0; i < n; i++) {
+        const ahci_disk_t *d = ahci_disk(i);
+        kprintf("%s: %s, %llu sectors (%llu MiB)\n", d->dev->name, d->model,
+                (unsigned long long)d->sectors, (unsigned long long)(d->sectors / 2048));
+        uint8_t sector[512];
+        if (block_device_read(d->dev, 0, sector, 1) == 1) {
+            /* The boot signature is the byte 0x55 at offset 510 then 0xAA at 511,
+             * so print in file order to show it as 55aa. */
+            kprintf("%s: sector 0 signature %02x%02x\n", d->dev->name, sector[510], sector[511]);
+        } else {
+            kprintf("%s: could not read sector 0\n", d->dev->name);
+        }
+    }
+}
+
 static void cmd_xhci(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -2491,6 +2515,7 @@ const command_t helix_commands[] = {
     {"acpi", "list the firmware's ACPI tables", cmd_acpi},
     {"spi", "Intel LPSS GSPI controller state (MacBook Air SPI)", cmd_spi},
     {"xhci", "xHCI (USB 3) controller discovery, read-only", cmd_xhci},
+    {"disk", "list SATA disks on the AHCI controller and read sector 0", cmd_disk},
     {"topcase", "read-only probe of the Apple top-case keyboard over SPI", cmd_topcase},
     {"pci", "list every PCI function: vendor:device, class, BAR0", cmd_pci},
     {"dhcp",    "get a network address from a DHCP server (replaces the static address)", cmd_dhcp},

@@ -35,6 +35,7 @@
 #include "pit.h"
 #include "pmm.h"
 #include "ramdisk_driver.h"
+#include "ahci.h"
 #include "driver.h"
 #include "block_device.h"
 #include "shell.h"
@@ -403,6 +404,12 @@ void kmain(void) {
     /* Adopt page tables, install exceptions, map a protected stack, then move
      * all ordinary kernel execution onto it before enabling interrupts. */
     vmm_init(hhdm_offset);
+
+    /* AHCI (SATA) maps its host registers with vmm_map, so it must run after
+     * vmm_init has set the page-table pointer. Registers sataN disks; read-only. */
+    if (ahci_init()) kprintf("[ahci] %d SATA disk(s) registered\n", ahci_disk_count());
+    else kprintf("[ahci] no AHCI controller found\n");
+
     gdt_init();
 
     idt_init();
