@@ -56,8 +56,8 @@ native object model. They are not the foundation.
 | Kernel event log (`log`) | ✅ 512-event ring of kernel activity, dumped automatically on a CPU exception; machine-tested |
 | Shell command history (Up/Down, `history`) | ✅ working in the kernel shell; a userland shell still to come |
 | Driver framework | ✅ complete (M10) |
-| Storage and filesystems | 🚧 ext4 root and file commands working; AHCI SATA read-only access (`disk`) QEMU-tested only, no writes; FAT32 not implemented (M11, see docs/20-ahci.md) |
-| Networking, display, and input objects | 🚧 objects exist (M12); e1000 driver, Ethernet/ARP, IPv4, ICMP echo, UDP, DNS, DHCP, TCP client, HTTP/1.1 client (QEMU only; ICMP to internet addresses blocked on the test host); no HTTPS or compositor yet |
+| Storage and filesystems | 🚧 ext4 root and file commands working; AHCI SATA read-only access (`disk`) QEMU-tested only, no writes; FAT32 read-only driver (`fat` command, whole-device volumes, no writes, no partition tables; docs/21-fat32.md), QEMU- and host-tested only (M11, see docs/20-ahci.md) |
+| Networking, display, and input objects | 🚧 objects exist (M12); e1000 driver, Ethernet/ARP, IPv4, ICMP echo, UDP, DNS, DHCP, TCP client and listener (`tcplisten`), HTTP/1.1 client (QEMU only; ICMP to internet addresses blocked on the test host); no HTTPS or compositor yet |
 | Linux / BSD / POSIX compatibility | 🚧 in progress (runtime subsystem) |
 | Mac / Darwin compatibility | ✅ working, machine-tested (Mach-O loader, Darwin syscalls, Mac-like FS, xattrs, plist/bundle, CLI/GUI via X11) |
 | USB HID support | 🚧 UHCI host, root ports, hubs and HID keyboard/mouse in QEMU; not yet verified on real iMac hardware (see docs/07-usb.md) |
