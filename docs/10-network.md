@@ -117,10 +117,28 @@ attribute, but real hardware does, so the cache-disable bit is set deliberately.
    dropped after 5 seconds. Kernel command `tcplisten PORT` accepts one connection,
    reads a line and answers `helix: <line>`. The suite connects from the host through
    QEMU's hostfwd rule (127.0.0.1:17070 to guest port 7070) and checks the reply.
-   Not done: a listen backlog (a SYN that arrives while the slot is busy is dropped and
-   retried by the peer), no sockets API, no window scaling, SACK, timestamps or fast
-   retransmit (a lost segment waits for the timeout), no congestion control, no
-   zero-window persist timer of its own, and no TIME_WAIT. Only one open at a time is
+   Loss recovery and congestion control (stage 8c), from RFC 5681 (written from the RFC,
+   not from another kernel's source):
+   - The sender keeps a congestion window `cwnd` next to the peer's window and sends at
+     most the smaller of the two. It starts at two segments. Slow start adds up to one
+     segment per acknowledgement until `ssthresh`, then congestion avoidance adds about one
+     segment per round trip.
+   - Three duplicate ACKs (the same acknowledgement with no data) trigger fast retransmit:
+     `ssthresh` becomes half the bytes in flight, `cwnd` becomes `ssthresh` plus three
+     segments, and the sender goes back to the first unacknowledged byte at once, without
+     waiting for the timeout. Each further duplicate ACK inflates `cwnd` by one segment.
+     An acknowledgement that covers the whole loss window ends recovery at `ssthresh`.
+   - A timeout sets `ssthresh` to half the bytes in flight and restarts slow start at one
+     segment.
+   - Tests: `netdrop 5` makes the kernel skip every 5th outgoing data segment. `tcpsend
+     <a.b.c.d> <port> <count>` then sends 64 KB to a host server. The host checks every byte
+     arrives in order, and the command prints how many fast retransmits, timeouts and
+     duplicate ACKs that transfer caused. The suite requires at least one fast retransmit.
+     `netdrop 0` turns the test drop off.
+   Not done: no SACK, so a go-back resends data the peer already has; no window scaling,
+   timestamps, or NewReno partial-ACK handling beyond the go-back; a listen backlog (a SYN
+   that arrives while the slot is busy is dropped and retried by the peer); no sockets API;
+   no zero-window persist timer of its own; and no TIME_WAIT. Only one open at a time is
    tested.
 
 9. **HTTP/1.1 client — built and QEMU-tested (plain http:// only).** Code: `net_http.c`.

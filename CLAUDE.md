@@ -206,6 +206,9 @@ Also, in the same change:
   fetched a 16 KB page from a host web server under QEMU. Passive open added
   (`net_tcp_listen`/`net_tcp_accept`, `tcplisten`): the suite connects from the host through
   QEMU's hostfwd and gets a reply. No sockets API yet. See docs/10-network.md.
+  Loss recovery (RFC 5681 congestion window, fast retransmit on three duplicate ACKs,
+  timeout restart) is tested with `netdrop` and `tcpsend`: the suite sends 64 KB with every
+  5th segment skipped and checks the host gets every byte. No SACK yet.
 - **Implemented (network, stages 9–10, QEMU-tested only):** HTTP/1.1 GET client
   (`kernel/src/net_http.c`: Content-Length, chunked, redirects reported) with kernel
   `fetch`, and a desktop Browser window that shows plain http:// pages as text (checked

@@ -950,6 +950,143 @@ static void cmd_tcplisten(int argc, char **argv) {
     net_tcp_unlisten(listener);
 }
 
+/* tcpsink PORT: accept one connection and read until the peer closes. Prints the byte
+ * count and byte sum, so a host can check that every byte arrived, and how many loss
+ * recoveries ran during this transfer. */
+static void cmd_tcpsink(int argc, char **argv) {
+    if (argc < 2) {
+        kprintf("usage: tcpsink <port>\n");
+        return;
+    }
+    if (!net_ready()) {
+        kprintf("tcpsink: no network card (QEMU: -netdev user,id=n0 -device e1000,netdev=n0)\n");
+        return;
+    }
+    uint32_t port = 0;
+    for (const char *p = argv[1]; *p != '\0'; p++) {
+        if (*p < '0' || *p > '9') { port = 0; break; }
+        port = port * 10 + (uint32_t)(*p - '0');
+        if (port > 65535u) break;
+    }
+    if (port == 0 || port > 65535u) {
+        kprintf("tcpsink: bad port %s\n", argv[1]);
+        return;
+    }
+    uint32_t fast_before = 0, timeouts_before = 0;
+    uint32_t dup_before = 0;
+    net_tcp_stats(&fast_before, &timeouts_before, &dup_before);
+    int listener = net_tcp_listen((uint16_t)port);
+    if (listener < 0) {
+        kprintf("tcpsink: could not listen on port %u\n", port);
+        return;
+    }
+    kprintf("tcpsink: listening on port %u\n", port);
+    int conn = net_tcp_accept(listener, 30000);
+    if (conn < 0) {
+        kprintf("tcpsink: no connection on port %u within 30 seconds\n", port);
+        net_tcp_unlisten(listener);
+        return;
+    }
+    uint8_t buf[512];
+    uint32_t total = 0;
+    uint32_t sum = 0;
+    for (;;) {
+        int n = net_tcp_recv(conn, buf, sizeof buf, 10000);
+        if (n <= 0) break;            /* 0: the peer closed after its last byte; -1: stalled */
+        for (int i = 0; i < n; i++) sum += buf[i];
+        total += (uint32_t)n;
+    }
+    net_tcp_close(conn);
+    net_tcp_unlisten(listener);
+    uint32_t fast_after = 0, timeouts_after = 0;
+    uint32_t dup_after = 0;
+    net_tcp_stats(&fast_after, &timeouts_after, &dup_after);
+    kprintf("tcpsink: received %u bytes, sum %u\n", total, sum);
+    kprintf("tcpsink: fast_retransmits=%u timeouts=%u dup_acks=%u\n",
+            fast_after - fast_before, timeouts_after - timeouts_before, dup_after - dup_before);
+}
+
+/* netdrop N: test hook. Do not send every Nth outgoing TCP data segment (0 turns it off).
+ * QEMU does not lose packets, so this creates the loss that recovery repairs. */
+static void cmd_netdrop(int argc, char **argv) {
+    if (argc < 2) {
+        kprintf("usage: netdrop <n>   (0 turns the test drop off)\n");
+        return;
+    }
+    /* netdrop applies to outgoing data only: the tcpsend test sends, so this is its loss. */
+    uint32_t n = 0;
+    for (const char *p = argv[1]; *p != '\0'; p++) {
+        if (*p < '0' || *p > '9' || n > 100000u) { kprintf("netdrop: bad count %s\n", argv[1]); return; }
+        n = n * 10 + (uint32_t)(*p - '0');
+    }
+    net_tcp_set_drop_every(n);
+    if (n == 0) kprintf("netdrop: off\n");
+    else kprintf("netdrop: not sending every %uth outgoing data segment\n", n);
+}
+
+/* tcpsend IP PORT COUNT: connect, send COUNT bytes of a fixed pattern, close. Prints the
+ * byte count, the byte sum and this transfer's loss-recovery counters. With netdrop on,
+ * this is Helix as the sender under loss, which is what fast retransmit repairs. */
+static uint8_t g_send_pattern[65536];
+
+static void cmd_tcpsend(int argc, char **argv) {
+    if (argc < 4) {
+        kprintf("usage: tcpsend <a.b.c.d> <port> <count>\n");
+        return;
+    }
+    if (!net_ready()) {
+        kprintf("tcpsend: no network card (QEMU: -netdev user,id=n0 -device e1000,netdev=n0)\n");
+        return;
+    }
+    uint8_t ip[4];
+    if (!net_parse_ip(argv[1], ip)) {
+        kprintf("tcpsend: %s is not an IPv4 address\n", argv[1]);
+        return;
+    }
+    uint32_t port = 0;
+    for (const char *p = argv[2]; *p != '\0'; p++) {
+        if (*p < '0' || *p > '9') { port = 0; break; }
+        port = port * 10 + (uint32_t)(*p - '0');
+        if (port > 65535u) break;
+    }
+    if (port == 0 || port > 65535u) {
+        kprintf("tcpsend: bad port %s\n", argv[2]);
+        return;
+    }
+    uint32_t count = 0;
+    for (const char *p = argv[3]; *p != '\0'; p++) {
+        if (*p < '0' || *p > '9' || count > 65536u) { count = 0; break; }
+        count = count * 10 + (uint32_t)(*p - '0');
+    }
+    if (count == 0 || count > 65536u) {
+        kprintf("tcpsend: count must be 1 to 65536\n");
+        return;
+    }
+    uint32_t sum = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        g_send_pattern[i] = (uint8_t)((i * 7u + 3u) & 0xFFu);
+        sum += g_send_pattern[i];
+    }
+
+    uint32_t fast_before = 0, timeouts_before = 0;
+    uint32_t dup_before = 0;
+    net_tcp_stats(&fast_before, &timeouts_before, &dup_before);
+    int conn = net_tcp_connect(ip, (uint16_t)port, 5000);
+    if (conn < 0) {
+        kprintf("tcpsend: connect to %s:%u failed\n", argv[1], port);
+        return;
+    }
+    int sent = net_tcp_send(conn, g_send_pattern, count, 30000);
+    net_tcp_close(conn);
+    uint32_t fast_after = 0, timeouts_after = 0;
+    uint32_t dup_after = 0;
+    net_tcp_stats(&fast_after, &timeouts_after, &dup_after);
+    if (sent < 0) kprintf("tcpsend: send failed\n");
+    else kprintf("tcpsend: sent %u bytes, sum %u\n", count, sum);
+    kprintf("tcpsend: fast_retransmits=%u timeouts=%u dup_acks=%u\n",
+            fast_after - fast_before, timeouts_after - timeouts_before, dup_after - dup_before);
+}
+
 static void cmd_disk(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -2576,6 +2713,9 @@ const command_t helix_commands[] = {
     {"xhci", "xHCI (USB 3) controller discovery, read-only", cmd_xhci},
     {"disk", "list SATA disks on the AHCI controller and read sector 0", cmd_disk},
     {"tcplisten", "accept one TCP connection on a port, answer one line, close", cmd_tcplisten},
+    {"tcpsink", "accept one TCP connection and count the bytes it sends", cmd_tcpsink},
+    {"tcpsend", "connect to a host, send COUNT bytes of a fixed pattern, close", cmd_tcpsend},
+    {"netdrop", "test hook: skip sending every Nth outgoing TCP data segment (0 = off)", cmd_netdrop},
     {"topcase", "read-only probe of the Apple top-case keyboard over SPI", cmd_topcase},
     {"pci", "list every PCI function: vendor:device, class, BAR0", cmd_pci},
     {"dhcp",    "get a network address from a DHCP server (replaces the static address)", cmd_dhcp},
