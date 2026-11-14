@@ -203,7 +203,9 @@ Also, in the same change:
   is checked by hand (`github.com` resolves). No DHCP at boot or renewal.
 - **Implemented (network, stage 8, QEMU-tested only):** TCP client (`kernel/src/net_tcp.c`):
   connect, in-order receive with a window, go-back-N send, close. Kernel `tcpget`
-  fetched a 16 KB page from a host web server under QEMU. No listening sockets.
+  fetched a 16 KB page from a host web server under QEMU. Passive open added
+  (`net_tcp_listen`/`net_tcp_accept`, `tcplisten`): the suite connects from the host through
+  QEMU's hostfwd and gets a reply. No sockets API yet. See docs/10-network.md.
 - **Implemented (network, stages 9–10, QEMU-tested only):** HTTP/1.1 GET client
   (`kernel/src/net_http.c`: Content-Length, chunked, redirects reported) with kernel
   `fetch`, and a desktop Browser window that shows plain http:// pages as text (checked
@@ -215,7 +217,7 @@ Also, in the same change:
   `userspace/libc`: string, stdlib, stdio, unistd, errno; there is no `fork`;
   the M9 exit gate is not yet passed), the `installer` / live install
   environment (needs a disk driver and partitioning), isolated driver services,
-  a network stack above the HTTP client (HTTPS and TLS, listening sockets), a real graphics stack (the desktop is a basic framebuffer demo
+  a network stack above the HTTP client (HTTPS and TLS, a general sockets API), a real graphics stack (the desktop is a basic framebuffer demo
   with no compositor), POSIX translation layer.
 
 Do not write documentation or commit messages that imply unimplemented systems

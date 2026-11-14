@@ -201,7 +201,8 @@ def main():
         "-monitor", f"unix:{MONITOR_SOCK},server=on,wait=off",
         # Network card (Intel e1000) with QEMU's user-mode network: a real gateway
         # answers our ARP request. See docs/10-network.md.
-        "-netdev", "user,id=n0", "-device", "e1000,netdev=n0",
+        # hostfwd: a host connection to 127.0.0.1:17070 reaches guest port 7070 (the tcplisten test).
+        "-netdev", "user,id=n0,hostfwd=tcp:127.0.0.1:17070-:7070", "-device", "e1000,netdev=n0",
         # Graphics card: a virtio-gpu device, found by its PCI IDs. See docs/12-graphics.md.
         "-device", "virtio-gpu-pci",
         "-display", "none",
@@ -454,6 +455,23 @@ def main():
         # connect must fail cleanly rather than hang the shell. The success path is checked by hand.
         ser.send("tcpget 10.0.2.2 9 /\n")
         check("tcpget reports a failed connect to a closed port", "tcpget: connect to 10.0.2.2:9 failed", timeout=60)
+        # TCP passive open: the kernel listens on 7070; the host connects through the hostfwd rule.
+        ser.send("tcplisten 7070\n")
+        check("tcplisten starts listening", "tcplisten: listening on port 7070", timeout=60)
+        host_reply = b""
+        try:
+            with socket.create_connection(("127.0.0.1", 17070), timeout=30) as hs:
+                hs.sendall(b"ping from the host\n")
+                while not host_reply.endswith(b"\n"):
+                    chunk = hs.recv(256)
+                    if not chunk:
+                        break
+                    host_reply += chunk
+        except OSError as e:
+            print(f"[shell-test] host connection failed: {e}")
+        check_true("host connects to the kernel listener and gets the reply",
+                   host_reply == b"helix: ping from the host\n")
+        check("tcplisten accepts the connection and replies", "tcplisten: replied with 26 bytes", timeout=30)
         # HTTP client error paths: each fails at a different step, without needing a server.
         ser.send("gpu\n")
         check("gpu lists the virtio-gpu scanout", "gpu: scanout 0: ", timeout=60)

@@ -329,6 +329,7 @@ shows it; typing `myprog arg1 arg2` runs it.
 | `ping <a.b.c.d \| name>` | four ICMP echo requests, one second each; prints each reply's round-trip time in microseconds, then a count. `ping 10.0.2.2` gets replies under QEMU. A dead address times out. A host name is resolved first |
 | `nslookup <name>` | resolve a name to an IPv4 address with the DNS server (10.0.2.3 under QEMU). Prints "not found" for a name that does not exist |
 | `tcpget <a.b.c.d> <port> <path>` | open a TCP connection, send `GET <path>` (HTTP/1.0), and print the byte count and the status line. Example: `tcpget 10.0.2.2 8765 /` against a host web server |
+| `tcplisten <port>` | listen on a TCP port, accept one connection (up to 30 s), read one line, answer `helix: <line>`, and close. Connect from the host to test it; the suite uses QEMU's hostfwd to reach guest port 7070 |
 | `gpu` | list the display outputs of the virtio-gpu device (QEMU: `-device virtio-gpu-pci`); prints "no virtio-gpu device ready" when there is none |
 | `fetch <http://host[:port]/path>` | HTTP/1.1 GET: prints the status, body length and content type, and the redirect target if there is one. Only `http://`; `https://` is refused for now. Example: `fetch http://10.0.2.2:8766/index.html` |
 | `dhcp` | get an address, mask, router and DNS server from a DHCP server, replacing the static configuration. Runs when asked, not at boot |

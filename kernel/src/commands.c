@@ -891,6 +891,65 @@ static void cmd_topcase(int argc, char **argv) {
 }
 
 /* xhci: the xHCI controller found by discovery (read-only). */
+/* tcplisten PORT: wait for one TCP connection, read a line, answer "helix: <line>" and
+ * close. Tests the passive open: run it, then connect to the port from the host. */
+static void cmd_tcplisten(int argc, char **argv) {
+    if (argc < 2) {
+        kprintf("usage: tcplisten <port>\n");
+        return;
+    }
+    if (!net_ready()) {
+        kprintf("tcplisten: no network card (QEMU: -netdev user,id=n0 -device e1000,netdev=n0)\n");
+        return;
+    }
+    uint32_t port = 0;
+    for (const char *p = argv[1]; *p != '\0'; p++) {
+        if (*p < '0' || *p > '9') { port = 0; break; }
+        port = port * 10 + (uint32_t)(*p - '0');
+        if (port > 65535u) break;
+    }
+    if (port == 0 || port > 65535u) {
+        kprintf("tcplisten: bad port %s\n", argv[1]);
+        return;
+    }
+    int listener = net_tcp_listen((uint16_t)port);
+    if (listener < 0) {
+        kprintf("tcplisten: could not listen on port %u\n", port);
+        return;
+    }
+    kprintf("tcplisten: listening on port %u\n", port);
+    int conn = net_tcp_accept(listener, 30000);
+    if (conn < 0) {
+        kprintf("tcplisten: no connection on port %u within 30 seconds\n", port);
+        net_tcp_unlisten(listener);
+        return;
+    }
+    kprintf("tcplisten: accepted a connection on port %u\n", port);
+
+    uint8_t line[256];
+    int n = net_tcp_recv(conn, line, sizeof line, 5000);
+    while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r')) n--;
+    if (n <= 0) {
+        kprintf("tcplisten: the peer sent no data\n");
+        net_tcp_close(conn);
+        net_tcp_unlisten(listener);
+        return;
+    }
+    static const char prefix[] = "helix: ";
+    uint8_t reply[sizeof prefix - 1 + sizeof line + 1];
+    uint32_t rn = 0;
+    for (uint32_t i = 0; i < sizeof prefix - 1; i++) reply[rn++] = (uint8_t)prefix[i];
+    for (int i = 0; i < n; i++) reply[rn++] = line[i];
+    reply[rn++] = '\n';
+    if (net_tcp_send(conn, reply, rn, 3000) < 0) {
+        kprintf("tcplisten: could not send the reply\n");
+    } else {
+        kprintf("tcplisten: replied with %u bytes\n", rn);
+    }
+    net_tcp_close(conn);
+    net_tcp_unlisten(listener);
+}
+
 static void cmd_disk(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -2516,6 +2575,7 @@ const command_t helix_commands[] = {
     {"spi", "Intel LPSS GSPI controller state (MacBook Air SPI)", cmd_spi},
     {"xhci", "xHCI (USB 3) controller discovery, read-only", cmd_xhci},
     {"disk", "list SATA disks on the AHCI controller and read sector 0", cmd_disk},
+    {"tcplisten", "accept one TCP connection on a port, answer one line, close", cmd_tcplisten},
     {"topcase", "read-only probe of the Apple top-case keyboard over SPI", cmd_topcase},
     {"pci", "list every PCI function: vendor:device, class, BAR0", cmd_pci},
     {"dhcp",    "get a network address from a DHCP server (replaces the static address)", cmd_dhcp},

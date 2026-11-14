@@ -38,11 +38,17 @@ typedef enum {
     TC_ESTABLISHED,
     TC_FIN_WAIT,        /* we sent FIN, waiting for the peer's FIN */
     TC_CLOSE_WAIT,      /* the peer sent FIN; we can still send */
-    TC_RESET
+    TC_RESET,
+    TC_SYN_RCVD        /* passive open: we sent SYN-ACK, waiting for the peer's ACK */
 } tcp_state_t;
+
+#define TC_SYN_RCVD_TIMEOUT_MS 5000   /* a half-open connection is dropped after this */
 
 typedef struct {
     tcp_state_t state;
+    bool passive;          /* created by a listener, not by connect() */
+    bool accepted;         /* handed to accept() */
+    uint64_t created_ms;   /* when a passive connection started its handshake */
     uint8_t peer_ip[4];
     uint16_t peer_port;
     uint16_t local_port;
@@ -60,6 +66,14 @@ typedef struct {
 static tcp_conn_t g_conns[NET_TCP_CONNS];
 static uint16_t g_next_port = 49152;
 static uint32_t g_iss_seed = 0x1000;
+
+/* Listening ports. A SYN to one of these creates a passive connection in a free slot. */
+typedef struct {
+    bool used;
+    uint16_t port;
+} tcp_listener_t;
+
+static tcp_listener_t g_listeners[NET_TCP_LISTENERS];
 
 static bool seq_after(uint32_t a, uint32_t b) {
     return (int32_t)(a - b) > 0;          /* correct across the 2^32 wrap */
@@ -157,6 +171,8 @@ int net_tcp_connect(const uint8_t ip[4], uint16_t port, uint32_t timeout_ms) {
     if (id < 0) return -1;
     tcp_conn_t *c = &g_conns[id];
     c->state = TC_SYN_SENT;
+    c->passive = false;
+    c->accepted = false;
     for (int i = 0; i < 4; i++) c->peer_ip[i] = ip[i];
     c->peer_port = port;
     c->local_port = alloc_port();
@@ -185,6 +201,59 @@ int net_tcp_connect(const uint8_t ip[4], uint16_t port, uint32_t timeout_ms) {
     klog_note(KLOG_INPUT, "[net] TCP connect to port %u failed\n", port);
     free_conn(c);
     return -1;
+}
+
+int net_tcp_listen(uint16_t port) {
+    if (!net_ready() || port == 0) return -1;
+    int free_slot = -1;
+    for (int i = 0; i < NET_TCP_LISTENERS; i++) {
+        if (g_listeners[i].used) {
+            if (g_listeners[i].port == port) return -1;     /* already listening */
+        } else if (free_slot < 0) {
+            free_slot = i;
+        }
+    }
+    if (free_slot < 0) return -1;
+    g_listeners[free_slot].used = true;
+    g_listeners[free_slot].port = port;
+    return free_slot;
+}
+
+void net_tcp_unlisten(int listener) {
+    if (listener < 0 || listener >= NET_TCP_LISTENERS) return;
+    g_listeners[listener].used = false;
+}
+
+/* Drop passive connections on this port whose handshake never finished. */
+static void expire_half_open(uint16_t port) {
+    uint64_t now = time_uptime_ms();
+    for (int i = 0; i < NET_TCP_CONNS; i++) {
+        tcp_conn_t *c = &g_conns[i];
+        if (c->state == TC_SYN_RCVD && c->passive && c->local_port == port &&
+            now - c->created_ms >= TC_SYN_RCVD_TIMEOUT_MS) {
+            free_conn(c);
+        }
+    }
+}
+
+int net_tcp_accept(int listener, uint32_t timeout_ms) {
+    if (listener < 0 || listener >= NET_TCP_LISTENERS || !g_listeners[listener].used) return -1;
+    uint16_t port = g_listeners[listener].port;
+    uint64_t start = time_uptime_ms();
+    for (;;) {
+        net_poll();
+        for (int i = 0; i < NET_TCP_CONNS; i++) {
+            tcp_conn_t *c = &g_conns[i];
+            /* CLOSE_WAIT counts too: the peer may have sent and closed before we looked. */
+            if (c->passive && c->local_port == port && !c->accepted &&
+                (c->state == TC_ESTABLISHED || c->state == TC_CLOSE_WAIT)) {
+                c->accepted = true;
+                return i;
+            }
+        }
+        expire_half_open(port);
+        if (time_uptime_ms() - start >= timeout_ms) return -1;
+    }
 }
 
 int net_tcp_send(int id, const uint8_t *data, uint32_t len, uint32_t timeout_ms) {
@@ -268,6 +337,39 @@ void net_tcp_close(int id) {
     free_conn(c);
 }
 
+static bool listening_on(uint16_t port) {
+    for (int i = 0; i < NET_TCP_LISTENERS; i++) {
+        if (g_listeners[i].used && g_listeners[i].port == port) return true;
+    }
+    return false;
+}
+
+/* A SYN arrived for a listening port: take a free slot and answer SYN-ACK. If every slot
+ * is busy the SYN is dropped, and the peer retries it later. */
+static void open_passive(const uint8_t src[4], uint16_t sport, uint16_t dport, uint32_t seq, uint16_t wnd) {
+    tcp_conn_t *c = NULL;
+    for (int i = 0; i < NET_TCP_CONNS; i++) {
+        if (g_conns[i].state == TC_FREE) { c = &g_conns[i]; break; }
+    }
+    if (!c) return;
+    c->state = TC_SYN_RCVD;
+    c->passive = true;
+    c->accepted = false;
+    c->created_ms = time_uptime_ms();
+    for (int i = 0; i < 4; i++) c->peer_ip[i] = src[i];
+    c->peer_port = sport;
+    c->local_port = dport;
+    c->iss = next_iss();
+    c->snd_una = c->iss;
+    c->snd_nxt = c->iss + 1;             /* the SYN-ACK takes one sequence number */
+    c->snd_max = c->snd_nxt;
+    c->rcv_nxt = seq + 1;                /* the peer's SYN takes one sequence number */
+    c->peer_wnd = wnd;
+    c->rx_head = 0;
+    c->rx_count = 0;
+    send_segment(c, F_SYN | F_ACK, c->iss, NULL, 0);
+}
+
 void net_tcp_input(const uint8_t src[4], const uint8_t dst[4], const uint8_t *seg, uint16_t len) {
     if (len < TCP_HLEN) return;
     uint8_t hl = (uint8_t)((seg[12] >> 4) * 4);
@@ -293,11 +395,31 @@ void net_tcp_input(const uint8_t src[4], const uint8_t dst[4], const uint8_t *se
             break;
         }
     }
-    if (!c) return;                                       /* not one of ours */
+    if (!c) {
+        /* A bare SYN to a port someone listens on starts a passive open. */
+        if ((flags & (F_SYN | F_ACK | F_RST)) == F_SYN && listening_on(dport)) {
+            open_passive(src, sport, dport, seq, wnd);
+        }
+        return;                                           /* otherwise not one of ours */
+    }
 
     if (flags & F_RST) {
         c->state = TC_RESET;
         return;
+    }
+
+    if (c->state == TC_SYN_RCVD) {
+        if (flags & F_SYN) {
+            /* The peer resent its SYN, so our SYN-ACK was lost: send it again. */
+            send_segment(c, F_SYN | F_ACK, c->iss, NULL, 0);
+            return;
+        }
+        /* Only the ACK of our SYN-ACK completes the handshake. Anything else waits. */
+        if (!(flags & F_ACK) || ack != c->iss + 1) return;
+        c->snd_una = ack;
+        c->peer_wnd = wnd;
+        c->state = TC_ESTABLISHED;
+        /* Fall through: this segment may already carry data or a FIN. */
     }
 
     if (c->state == TC_SYN_SENT) {

@@ -263,7 +263,7 @@ not implemented. AHCI reads work under QEMU only.
 
 ## M12 — Networking and graphics 🚧
 
-- 🚧 Network-interface objects (`net_interface.c`). The network stack is partial: ARP, IPv4, ICMP, UDP, DNS, DHCP and a TCP client exist; no listening sockets, no HTTP yet.
+- 🚧 Network-interface objects (`net_interface.c`). The network stack is partial: ARP, IPv4, ICMP, UDP, DNS, DHCP, a TCP client and a one-connection-per-accept TCP listener (`tcplisten`, tested under QEMU) exist; no sockets API, no HTTP server yet.
 - 🚧 Display-surface objects (`display_surface.c`). There is no compositor yet.
 - 🚧 Network stack (`docs/10-network.md`): Intel e1000 driver (stage 1, built and
   QEMU-tested: `net`, `net test` gets an ARP reply from the gateway); Ethernet and

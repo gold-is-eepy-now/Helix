@@ -1,15 +1,29 @@
-/* net_tcp.h — TCP client connections: connect, send, receive, close.
+/* net_tcp.h — TCP connections: connect or listen, send, receive, close.
  *
- * Scope: active opens only (we connect out; nothing listens). Data is delivered in order.
- * Out-of-order segments are dropped and re-sent by the peer. Sending is stop-and-wait
- * per window with go-back-N retransmission after a timeout. Options: MSS is sent in the
- * SYN; nothing else (no window scaling, SACK or timestamps). See docs/10-network.md. */
+ * Scope: active opens (connect) and passive opens (listen, accept, one port each).
+ * Data is delivered in order. Out-of-order segments are dropped and re-sent by the peer.
+ * Sending is stop-and-wait per window with go-back-N retransmission after a timeout.
+ * Options: MSS is sent in the SYN; nothing else (no window scaling, SACK or timestamps).
+ * See docs/10-network.md. */
 #ifndef HELIX_NET_TCP_H
 #define HELIX_NET_TCP_H
 
 #include <stdint.h>
 
 #define NET_TCP_CONNS 4
+#define NET_TCP_LISTENERS 4
+
+/* Start listening on a local port. Returns a listener id, or -1 if the port is already
+ * listening or no listener slot is free. Connections share the NET_TCP_CONNS slots. */
+int net_tcp_listen(uint16_t port);
+
+/* Wait up to timeout_ms for a peer to finish connecting to the listener. Returns a
+ * connection id (use it with send, recv and close), or -1 on timeout. Handshakes that
+ * never finish are dropped after a few seconds. Blocks, polling the network. */
+int net_tcp_accept(int listener, uint32_t timeout_ms);
+
+/* Stop listening. Connections already accepted are not affected. */
+void net_tcp_unlisten(int listener);
 
 /* Open a connection to ip:port. Returns a connection id, or -1 (no free slot, timeout,
  * or refused). Blocks, polling the network, until established or timeout_ms passes. */

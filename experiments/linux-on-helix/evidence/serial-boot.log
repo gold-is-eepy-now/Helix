@@ -1,0 +1,121 @@
+BdsDxe: starting Boot0001 "UEFI QEMU DVD-ROM QM00005 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x2,0xFFFF,0x0)^M
+Command line: earlycon=uart8250,io,0x3f8 console=ttyS0 panic=-1^M
+BIOS-provided physical RAM map:^M
+BIOS-e820: [mem 0x0000000000000000-0x000000000009ffff]  System RAM^M
+BIOS-e820: [gap 0x00000000000a0000-0x00000000000fffff]^M
+BIOS-e820: [mem 0x0000000000100000-0x00000000007fffff]  System RAM^M
+BIOS-e820: [mem 0x0000000000800000-0x0000000000807fff]  ACPI NVS^M
+BIOS-e820: [mem 0x0000000000808000-0x000000000080afff]  System RAM^M
+BIOS-e820: [mem 0x000000000080b000-0x000000000080bfff]  ACPI NVS^M
+BIOS-e820: [mem 0x000000000080c000-0x000000000080ffff]  System RAM^M
+BIOS-e820: [mem 0x0000000000810000-0x00000000008fffff]  ACPI NVS^M
+BIOS-e820: [mem 0x0000000000900000-0x000000001ec0dfff]  System RAM^M
+BIOS-e820: [mem 0x000000001ec0e000-0x000000001eccefff]  device reserved^M
+BIOS-e820: [mem 0x000000001eccf000-0x000000001f4ecfff]  System RAM^M
+BIOS-e820: [mem 0x000000001f4ed000-0x000000001f76cfff]  device reserved^M
+BIOS-e820: [mem 0x000000001f76d000-0x000000001f77efff]  ACPI data^M
+BIOS-e820: [mem 0x000000001f77f000-0x000000001f7fefff]  ACPI NVS^M
+BIOS-e820: [mem 0x000000001f7ff000-0x000000001fef3fff]  System RAM^M
+BIOS-e820: [mem 0x000000001fef4000-0x000000001ff77fff]  device reserved^M
+BIOS-e820: [mem 0x000000001ff78000-0x000000001fffffff]  ACPI NVS^M
+BIOS-e820: [gap 0x0000000020000000-0x00000000dfffffff]^M
+BIOS-e820: [mem 0x00000000e0000000-0x00000000efffffff]  device reserved^M
+BIOS-e820: [gap 0x00000000f0000000-0x00000000ffbfffff]^M
+BIOS-e820: [mem 0x00000000ffc00000-0x00000000ffffffff]  device reserved^M
+BIOS-e820: [gap 0x0000000100000000-0x000000fcffffffff]^M
+BIOS-e820: [mem 0x000000fd00000000-0x000000ffffffffff]  device reserved^M
+earlycon: uart8250 at I/O port 0x3f8 (options '')^M
+printk: legacy bootconsole [uart8250] enabled^M
+NX (Execute Disable) protection: active^M
+APIC: Static calls initialized^M
+tsc: Fast TSC calibration using PIT^M
+tsc: Detected 2099.996 MHz processor^M
+last_pfn = 0x1fef4 max_arch_pfn = 0x400000000^M
+x86/PAT: PAT support disabled because CONFIG_X86_PAT is disabled in the kernel.^M
+x86/PAT: Configuration [0-7]: WB  WT  UC- UC  WB  WT  UC- UC  ^M
+RAMDISK: [mem 0x19d00000-0x19dbffff]^M
+CPU topo: Max. logical packages:   1^M
+CPU topo: Max. logical nodes:      1^M
+CPU topo: Num. nodes per package:  1^M
+CPU topo: Max. logical dies:       1^M
+CPU topo: Max. dies per package:   1^M
+CPU topo: Max. threads per core:   1^M
+CPU topo: Num. cores per package:     1^M
+CPU topo: Num. threads per package:   1^M
+CPU topo: Allowing 1 present CPUs plus 0 hotplug CPUs^M
+[gap 0x20000000-0xdfffffff] available for PCI devices^M
+clocksource: refined-jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 7645519600211568 ns^M
+Zone ranges:^M
+  DMA32    [mem 0x0000000000001000-0x000000001fef3fff]^M
+  Normal   empty^M
+Movable zone start for each node^M
+Early memory node ranges^M
+  node   0: [mem 0x0000000000001000-0x000000000009ffff]^M
+  node   0: [mem 0x0000000000100000-0x00000000007fffff]^M
+  node   0: [mem 0x0000000000808000-0x000000000080afff]^M
+  node   0: [mem 0x000000000080c000-0x000000000080ffff]^M
+  node   0: [mem 0x0000000000900000-0x000000001ec0dfff]^M
+  node   0: [mem 0x000000001eccf000-0x000000001f4ecfff]^M
+  node   0: [mem 0x000000001f7ff000-0x000000001fef3fff]^M
+Initmem setup node 0 [mem 0x0000000000001000-0x000000001fef3fff]^M
+On node 0, zone DMA32: 1 pages in unavailable ranges^M
+On node 0, zone DMA32: 96 pages in unavailable ranges^M
+On node 0, zone DMA32: 8 pages in unavailable ranges^M
+On node 0, zone DMA32: 1 pages in unavailable ranges^M
+On node 0, zone DMA32: 240 pages in unavailable ranges^M
+On node 0, zone DMA32: 193 pages in unavailable ranges^M
+On node 0, zone DMA32: 786 pages in unavailable ranges^M
+On node 0, zone DMA32: 268 pages in unavailable ranges^M
+Kernel command line: earlycon=uart8250,io,0x3f8 console=ttyS0 panic=-1^M
+printk: log buffer data + meta data: 131072 + 458752 = 589824 bytes^M
+Dentry cache hash table entries: 65536 (order: 7, 524288 bytes, linear)^M
+Inode-cache hash table entries: 32768 (order: 6, 262144 bytes, linear)^M
+Built 1 zonelists, mobility grouping on.  Total pages: 129479^M
+mem auto-init: stack:all(zero), heap alloc:off, heap free:off^M
+SLUB: HWalign=64, Order=0-1, MinObjects=0, CPUs=1, Nodes=1^M
+NR_IRQS: 4352, nr_irqs: 24, preallocated irqs: 16^M
+clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 7645041785100000 ns^M
+Console: colour dummy device 80x25^M
+printk: legacy console [ttyS0] enabled^M
+printk: legacy console [ttyS0] enabled^M
+printk: legacy bootconsole [uart8250] disabled^M
+printk: legacy bootconsole [uart8250] disabled^M
+APIC: ACPI MADT or MP tables are not detected^M
+APIC: Switch to virtual wire mode setup with no configuration^M
+Not enabling interrupt remapping due to skipped IO-APIC setup^M
+clocksource: tsc-early: mask: 0xffffffffffffffff max_cycles: 0x1e452ca2c89, max_idle_ns: 440795231168 ns^M
+Calibrating delay loop (skipped), value calculated using timer frequency.. 4199.99 BogoMIPS (lpj=8399984)^M
+Last level iTLB entries: 4KB 512, 2MB 255, 4MB 127^M
+Last level dTLB entries: 4KB 512, 2MB 255, 4MB 127, 1GB 0^M
+CPU: AMD QEMU Virtual CPU version 2.5+ (family: 0xf, model: 0x6b, stepping: 0x1)^M
+mitigations: Enabled attack vectors: SMT mitigations: off^M
+Spectre V2 : Vulnerable^M
+Spectre V1 : Vulnerable: __user pointer sanitization and usercopy barriers only; no swapgs barriers^M
+x86/fpu: x87 FPU will use FXSAVE^M
+pid_max: default: 32768 minimum: 301^M
+Mount-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)^M
+Mountpoint-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)^M
+VFS: Finished mounting rootfs on nullfs^M
+Performance Events: PMU not available due to virtualization, using software events only.^M
+signal: max sigframe size: 1040^M
+Memory: 498992K/517916K available (3560K kernel code, 759K rwdata, 316K rodata, 564K init, 216K bss, 18196K reserved, 0K cma-reserved)^M
+clocksource: Switched to clocksource tsc-early^M
+platform rtc_cmos: registered fallback platform RTC device^M
+Unpacking initramfs...^M
+workingset: timestamp_bits=62 (anon: 57) max_order=17 bucket_order=0 (anon: 0)^M
+Freeing initrd memory: 768K^M
+Serial: 8250/16550 driver, 4 ports, IRQ sharing disabled^M
+serial8250: ttyS0 at I/O 0x3f8 (irq = 4, base_baud = 115200) is a 16550A^M
+serio: i8042 KBD port at 0x60,0x64 irq 1^M
+serio: i8042 AUX port at 0x60,0x64 irq 12^M
+sched_clock: Marking stable (552543705, 9460404)->(570529811, -8525702)^M
+input: AT Translated Set 2 keyboard as /devices/platform/i8042/serio0/input/input0^M
+Freeing unused kernel image (initmem) memory: 564K^M
+Write protecting the kernel read-only data: 6144k^M
+Freeing unused kernel image (text/rodata gap) memory: 532K^M
+Freeing unused kernel image (rodata/data gap) memory: 1732K^M
+Run /init as init process^M
+[linux-on-helix] /init is running as PID 1^M
+[linux-on-helix] this Linux kernel was started by Limine on the Helix boot path^M
+input: ImExPS/2 Generic Explorer Mouse as /devices/platform/i8042/serio1/input/input2^M
+reboot: Power off not available: System halted instead^M

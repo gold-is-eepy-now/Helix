@@ -110,7 +110,15 @@ attribute, but real hardware does, so the cache-disable bit is set deliberately.
    Tests: `tcpget` to a closed port reports the connect failure (in the suite). Checked by
    hand: `tcpget 10.0.2.2 8765 /` against a local `python3 -m http.server` on the host
    (QEMU maps 10.0.2.2 to the host's loopback) receives the whole 16512-byte response.
-   Not done: no listening sockets, no window scaling, SACK, timestamps or fast
+   Passive open (stage 8b): `net_tcp_listen(port)` registers a port. A SYN to it takes
+   a free connection slot, enters SYN_RCVD and is answered with SYN-ACK. The handshake
+   completes on the peer's ACK, and `net_tcp_accept` then returns the connection, which
+   uses the same send, recv and close as an outgoing one. A half-open handshake is
+   dropped after 5 seconds. Kernel command `tcplisten PORT` accepts one connection,
+   reads a line and answers `helix: <line>`. The suite connects from the host through
+   QEMU's hostfwd rule (127.0.0.1:17070 to guest port 7070) and checks the reply.
+   Not done: a listen backlog (a SYN that arrives while the slot is busy is dropped and
+   retried by the peer), no sockets API, no window scaling, SACK, timestamps or fast
    retransmit (a lost segment waits for the timeout), no congestion control, no
    zero-window persist timer of its own, and no TIME_WAIT. Only one open at a time is
    tested.
