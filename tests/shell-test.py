@@ -201,7 +201,11 @@ def main():
         "-monitor", f"unix:{MONITOR_SOCK},server=on,wait=off",
         # Network card (Intel e1000) with QEMU's user-mode network: a real gateway
         # answers our ARP request. See docs/10-network.md.
-        "-netdev", "user,id=n0", "-device", "e1000,netdev=n0",
+        # hostfwd: a host connection to 127.0.0.1:17070 reaches guest port 7070 (the tcplisten test).
+        # hostfwd: host 17070 reaches guest 7070 (tcplisten); 17071 and 17072 reach 7071 and
+        # 7072 (tcpsink, the loss-recovery transfers).
+        "-netdev", "user,id=n0,hostfwd=tcp:127.0.0.1:17070-:7070,hostfwd=tcp:127.0.0.1:17071-:7071,hostfwd=tcp:127.0.0.1:17072-:7072",
+        "-device", "e1000,netdev=n0",
         # Graphics card: a virtio-gpu device, found by its PCI IDs. See docs/12-graphics.md.
         "-device", "virtio-gpu-pci",
         "-display", "none",
@@ -454,6 +458,85 @@ def main():
         # connect must fail cleanly rather than hang the shell. The success path is checked by hand.
         ser.send("tcpget 10.0.2.2 9 /\n")
         check("tcpget reports a failed connect to a closed port", "tcpget: connect to 10.0.2.2:9 failed", timeout=60)
+        # TCP passive open: the kernel listens on 7070; the host connects through the hostfwd rule.
+        ser.send("tcplisten 7070\n")
+        check("tcplisten starts listening", "tcplisten: listening on port 7070", timeout=60)
+        host_reply = b""
+        try:
+            with socket.create_connection(("127.0.0.1", 17070), timeout=30) as hs:
+                hs.sendall(b"ping from the host\n")
+                while not host_reply.endswith(b"\n"):
+                    chunk = hs.recv(256)
+                    if not chunk:
+                        break
+                    host_reply += chunk
+        except OSError as e:
+            print(f"[shell-test] host connection failed: {e}")
+        check_true("host connects to the kernel listener and gets the reply",
+                   host_reply == b"helix: ping from the host\n")
+        check("tcplisten accepts the connection and replies", "tcplisten: replied with 26 bytes", timeout=30)
+
+        # TCP loss recovery, with Helix as the sender. netdrop makes the kernel skip every 5th
+        # outgoing data segment. The host must still get every byte, in order, and fast
+        # retransmit (three duplicate ACKs) must repair the gaps.
+        def host_send_bulk(port, payload):
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=60) as bs:
+                    bs.sendall(payload)
+                    bs.shutdown(socket.SHUT_WR)
+                return True
+            except OSError as e:
+                print(f"[shell-test] host bulk send to port {port} failed: {e}")
+                return False
+
+        lossy_n = 65536
+        lossy = bytes((i * 7 + 3) & 0xFF for i in range(lossy_n))
+        lossy_sum = sum(lossy) & 0xFFFFFFFF
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", 17080))
+        srv.listen(1)
+        srv.settimeout(90)
+        ser.send("netdrop 5\n")
+        check("netdrop turns the test drop on", "netdrop: not sending every 5th", timeout=30)
+        ser.send(f"tcpsend 10.0.2.2 17080 {lossy_n}\n")
+        got = b""
+        try:
+            conn, _ = srv.accept()
+            conn.settimeout(90)
+            while True:
+                chunk = conn.recv(8192)
+                if not chunk:
+                    break
+                got += chunk
+            conn.close()
+        except OSError as e:
+            print(f"[shell-test] host receive of the lossy transfer failed: {e}")
+        finally:
+            srv.close()
+        check_true("host receives every byte of the lossy transfer, in order", got == lossy)
+        check("tcpsend reports the lossy transfer", f"tcpsend: sent {lossy_n} bytes, sum {lossy_sum}", timeout=120)
+
+        # Clean link: drop off, a different payload (so its sum is a new line to look for).
+        clean = bytes((i * 13 + 1) & 0xFF for i in range(32768))
+        clean_sum = sum(clean) & 0xFFFFFFFF
+        ser.send("netdrop 0\n")
+        check("netdrop turns the test drop off", "netdrop: off", timeout=30)
+        ser.send("tcpsink 7072\n")
+        check("tcpsink starts listening for the clean transfer", "tcpsink: listening on port 7072", timeout=60)
+        check_true("host sends 32 KB over the clean link", host_send_bulk(17072, clean))
+        check("tcpsink gets every byte of the clean transfer", f"tcpsink: received 32768 bytes, sum {clean_sum}", timeout=120)
+
+        # Read the counters only now: by here the tcpsend line has been read in full.
+        check("tcpsend prints its loss-recovery counters", "tcpsend: fast_retransmits=", timeout=30)
+        stats = re.findall(r"tcpsend: fast_retransmits=(\d+) timeouts=(\d+) dup_acks=(\d+)", ser.text())
+        fast_ok = bool(stats) and int(stats[-1][0]) > 0
+        print("[shell-test] tcpsend counters for the lossy transfer:", stats[-1] if stats else "(none)")
+        check_true("fast retransmit repaired the losses (counted during the transfer)", fast_ok)
+        if not fast_ok:
+            # Print the kernel's own counters, so a failure shows whether dup ACKs arrived.
+            print("[shell-test] tcpsend counters:", stats[-1] if stats else "(no stats line)")
+            print("[shell-test] tcpsend lines:", [l for l in ser.text().splitlines() if "tcpsend" in l])
         # HTTP client error paths: each fails at a different step, without needing a server.
         ser.send("gpu\n")
         check("gpu lists the virtio-gpu scanout", "gpu: scanout 0: ", timeout=60)

@@ -38,11 +38,17 @@ typedef enum {
     TC_ESTABLISHED,
     TC_FIN_WAIT,        /* we sent FIN, waiting for the peer's FIN */
     TC_CLOSE_WAIT,      /* the peer sent FIN; we can still send */
-    TC_RESET
+    TC_RESET,
+    TC_SYN_RCVD        /* passive open: we sent SYN-ACK, waiting for the peer's ACK */
 } tcp_state_t;
+
+#define TC_SYN_RCVD_TIMEOUT_MS 5000   /* a half-open connection is dropped after this */
 
 typedef struct {
     tcp_state_t state;
+    bool passive;          /* created by a listener, not by connect() */
+    bool accepted;         /* handed to accept() */
+    uint64_t created_ms;   /* when a passive connection started its handshake */
     uint8_t peer_ip[4];
     uint16_t peer_port;
     uint16_t local_port;
@@ -55,11 +61,35 @@ typedef struct {
     uint8_t rx[TCP_RX_BUF];
     uint32_t rx_head;       /* index of the oldest byte in rx */
     uint32_t rx_count;      /* bytes waiting in rx */
+    /* Congestion control, RFC 5681. The sender may have min(cwnd, peer_wnd) unacknowledged. */
+    uint32_t cwnd;          /* congestion window, bytes */
+    uint32_t ssthresh;      /* slow-start threshold, bytes */
+    uint32_t dupacks;       /* duplicate ACKs since the last new acknowledgement */
+    bool in_recovery;       /* fast recovery: entered on three duplicate ACKs */
+    uint32_t recover;       /* snd_max when fast recovery began; it ends when this is acked */
 } tcp_conn_t;
+
+/* Counters for tests and the tcpsink command. */
+static uint32_t g_fast_retransmits;
+static uint32_t g_timeouts;
+static uint32_t g_dup_acks;
+
+/* Test hook: drop every Nth incoming data segment (0 = off), to exercise loss recovery
+ * under QEMU, which does not lose packets on its own. */
+static uint32_t g_drop_every;
+static uint32_t g_drop_count;
 
 static tcp_conn_t g_conns[NET_TCP_CONNS];
 static uint16_t g_next_port = 49152;
 static uint32_t g_iss_seed = 0x1000;
+
+/* Listening ports. A SYN to one of these creates a passive connection in a free slot. */
+typedef struct {
+    bool used;
+    uint16_t port;
+} tcp_listener_t;
+
+static tcp_listener_t g_listeners[NET_TCP_LISTENERS];
 
 static bool seq_after(uint32_t a, uint32_t b) {
     return (int32_t)(a - b) > 0;          /* correct across the 2^32 wrap */
@@ -104,6 +134,9 @@ static uint16_t tcp_checksum(const uint8_t src[4], const uint8_t dst[4], const u
 
 /* Build and send one segment. payload may be NULL when len is 0. */
 static bool send_segment(tcp_conn_t *c, uint8_t flags, uint32_t seq, const uint8_t *payload, uint16_t len) {
+    /* Test hook: pretend to send every Nth data segment, so the peer sees a gap and our
+     * loss recovery has to repair it. The sender still counts the bytes as sent. */
+    if (len > 0 && g_drop_every != 0 && ++g_drop_count % g_drop_every == 0) return true;
     /* Resolve the next hop first: ARP may poll the network, and a poll can send an ACK
      * through this function. Resolving first keeps the static buffer below unshared. */
     if (!net_ip_warm(c->peer_ip)) return false;
@@ -129,6 +162,16 @@ static tcp_conn_t *conn_at(int id) {
     if (id < 0 || id >= NET_TCP_CONNS) return NULL;
     if (g_conns[id].state == TC_FREE) return NULL;
     return &g_conns[id];
+}
+
+/* RFC 5681 section 3.1: start with an initial window of two segments, and a threshold
+ * that is effectively unlimited until the first loss. */
+static void init_congestion(tcp_conn_t *c) {
+    c->cwnd = 2u * TCP_MSS;
+    c->ssthresh = 65535u;
+    c->dupacks = 0;
+    c->in_recovery = false;
+    c->recover = c->snd_una;
 }
 
 static void free_conn(tcp_conn_t *c) {
@@ -157,6 +200,8 @@ int net_tcp_connect(const uint8_t ip[4], uint16_t port, uint32_t timeout_ms) {
     if (id < 0) return -1;
     tcp_conn_t *c = &g_conns[id];
     c->state = TC_SYN_SENT;
+    c->passive = false;
+    c->accepted = false;
     for (int i = 0; i < 4; i++) c->peer_ip[i] = ip[i];
     c->peer_port = port;
     c->local_port = alloc_port();
@@ -168,6 +213,7 @@ int net_tcp_connect(const uint8_t ip[4], uint16_t port, uint32_t timeout_ms) {
     c->peer_wnd = 0;
     c->rx_head = 0;
     c->rx_count = 0;
+    init_congestion(c);
 
     uint64_t start = time_uptime_ms();
     uint64_t next_syn = start;
@@ -187,6 +233,70 @@ int net_tcp_connect(const uint8_t ip[4], uint16_t port, uint32_t timeout_ms) {
     return -1;
 }
 
+int net_tcp_listen(uint16_t port) {
+    if (!net_ready() || port == 0) return -1;
+    int free_slot = -1;
+    for (int i = 0; i < NET_TCP_LISTENERS; i++) {
+        if (g_listeners[i].used) {
+            if (g_listeners[i].port == port) return -1;     /* already listening */
+        } else if (free_slot < 0) {
+            free_slot = i;
+        }
+    }
+    if (free_slot < 0) return -1;
+    g_listeners[free_slot].used = true;
+    g_listeners[free_slot].port = port;
+    return free_slot;
+}
+
+void net_tcp_unlisten(int listener) {
+    if (listener < 0 || listener >= NET_TCP_LISTENERS) return;
+    g_listeners[listener].used = false;
+}
+
+void net_tcp_set_drop_every(uint32_t n) {
+    g_drop_every = n;
+    g_drop_count = 0;
+}
+
+void net_tcp_stats(uint32_t *fast_retransmits, uint32_t *timeouts, uint32_t *dup_acks) {
+    if (fast_retransmits) *fast_retransmits = g_fast_retransmits;
+    if (timeouts) *timeouts = g_timeouts;
+    if (dup_acks) *dup_acks = g_dup_acks;
+}
+
+/* Drop passive connections on this port whose handshake never finished. */
+static void expire_half_open(uint16_t port) {
+    uint64_t now = time_uptime_ms();
+    for (int i = 0; i < NET_TCP_CONNS; i++) {
+        tcp_conn_t *c = &g_conns[i];
+        if (c->state == TC_SYN_RCVD && c->passive && c->local_port == port &&
+            now - c->created_ms >= TC_SYN_RCVD_TIMEOUT_MS) {
+            free_conn(c);
+        }
+    }
+}
+
+int net_tcp_accept(int listener, uint32_t timeout_ms) {
+    if (listener < 0 || listener >= NET_TCP_LISTENERS || !g_listeners[listener].used) return -1;
+    uint16_t port = g_listeners[listener].port;
+    uint64_t start = time_uptime_ms();
+    for (;;) {
+        net_poll();
+        for (int i = 0; i < NET_TCP_CONNS; i++) {
+            tcp_conn_t *c = &g_conns[i];
+            /* CLOSE_WAIT counts too: the peer may have sent and closed before we looked. */
+            if (c->passive && c->local_port == port && !c->accepted &&
+                (c->state == TC_ESTABLISHED || c->state == TC_CLOSE_WAIT)) {
+                c->accepted = true;
+                return i;
+            }
+        }
+        expire_half_open(port);
+        if (time_uptime_ms() - start >= timeout_ms) return -1;
+    }
+}
+
 int net_tcp_send(int id, const uint8_t *data, uint32_t len, uint32_t timeout_ms) {
     tcp_conn_t *c = conn_at(id);
     if (!c || (c->state != TC_ESTABLISHED && c->state != TC_CLOSE_WAIT)) return -1;
@@ -201,7 +311,8 @@ int net_tcp_send(int id, const uint8_t *data, uint32_t len, uint32_t timeout_ms)
         uint32_t sent = c->snd_nxt - base;
         uint32_t unsent = len - sent;
         uint32_t inflight = c->snd_nxt - c->snd_una;
-        uint32_t room = c->peer_wnd > inflight ? c->peer_wnd - inflight : 0;
+        uint32_t window = c->peer_wnd < c->cwnd ? c->peer_wnd : c->cwnd;   /* RFC 5681 */
+        uint32_t room = window > inflight ? window - inflight : 0;
         if (unsent > 0 && room > 0) {
             uint32_t n = unsent;
             if (n > TCP_MSS) n = TCP_MSS;
@@ -222,6 +333,13 @@ int net_tcp_send(int id, const uint8_t *data, uint32_t len, uint32_t timeout_ms)
         if (now - start >= timeout_ms) return -1;
         if (now - last_progress >= TCP_RTO_MS) {
             if (++retries > TCP_MAX_RETRY) return -1;
+            /* A timeout is the strongest loss signal: halve the threshold and restart slow start. */
+            uint32_t flight = c->snd_max - c->snd_una;
+            c->ssthresh = flight / 2 > 2u * TCP_MSS ? flight / 2 : 2u * TCP_MSS;
+            c->cwnd = TCP_MSS;
+            c->dupacks = 0;
+            c->in_recovery = false;
+            g_timeouts++;
             c->snd_nxt = c->snd_una;               /* go back: resend from the first unacked byte */
             last_progress = now;
         }
@@ -268,6 +386,40 @@ void net_tcp_close(int id) {
     free_conn(c);
 }
 
+static bool listening_on(uint16_t port) {
+    for (int i = 0; i < NET_TCP_LISTENERS; i++) {
+        if (g_listeners[i].used && g_listeners[i].port == port) return true;
+    }
+    return false;
+}
+
+/* A SYN arrived for a listening port: take a free slot and answer SYN-ACK. If every slot
+ * is busy the SYN is dropped, and the peer retries it later. */
+static void open_passive(const uint8_t src[4], uint16_t sport, uint16_t dport, uint32_t seq, uint16_t wnd) {
+    tcp_conn_t *c = NULL;
+    for (int i = 0; i < NET_TCP_CONNS; i++) {
+        if (g_conns[i].state == TC_FREE) { c = &g_conns[i]; break; }
+    }
+    if (!c) return;
+    c->state = TC_SYN_RCVD;
+    c->passive = true;
+    c->accepted = false;
+    c->created_ms = time_uptime_ms();
+    for (int i = 0; i < 4; i++) c->peer_ip[i] = src[i];
+    c->peer_port = sport;
+    c->local_port = dport;
+    c->iss = next_iss();
+    c->snd_una = c->iss;
+    c->snd_nxt = c->iss + 1;             /* the SYN-ACK takes one sequence number */
+    c->snd_max = c->snd_nxt;
+    c->rcv_nxt = seq + 1;                /* the peer's SYN takes one sequence number */
+    c->peer_wnd = wnd;
+    c->rx_head = 0;
+    c->rx_count = 0;
+    init_congestion(c);
+    send_segment(c, F_SYN | F_ACK, c->iss, NULL, 0);
+}
+
 void net_tcp_input(const uint8_t src[4], const uint8_t dst[4], const uint8_t *seg, uint16_t len) {
     if (len < TCP_HLEN) return;
     uint8_t hl = (uint8_t)((seg[12] >> 4) * 4);
@@ -293,11 +445,31 @@ void net_tcp_input(const uint8_t src[4], const uint8_t dst[4], const uint8_t *se
             break;
         }
     }
-    if (!c) return;                                       /* not one of ours */
+    if (!c) {
+        /* A bare SYN to a port someone listens on starts a passive open. */
+        if ((flags & (F_SYN | F_ACK | F_RST)) == F_SYN && listening_on(dport)) {
+            open_passive(src, sport, dport, seq, wnd);
+        }
+        return;                                           /* otherwise not one of ours */
+    }
 
     if (flags & F_RST) {
         c->state = TC_RESET;
         return;
+    }
+
+    if (c->state == TC_SYN_RCVD) {
+        if (flags & F_SYN) {
+            /* The peer resent its SYN, so our SYN-ACK was lost: send it again. */
+            send_segment(c, F_SYN | F_ACK, c->iss, NULL, 0);
+            return;
+        }
+        /* Only the ACK of our SYN-ACK completes the handshake. Anything else waits. */
+        if (!(flags & F_ACK) || ack != c->iss + 1) return;
+        c->snd_una = ack;
+        c->peer_wnd = wnd;
+        c->state = TC_ESTABLISHED;
+        /* Fall through: this segment may already carry data or a FIN. */
     }
 
     if (c->state == TC_SYN_SENT) {
@@ -318,6 +490,38 @@ void net_tcp_input(const uint8_t src[4], const uint8_t dst[4], const uint8_t *se
         if (newly != 0 && newly <= sent) {
             c->snd_una = ack;
             if (seq_after(ack, c->snd_nxt)) c->snd_nxt = ack;   /* peer has our data after a rewind */
+            c->dupacks = 0;
+            if (c->in_recovery) {
+                /* The ACK that covers the whole loss window ends fast recovery (RFC 5681 3.2). */
+                if (!seq_after(c->recover, ack)) {
+                    c->in_recovery = false;
+                    c->cwnd = c->ssthresh;
+                }
+            } else if (c->cwnd < c->ssthresh) {
+                c->cwnd += newly < TCP_MSS ? newly : TCP_MSS;               /* slow start */
+            } else {
+                uint32_t inc = (TCP_MSS * TCP_MSS) / c->cwnd;               /* congestion avoidance */
+                c->cwnd += inc > 0 ? inc : 1;
+            }
+        } else if (ack == c->snd_una && plen == 0 && !(flags & F_FIN) &&
+                   seq_after(c->snd_max, c->snd_una)) {
+            /* A duplicate ACK: the peer got a later segment but not the one at snd_una. */
+            c->dupacks++;
+            g_dup_acks++;
+            if (c->in_recovery) {
+                c->cwnd += TCP_MSS;                                          /* one segment left the net */
+            } else if (c->dupacks == 3) {
+                /* Three duplicates: the segment at snd_una is probably lost. Halve the window,
+                 * inflate it by the three segments that left the net, and go back to snd_una
+                 * now instead of waiting for the timeout (RFC 5681 3.2). */
+                uint32_t flight = c->snd_max - c->snd_una;
+                c->ssthresh = flight / 2 > 2u * TCP_MSS ? flight / 2 : 2u * TCP_MSS;
+                c->cwnd = c->ssthresh + 3u * TCP_MSS;
+                c->recover = c->snd_max;
+                c->in_recovery = true;
+                c->snd_nxt = c->snd_una;
+                g_fast_retransmits++;
+            }
         }
         c->peer_wnd = wnd;
     }
