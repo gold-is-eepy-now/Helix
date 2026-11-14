@@ -19,6 +19,7 @@ enum {
     KBD_KEY_PAGE_UP,
     KBD_KEY_PAGE_DOWN,
     KBD_KEY_DELETE,
+    KBD_KEY_F4,
 };
 
 /* Codes returned by keyboard_read and input_getchar for the editing keys. They
@@ -33,6 +34,8 @@ enum {
 #define SHELL_KEY_HOME   0x105
 #define SHELL_KEY_END    0x106
 #define SHELL_KEY_DELETE 0x107
+#define SHELL_KEY_ALT_TAB 0x108  /* Alt+Tab: focus the next window */
+#define SHELL_KEY_ALT_F4  0x109  /* Alt+F4: close the focused window */
 
 typedef struct {
     int key;       /* printable ASCII or one of KBD_KEY_* */

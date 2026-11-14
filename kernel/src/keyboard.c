@@ -134,6 +134,8 @@ bool keyboard_read_event(keyboard_event_t *event) {
         key = KBD_KEY_CTRL;
     } else if (code == 0x38) {
         key = KBD_KEY_ALT;
+    } else if (code == 0x3E) {
+        key = KBD_KEY_F4;                  /* F4: Alt+F4 closes a window (see keyboard_read) */
     } else if (code == 0x01) {
         key = KBD_KEY_ESCAPE;
     } else if (pressed) {
@@ -157,6 +159,8 @@ int keyboard_read(void) {
     if (event.key == KBD_KEY_CTRL) ctrl_held = event.pressed;
     if (event.key == KBD_KEY_ALT) alt_held = event.pressed;
     if (!event.pressed) return -1;
+    if (event.key == KBD_KEY_F4 && alt_held) return SHELL_KEY_ALT_F4;
+    if (event.key == '\t' && alt_held) return SHELL_KEY_ALT_TAB;
     if ((event.key == 't' || event.key == 'T') && ctrl_held && alt_held) return KBD_SWITCH_KEY;
     if (event.key == '\n') return '\n';
     if (event.key == KBD_KEY_ENTER) return '\n';

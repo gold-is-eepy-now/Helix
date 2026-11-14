@@ -271,6 +271,10 @@ static int g_drag_dx, g_drag_dy;
  * is never lost. */
 static int g_out_x, g_out_y;
 static bool g_outline_shown;
+static int g_resize = -1;          /* window being resized from its bottom-right grip, or -1 */
+static int g_rs_w, g_rs_h;         /* the size the resize outline shows */
+static int g_last_title_win = -1;  /* a second title-bar click within 500 ms maximises */
+static uint64_t g_last_title_ms;
 static uint32_t c_outline;
 
 /* What a pointer poll asks the main loop to do. */
@@ -1495,6 +1499,10 @@ static void draw_window(const window_t *w, bool focused) {
         fill_box(w->x + 1, w->y + 1, w->w - 2, w->h - 2, 5, g_th->frame_blur_top, g_th->frame_blur_bot, false);
     }
 
+    if (!w->maximised) {                       /* resize grip: three dots in the corner */
+        for (uint32_t k = 0; k < 3; k++) fb_fill_rect(w->x + w->w - 4u - k * 4u, w->y + w->h - 4u, 2, 2, c_gray);
+    }
+
     /* Caption: the title on the glass, then minimise, maximise and a red close button. */
     uint32_t tx = w->x + 3, ty = w->y + 3, tw = w->w - 6;
     uint32_t cap = focused ? rgb_hex(g_th->cap_focus) : rgb_hex(g_th->cap_blur);
@@ -1935,6 +1943,30 @@ static void drag_move(int nx, int ny) {
     cursor_show();
 }
 
+/* The resize outline follows the pointer. The grip is the bottom-right corner, so the top-left
+ * corner stays where it is. Sizes are clamped to a minimum, so the title buttons stay usable,
+ * and to the screen above the taskbar. */
+static void resize_move(int nx, int ny) {
+    uint32_t sw = fb_width(), sh = fb_height();
+    cursor_restore();
+    if (g_outline_shown) outline_xor(g_out_x, g_out_y, g_rs_w, g_rs_h);
+    int rw = nx - g_out_x + 1;
+    int rh = ny - g_out_y + 1;
+    int max_w = (int)sw - g_out_x;
+    int max_h = (int)(sh - TASK_H) - g_out_y;
+    if (rw < 200) rw = 200;
+    if (rh < 120) rh = 120;
+    if (rw > max_w) rw = max_w;
+    if (rh > max_h) rh = max_h;
+    g_rs_w = rw;
+    g_rs_h = rh;
+    outline_xor(g_out_x, g_out_y, g_rs_w, g_rs_h);
+    g_outline_shown = true;
+    g_mx = nx;
+    g_my = ny;
+    cursor_show();
+}
+
 /* Stacking order: the windows are drawn in slot order, except that the focused window is
  * drawn last, so it is on top. Clicks test the same order from the top down. k is the
  * position in that order (0 is the bottom). */
@@ -1960,6 +1992,10 @@ static void redraw(void) {
     }
     if (g_drag >= 0 && g_win[g_drag].used) {   /* a drag in progress: keep its outline */
         outline_xor(g_out_x, g_out_y, g_win[g_drag].w, g_win[g_drag].h);
+        g_outline_shown = true;
+    }
+    if (g_resize >= 0) {                        /* a resize in progress: keep its outline */
+        outline_xor(g_out_x, g_out_y, g_rs_w, g_rs_h);
         g_outline_shown = true;
     }
     draw_taskbar(sw, sh);
@@ -1998,7 +2034,7 @@ static void term_redraw_input(int old_len) {
     int x1 = (int)(cx + 4u) + (TERM_PROMPT_LEN + hi + 2) * 8;    /* caret and one blank cell */
     if (x1 > (int)(cx + cw)) x1 = (int)(cx + cw);
 
-    bool covered = g_menu_open || g_drag >= 0;
+    bool covered = g_menu_open || g_drag >= 0 || g_resize >= 0;
     for (int i = g_focus + 1; i < MAX_WIN && !covered; i++) {
         if (g_win[i].used && rect_hits(x0, row_y, x1 - x0, 12, &g_win[i])) covered = true;
     }
@@ -2475,6 +2511,14 @@ static int handle_click(int x, int y, uint32_t sh) {
         }
         if (inside(x, y, w->x, w->y, w->w, 24)) {          /* title bar: drag, unless maximised */
             g_focus = i;
+            uint64_t now = time_uptime_ms();
+            if (g_last_title_win == i && now - g_last_title_ms < 500) {   /* double-click */
+                g_last_title_win = -1;
+                window_toggle_max(i);
+                return PTR_REDRAW;
+            }
+            g_last_title_win = i;
+            g_last_title_ms = now;
             if (w->maximised) return PTR_REDRAW;
             g_drag = i;
             g_drag_dx = x - (int)w->x;
@@ -2482,6 +2526,16 @@ static int handle_click(int x, int y, uint32_t sh) {
             g_out_x = (int)w->x;
             g_out_y = (int)w->y;
             klog_event(KLOG_DESKTOP, "drag start %s", g_app_names[w->app]);
+            return PTR_REDRAW;
+        }
+        if (!w->maximised && inside(x, y, w->x + w->w - 14u, w->y + w->h - 14u, 14, 14)) {   /* resize grip */
+            g_focus = i;
+            g_resize = i;
+            g_out_x = (int)w->x;
+            g_out_y = (int)w->y;
+            g_rs_w = (int)w->w;
+            g_rs_h = (int)w->h;
+            g_outline_shown = false;
             return PTR_REDRAW;
         }
         if (inside(x, y, w->x, w->y, w->w, w->h)) {
@@ -2554,6 +2608,8 @@ static int poll_pointer(void) {
                    (unsigned)m.buttons, nx, ny);
         if (g_drag >= 0 && down) {
             drag_move(nx, ny);                 /* only the outline moves; no repaint */
+        } else if (g_resize >= 0 && down) {
+            resize_move(nx, ny);
         } else {
             cursor_move(nx, ny);               /* plain move: only the arrow changes */
             int hv = hover_at(g_mx, g_my, sw, sh);
@@ -2571,6 +2627,16 @@ static int poll_pointer(void) {
             g_win[g_drag].y = (uint32_t)g_out_y;
         }
         g_drag = -1;
+        g_outline_shown = false;
+        result = PTR_REDRAW;
+    }
+    if (!down && g_button_was_down && g_resize >= 0) {
+        /* Release: the window takes the outlined size, and a full repaint clears the outline. */
+        if (g_win[g_resize].used) {
+            g_win[g_resize].w = (uint32_t)g_rs_w;
+            g_win[g_resize].h = (uint32_t)g_rs_h;
+        }
+        g_resize = -1;
         g_outline_shown = false;
         result = PTR_REDRAW;
     }
@@ -2868,6 +2934,14 @@ static void editor_key(int c) {
 static bool handle_key(int c) {
     klog_event(KLOG_INPUT, "key %d", c);
     g_repaint = true;
+    if (c == SHELL_KEY_ALT_TAB) {              /* Alt+Tab: the next shown window comes forward */
+        focus_next();
+        return false;
+    }
+    if (c == SHELL_KEY_ALT_F4) {               /* Alt+F4 closes the focused window */
+        close_window(g_focus);
+        return false;
+    }
     if (g_ctx_open) {                  /* any key closes the desktop menu; Esc only closes it */
         g_ctx_open = false;
         if (c == 0x1b) return false;
