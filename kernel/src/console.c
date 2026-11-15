@@ -161,6 +161,10 @@ void console_set_sink(console_sink_fn fn) {
     g_sink = fn;
 }
 
+console_sink_fn console_get_sink(void) {
+    return g_sink;
+}
+
 void console_write(const char *s) {
     if (g_sink) {
         g_sink(s, strlen(s));

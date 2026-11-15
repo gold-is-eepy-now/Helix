@@ -80,6 +80,23 @@ static inline uint64_t helix_syscall(uint64_t native_num,
 #define SYS_OPEN               27   /* open(path, flags) */
 #define SYS_CLOSE              28   /* close(fd) */
 #define SYS_LSEEK              29   /* lseek(fd, offset, whence) */
+#define SYS_STAT               30   /* stat(path, struct helix_stat *) */
+#define SYS_LISTDIR            31   /* listdir(path, buf, cap) -> bytes, text lines */
+#define SYS_MKDIR              32   /* mkdir(path) */
+#define SYS_UNLINK             33   /* unlink(path): files only */
+#define SYS_RMDIR              34   /* rmdir(path): empty directories only */
+#define SYS_TRUNCATE           35   /* truncate(path, size) */
+#define SYS_NET_PING           36   /* net_ping(ipv4_be, seq, timeout_ms) -> rtt in us, or -1 */
+#define SYS_NET_RESOLVE        37   /* net_resolve(name) -> ipv4_be, -1 not found, -2 no answer */
+
+/* Result of SYS_STAT. Same layout as kernel/src/syscall_fs.c's user_stat_t. */
+struct helix_stat {
+    uint64_t ino;
+    uint64_t size;
+    uint16_t mode;
+    uint16_t links;
+    uint32_t mtime;
+};
 
 /* Return values / error codes. */
 #define HELIX_SUCCESS          0
@@ -109,6 +126,24 @@ static inline uint64_t helix_syscall(uint64_t native_num,
 #define HELIX_SEEK_CUR 1
 #define HELIX_SEEK_END 2
 int helix_open(const char *path, int flags);
+
+/* File-system calls (SYS_STAT .. SYS_TRUNCATE above). Each returns 0 on success
+ * and -1 on failure, except helix_listdir, which returns the bytes written to buf
+ * ("kind\tsize\tname\n" per entry, kind is 'd' or '-'), or -1. */
+int helix_stat(const char *path, struct helix_stat *out);
+int64_t helix_listdir(const char *path, char *buf, size_t cap);
+int helix_mkdir(const char *path);
+int helix_unlink(const char *path);
+int helix_rmdir(const char *path);
+int helix_truncate(const char *path, uint64_t size);
+
+/* One ICMP echo through the kernel stack. ip is the IPv4 address with the first octet
+ * in the top byte. Returns the round-trip time in microseconds, or -1 on timeout. */
+int64_t helix_net_ping(uint32_t ip, uint16_t seq, uint32_t timeout_ms);
+
+/* Resolve a host name through the kernel. Returns the IPv4 address (first octet in the
+ * top byte), -1 if the name does not exist, or -2 if the server did not answer. */
+int64_t helix_net_resolve(const char *name);
 int64_t helix_read(int fd, void *buf, size_t count);
 int64_t helix_write(int fd, const void *buf, size_t count);
 int helix_close(int fd);
@@ -143,6 +178,10 @@ __attribute__((noreturn)) void helix_exit(int status);
  * status, or -1 if it could not run. This kernel has no fork: the caller is not
  * replaced, it resumes with the child's status. */
 int64_t helix_spawn(const char *path, char *const argv[]);
+
+/* As helix_spawn, with an explicit environment (envp is NULL-terminated). Passing
+ * NULL for envp gives the child this process's environment, as helix_spawn does. */
+int64_t helix_spawn_env(const char *path, char *const argv[], char *const envp[]);
 void helix_yield(void);
 void *helix_thread_create(void (*entry)(void));
 

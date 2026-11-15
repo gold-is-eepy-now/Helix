@@ -53,9 +53,22 @@ enum {
     SYSCALL_OPEN,          /* open(path, flags) -> fd, or -1 */
     SYSCALL_CLOSE,         /* close(fd) -> 0, or -1 */
     SYSCALL_LSEEK,         /* lseek(fd, offset, whence) -> new offset, or -1 */
+    SYSCALL_STAT,          /* stat(path, struct helix_stat *) -> 0, or -1 */
+    SYSCALL_LISTDIR,       /* listdir(path, buf, cap) -> bytes written, or -1 */
+    SYSCALL_MKDIR,         /* mkdir(path) -> 0, or -1 */
+    SYSCALL_UNLINK,        /* unlink(path) -> 0, or -1 (files only) */
+    SYSCALL_RMDIR,         /* rmdir(path) -> 0, or -1 (empty directories only) */
+    SYSCALL_TRUNCATE,      /* truncate(path, size) -> 0, or -1 */
+    SYSCALL_NET_PING,      /* net_ping(ipv4 as big-endian u32, seq, timeout_ms) -> rtt in us, or -1 */
+    SYSCALL_NET_RESOLVE,   /* net_resolve(name) -> ipv4 as big-endian u32, -1 not found, -2 no answer */
 };
 
 /* Numbers are append-only: user programs (libhelix.h) depend on them. */
+
+uint64_t sys_net_ping(uint64_t ip_be, uint64_t seq, uint64_t timeout_ms,
+                      uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
+uint64_t sys_net_resolve(uint64_t name_addr, uint64_t a2, uint64_t a3,
+                         uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
 
 /* System call handler signature. All syscalls use a uniform 7-argument
  * interface matching the x86_64 ABI: rax = syscall number, then rdi,
@@ -65,6 +78,14 @@ typedef uint64_t (*syscall_handler_t)(uint64_t arg1, uint64_t arg2,
                                     uint64_t arg3, uint64_t arg4,
                                     uint64_t arg5, uint64_t arg6,
                                     uint64_t arg7);
+
+/* File-management handlers (syscall_fs.c), registered by syscall_init. */
+uint64_t sys_stat(uint64_t path, uint64_t out, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
+uint64_t sys_listdir(uint64_t path, uint64_t buf, uint64_t cap, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
+uint64_t sys_mkdir(uint64_t path, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
+uint64_t sys_unlink(uint64_t path, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
+uint64_t sys_rmdir(uint64_t path, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
+uint64_t sys_truncate(uint64_t path, uint64_t size, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
 
 void syscall_init(void);
 void syscall_dispatch(registers_t *regs);

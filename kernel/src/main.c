@@ -18,6 +18,7 @@
 #include "usermode.h"
 #include "userbin.h"
 #include "doom_wad.h"
+#include "icon_pack.h"
 #include "filesystem.h"
 #include "apic.h"
 #include "fb.h"
@@ -34,6 +35,7 @@
 #include "pit.h"
 #include "pmm.h"
 #include "ramdisk_driver.h"
+#include "ahci.h"
 #include "driver.h"
 #include "block_device.h"
 #include "shell.h"
@@ -45,6 +47,15 @@
 #include "usb_hid.h"
 #include "syscall.h"
 #include "usb_host.h"
+#include "acpi.h"
+#include "intel_lpss_gspi.h"
+#include "xhci.h"
+#include "e1000.h"
+#include "net.h"
+#include "klog.h"
+#include "ui.h"
+#include "accounts.h"
+#include "virtio_gpu.h"
 #include "ext4.h"
 #include "t2.h"
 
@@ -90,6 +101,13 @@ static volatile struct limine_firmware_type_request firmware_type_request = {
 __attribute__((used, section(".limine_requests")))
 static volatile struct limine_date_at_boot_request date_at_boot_request = {
     .id = LIMINE_DATE_AT_BOOT_REQUEST_ID,
+    .revision = 0,
+};
+
+/* Ask where the ACPI root pointer (RSDP) is, for the firmware tables (acpi.c). */
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_rsdp_request rsdp_request = {
+    .id = LIMINE_RSDP_REQUEST_ID,
     .revision = 0,
 };
 
@@ -184,6 +202,13 @@ static void kernel_main_continue(void) {
                     if (*p == '/' || *p == '\\') name = p + 1;
                 }
                 if (name[0] != '\0') {
+                    /* The Oxygen icon pack, installed by mkimage at boot/icons/. */
+                    const char icon_pack_name[] = "oxygen-32.pak";
+                    size_t k = 0;
+                    while (icon_pack_name[k] != '\0' && name[k] == icon_pack_name[k]) ++k;
+                    if (icon_pack_name[k] == '\0' && name[k] == '\0') {
+                        icon_pack_set(module->address, (size_t)module->size);
+                    }
                     /* mkimage installs the optional module at this path. */
                     const char expected[] = "doom1.wad";
                     size_t n = 0;
@@ -216,8 +241,60 @@ static void kernel_main_continue(void) {
 
     /* USB needs our page tables (vmm_init ran in kmain) to map the EHCI registers,
      * so it starts here, before the shell takes the keyboard. See docs/07-usb.md. */
+    /* Firmware tables first: they are read-only and do not depend on the devices. */
+    if (rsdp_request.response != NULL && rsdp_request.response->address != NULL) {
+        if (!acpi_init(hhdm_request.response->offset, (uint64_t)(uintptr_t)rsdp_request.response->address)) {
+            console_write("[acpi] RSDP or root table failed its checksum\n");
+        }
+    } else {
+        console_write("[acpi] no RSDP from the bootloader\n");
+    }
+    if (acpi_table_count() > 0) {
+        kprintf("[acpi] ACPI revision %u, %u tables\n", (unsigned)acpi_revision() + 1u,
+                acpi_table_count());
+    }
+
+    /* The Intel LPSS GSPI controller (MacBook Air 7,2). Optional: absent on QEMU, and the
+     * system runs without it. See docs/17-spi.md. */
+    bool gspi_ready = intel_lpss_gspi_init();
+    intel_lpss_gspi_info_t gspi;
+    intel_lpss_gspi_info(&gspi);
+    if (!gspi.found) {
+        kprintf("[spi] Intel LPSS GSPI 8086:9CE6 not found\n");
+    } else {
+        kprintf("[spi] Intel LPSS GSPI 8086:9CE6 at %02x:%02x.%u, ready %s\n", gspi.bus,
+                gspi.device, gspi.function, gspi_ready ? "yes" : "no");
+    }
+
+    /* xHCI (USB 3): read-only discovery. Logged only; nothing is written to the controller. */
+    if (xhci_init()) {
+        xhci_info_t x;
+        xhci_get_info(&x);
+        kprintf("[xhci] found at %02x:%02x.%u, version 0x%04x, %u ports, %u connected\n",
+                x.bus, x.device, x.function, (unsigned)x.hci_version, (unsigned)x.max_ports,
+                (unsigned)x.ports_connected);
+    } else {
+        kprintf("[xhci] no xHCI controller found\n");
+    }
+
+    usb_report_pci_controllers();
+
     if (!usb_host_init(hhdm_request.response->offset)) {
         console_write("no UHCI controller found or started\n");
+    }
+
+    /* The network card (Intel e1000). Absent cards are reported by `net`, not at boot. */
+    e1000_init();
+    net_init();                 /* the IPv4 stack on top of the card; see docs/10-network.md */
+    if (virtio_gpu_init()) {    /* the virtio-gpu display list, if QEMU provides the device */
+        void *pixels = NULL;
+        uint32_t w = 0, h = 0, pitch = 0;
+        if (virtio_gpu_display_init() && virtio_gpu_backing(&pixels, &w, &h, &pitch) &&
+            fb_use_virtio(pixels, w, h)) {
+            klog_note(KLOG_DESKTOP, "[display] drawing through virtio-gpu (%ux%u)\n", w, h);
+        } else {
+            klog_note(KLOG_DESKTOP, "[display] staying on the firmware framebuffer\n");
+        }
     }
 
     /* M9: install the programs into /bin, then start PID 1 (/bin/init) in ring 3.
@@ -227,7 +304,8 @@ static void kernel_main_continue(void) {
     if (!userbin_install()) {
         kprintf("[init] could not install /bin\n");
     }
-    {
+    usermode_env_reset();   /* default PATH and HOME for every program, on every boot */
+    if (!fb_ready()) {      /* graphical boots go to the sign-in screen instead */
         const char *init_argv[] = { "/bin/init", NULL };
         int64_t init_status = usermode_spawn("/bin/init", 1, init_argv);
         if (init_status < 0) {
@@ -244,7 +322,7 @@ static void kernel_main_continue(void) {
     thread_init();
     thread_yield();
 
-    shell_run();
+    ui_run();            /* sign-in, desktop and TUI shell; falls back to the serial shell */
     kernel_idle_loop();
 }
 
@@ -327,12 +405,19 @@ void kmain(void) {
         fs_boot_add_file("LICENSE", "MIT License\n\nCopyright (c) 2025 Helix OS\n\nPermission is hereby granted, free of charge, ...\n", 0);
     } else {
         console_write("[main] mounted ext4 from ramdisk as root\n");
+        accounts_init();
         /* ext4_set_time_source and ext4_mount already set g_ext4_current */
     }
 
     /* Adopt page tables, install exceptions, map a protected stack, then move
      * all ordinary kernel execution onto it before enabling interrupts. */
     vmm_init(hhdm_offset);
+
+    /* AHCI (SATA) maps its host registers with vmm_map, so it must run after
+     * vmm_init has set the page-table pointer. Registers sataN disks; read-only. */
+    if (ahci_init()) kprintf("[ahci] %d SATA disk(s) registered\n", ahci_disk_count());
+    else kprintf("[ahci] no AHCI controller found\n");
+
     gdt_init();
 
     idt_init();

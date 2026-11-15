@@ -25,6 +25,7 @@
 #include "object.h"
 #include "panic.h"
 #include "syscall.h"
+#include "klog.h"
 #include "thread.h"
 #include "channel.h"
 #include "usermode.h"
@@ -105,6 +106,14 @@ void syscall_init(void) {
     syscall_table[SYSCALL_OPEN]          = handle_open;
     syscall_table[SYSCALL_CLOSE]         = handle_fd_close;
     syscall_table[SYSCALL_LSEEK]         = handle_lseek;
+    syscall_table[SYSCALL_STAT]          = sys_stat;
+    syscall_table[SYSCALL_LISTDIR]       = sys_listdir;
+    syscall_table[SYSCALL_MKDIR]         = sys_mkdir;
+    syscall_table[SYSCALL_UNLINK]        = sys_unlink;
+    syscall_table[SYSCALL_RMDIR]         = sys_rmdir;
+    syscall_table[SYSCALL_TRUNCATE]      = sys_truncate;
+    syscall_table[SYSCALL_NET_PING]      = sys_net_ping;
+    syscall_table[SYSCALL_NET_RESOLVE]   = sys_net_resolve;
 }
 
 /* -- Handler implementations ------------------------------------------ */
@@ -367,16 +376,24 @@ static uint64_t handle_brk(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, u
  * the caller. It starts a child with the given argv and returns the child's exit
  * status, or -1 if the child could not run. argv is a NULL-terminated array of
  * user pointers; a NULL argv gives the child just its path as argv[0]. */
+/* SYS_EXECVE(path, argv, envp): run a program from the root and wait for it.
+ * argv and envp are NULL-terminated arrays of user pointers. A NULL envp means
+ * the child inherits the caller's environment. */
 static uint64_t handle_execve(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
-    (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
+    (void)a4; (void)a5; (void)a6; (void)a7;
     char path[256];
     if (!usermem_copy_str(path, sizeof(path), a1)) return UINT64_MAX;
 
-    char *store = kmalloc(USERMODE_ARG_BYTES);
+    /* One kernel buffer holds the copied argv strings, then the environment. */
+    char *store = kmalloc(USERMODE_ARG_BYTES + USERMODE_ENV_BYTES);
     if (store == NULL) return UINT64_MAX;
+    char *env_store = store + USERMODE_ARG_BYTES;
     const char *argv_k[USERMODE_MAX_ARGS];
+    const char *envp_k[USERMODE_MAX_ENV];
     int argc = 0;
+    int envc = -1;
     size_t used = 0;
+    size_t env_used = 0;
 
     if (a2 != 0) {
         for (;;) {
@@ -396,7 +413,20 @@ static uint64_t handle_execve(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4
         argv_k[argc++] = store;
     }
 
-    int64_t status = usermode_spawn(path, argc, argv_k);
+    if (a3 != 0) {
+        envc = 0;
+        for (;;) {
+            uint64_t p = 0;
+            if (envc == (int)USERMODE_MAX_ENV) goto fail;
+            if (!usermem_copy_in(&p, a3 + (uint64_t)envc * 8u, 8)) goto fail;
+            if (p == 0) break;
+            if (!usermem_copy_str(env_store + env_used, USERMODE_ENV_BYTES - env_used, p)) goto fail;
+            envp_k[envc++] = env_store + env_used;
+            env_used += strlen(env_store + env_used) + 1u;
+        }
+    }
+
+    int64_t status = usermode_spawn_env(path, argc, argv_k, envc, envp_k);
     kfree(store);
     return (uint64_t)status;
 
@@ -414,8 +444,16 @@ void syscall_dispatch(registers_t *regs) {
     }
     
     syscall_handler_t handler = syscall_table[syscall_num];
+    /* A keystroke poll (read_input with no buffer) returns -1 on most calls; logging
+     * each one would fill the ring with noise and push out the events before a crash. */
+    bool poll = (syscall_num == SYSCALL_READ_INPUT && regs->rdi == 0);
+    if (!poll) {
+        klog_event(KLOG_SYSCALL, "nr=%llu a1=%p a2=%p a3=%p", (unsigned long long)syscall_num,
+                   (uintptr_t)regs->rdi, (uintptr_t)regs->rsi, (uintptr_t)regs->rdx);
+    }
     if (handler == NULL) {
         regs->rax = UINT64_MAX; /* unimplmented syscall */
+        klog_event(KLOG_SYSCALL, "nr=%llu not implemented", (unsigned long long)syscall_num);
         return;
     }
     
@@ -424,4 +462,8 @@ void syscall_dispatch(registers_t *regs) {
      * The seventh argument is unused by all handlers. */
     regs->rax = handler(regs->rdi, regs->rsi, regs->rdx,
                         regs->r10, regs->r8, regs->r9, 0);
+    if (!poll || regs->rax != UINT64_MAX) {
+        klog_event(KLOG_SYSCALL, "nr=%llu returned %p", (unsigned long long)syscall_num,
+                   (uintptr_t)regs->rax);
+    }
 }

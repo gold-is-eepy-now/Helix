@@ -188,8 +188,9 @@ def run_scenario(index, scenario):
             print(f"[usb-test]   {'PASS' if ok else 'FAIL'}: {label}")
             results.append((label, bool(ok)))
 
-        # PID 1 starts /bin/sh first, so the boot prompt is the userland shell. Exit
-        # it over serial to reach the kernel shell, which the rest of this test uses.
+        # This test boots with -nodefaults: no framebuffer, so there is no sign-in
+        # screen. PID 1 starts /bin/sh first, so the boot prompt is the userland shell.
+        # Exit it over serial to reach the kernel shell, which the rest of this test uses.
         check("userland shell prompt reached at boot", ser.read_until("ring3> ", 60))
         ser.send("exit\n")
         check("kernel reached the shell prompt", ser.read_until("helix> ", 60))

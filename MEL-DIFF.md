@@ -28,7 +28,7 @@ _Full list of functional differences: pending branch comparison._
 
 | Time (UTC) | Change | Commit | Notes |
 |------------|--------|--------|-------|
-| 02:12 | Bumped version to `0.5.20-dev.20261115.MELDEV` in `kernel/src/version.h` (Nov 15 ETA date, `.MELDEV` suffix) | _this commit_ | Version string only; built and booted with the merge below. |
+| 02:12 | Bumped version to `0.5.20-dev.20261115.MELDEV` in `kernel/src/version.h` (Nov 15 ETA date, `.MELDEV` suffix) | _this commit_ | Version string only. Build/boot check runs after the desktop-test merge. |
 | 00:29 | Added a "MelDev branch exception" to `CLAUDE.md`: the compile-and-boot requirements do not apply on MelDev; the honesty rule still does | [`731a7bc`](https://github.com/mymel2001-holder/Helix-MelDev/commit/731a7bc19ee34ff7151b0c44754ebf1c0b5a0492) | Documentation only. |
 
 ### 2026-11-14

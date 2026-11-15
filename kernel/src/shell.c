@@ -21,6 +21,7 @@
 #include "heap.h"
 #include "input.h"
 #include "keyboard.h"
+#include "klog.h"
 #include "version.h"
 
 #define LINE_MAX 128
@@ -98,14 +99,19 @@ static void capture_sink(const char *data, size_t len) {
     }
 }
 
+/* The sink that was in place before the capture. Restored afterwards, so a
+ * capture inside another capturer (the desktop terminal) leaves that one working. */
+static console_sink_fn g_prev_sink;
+
 static void start_output_capture(void) {
     g_out_len = 0;
     g_out_buf[0] = '\0';
+    g_prev_sink = console_get_sink();
     console_set_sink(capture_sink);
 }
 
 static const char *stop_output_capture(void) {
-    console_set_sink(NULL);
+    console_set_sink(g_prev_sink);
     g_out_buf[g_out_len] = '\0';
     return g_out_buf;
 }
@@ -225,6 +231,8 @@ void shell_history_print(void) {
     }
 }
 
+static bool g_leave_shell;   /* set when the switch key is pressed while reading a line */
+
 static size_t read_line(char *line, size_t max) {
     size_t len = 0;
     g_history_pos = g_history_count;
@@ -233,6 +241,10 @@ static size_t read_line(char *line, size_t max) {
         if (c < 0) {
             __asm__ volatile("pause");
             continue;
+        }
+        if (c == KBD_SWITCH_KEY) {
+            g_leave_shell = true;
+            return (size_t)-1;
         }
 
         if (c == SHELL_KEY_UP) {
@@ -389,6 +401,7 @@ bool shell_is_builtin(const char *name) {
 
 /* Execute a single parsed command. Returns 0 on success. */
 static int execute_cmd(parsed_cmd_t *cmd) {
+    klog_event(KLOG_SHELL, "command: %s argc=%d", cmd->argv[0], cmd->argc);
     if (cmd->argc == 0) return 0;
 
     for (size_t i = 0; i < helix_command_count; i++) {
@@ -468,6 +481,7 @@ static int execute_cmd(parsed_cmd_t *cmd) {
 /* Split a line into segments separated by | or ||, parse each segment,
  * and execute the chain. */
 static void execute(char *line) {
+    klog_event(KLOG_SHELL, "line: %s", line);
     char *p = line;
     parsed_cmd_t cmds[MAX_SEGMENTS];
     bool is_or[MAX_SEGMENTS];
@@ -532,4 +546,32 @@ void shell_run(void) {
         history_add(line);
         execute(line);
     }
+}
+
+/* The kernel shell inside the graphical session: the same loop as shell_run, but it
+ * returns when the switch key is pressed, so the caller can go back to the desktop. */
+void shell_run_until_switch(void) {
+    static char line[LINE_MAX];
+    for (;;) {
+        console_set_fg(CONSOLE_BRIGHT_GREEN);
+        console_write(PROMPT);
+        console_reset_color();
+
+        size_t len = read_line(line, sizeof(line));
+        if (g_leave_shell) {
+            g_leave_shell = false;
+            return;
+        }
+        if (len == (size_t)-1) {
+            continue;
+        }
+        history_add(line);
+        execute(line);
+    }
+}
+
+/* Run one command line as the kernel shell would (pipes, redirection, the command
+ * table). The line is modified in place. Used by the desktop terminal window. */
+void shell_run_line(char *line) {
+    execute(line);
 }

@@ -222,14 +222,17 @@ first arrival delivers, both resume correctly).
   headers in `userspace/include`: `string.h`, `stdlib.h` (malloc/calloc/realloc/
   free, exit, strtol), `stdio.h` (printf family, puts/fputs/fgets, fopen/fclose
   over files, unbuffered), `unistd.h`/`fcntl.h` (read/write/open/close/lseek),
-  `errno.h`. `/bin/args` uses `printf`. No fork, no environment (`getenv` finds
-  nothing: envp is not passed yet).
+  `errno.h`. `/bin/args` uses `printf`. No fork.
+- ✅ Environment: the kernel passes `envp` on the initial stack after argv;
+  `getenv`, `setenv`, `unsetenv`; kernel-shell `export`/`unset`; `/bin/env`
+  prints the environment. Default `PATH=/bin` and `HOME=/`. Machine-tested
+  (`tests/shell-test.py`).
 
 **M9 exit gate:** not yet passed. Done: ring-3 processes, the ELF loader,
-userland file I/O, brk, nested `execve` with argv, `/bin` installed at boot,
-`init` starting `/bin/sh`, and a C runtime subset. Still missing: the
-environment (envp on the stack and `getenv`/`setenv`) and a complete C library
-(only the subset above).
+userland file I/O, brk, nested `execve` with argv and envp, `/bin` installed at
+boot, `init` starting `/bin/sh`, the environment, and a C runtime subset.
+Still missing: a complete C library (only the subset above; `strdup`, `strstr`,
+`sleep`, `fseek`/`ftell` and others are absent).
 
 ## M10 — Driver framework and isolated drivers 🚧
 
@@ -257,13 +260,35 @@ Isolation and a real device driver are still to do.
 - ⛔ FAT32: not implemented (no FAT code in the kernel).
 - 🚧 Installer script: `tools/install.sh` exists; its population of /etc, /var and /home was not re-verified in this audit.
 
+- 🚧 AHCI (SATA) stage 1: read-only disk access, QEMU-tested only (`disk` command, docs/20-ahci.md). Writes and hardware tests are still to do.
+
 **M11 exit gate:** partly passed. ext4 read/write and root mount work. FAT32 is
-not implemented.
+not implemented. AHCI reads work under QEMU only.
 
 ## M12 — Networking and graphics 🚧
 
-- 🚧 Network-interface objects (`net_interface.c`). There is no network stack yet: no ARP, IPv4, UDP or TCP.
+- 🚧 Network-interface objects (`net_interface.c`). The network stack is partial: ARP, IPv4, ICMP, UDP, DNS, DHCP, a TCP client and a one-connection-per-accept TCP listener (`tcplisten`, tested under QEMU) exist, and TCP loss recovery (RFC 5681 congestion window and fast retransmit, tested with `tcpsend` and `netdrop`); no SACK, no sockets API, no HTTP server yet.
 - 🚧 Display-surface objects (`display_surface.c`). There is no compositor yet.
+- 🚧 Network stack (`docs/10-network.md`): Intel e1000 driver (stage 1, built and
+  QEMU-tested: `net`, `net test` gets an ARP reply from the gateway); Ethernet and
+  ARP with a cache (stage 2); IPv4 and ICMP echo, where kernel-shell `ping 10.0.2.2`
+  gets replies (stage 3); a ring-3 `/bin/ping` through `SYS_NET_PING` (stage 4); UDP and
+  a DNS client, `nslookup` (stage 6); DHCP, `dhcp` (stage 7); TCP client with
+  `tcpget` (stage 8), which fetched a 16 KB page from a local HTTP server; an HTTP/1.1 client,
+  `fetch` (stage 9), and a Browser window that shows plain http:// pages as text (stage 10,
+  checked with screenshots). Built and
+  QEMU-tested only. Stage 5 (ping to internet addresses) is blocked here: the host
+  disables unprivileged ICMP. HTTPS (TLS 1.3, crypto primitives, certificate checks) is not started.
+- 🚧 Graphics: a virtio 1.0 transport and the virtio-gpu display list (`gpu`, `docs/12-graphics.md`, step 1 of 4). Resources, scanout and flushes are next.
+- 🚧 Desktop apps with windows: My Computer, Network, Settings, Terminal, Text Editor, Browser, About. The userspace `/bin` tools are still text-only, except that My Computer covers ls, cat, mkdir, touch, cp, rm and rmdir, Text Editor covers edit, and Network covers ping and nslookup. `find`, `echo`, `args`, `env`, `true` and `false` stay in the Terminal. A light and dark theme is set in Settings (in memory, so it resets at boot). QEMU-tested (screenshots) only.
+- 🚧 My Computer is an Explorer-style window over the ext4 volume: an Up button and the path, folders listed first, a click or Enter opens a folder, Backspace goes up, and a file's first 512 bytes show in a preview pane (binary files show as dots). A Settings window shows read-only information (signed-in user, accounts, screen size, version); nothing can be changed there yet. QEMU-tested (screenshots) only.
+- 🚧 A basic graphical desktop (`desktop` command): teal desktop, My Computer and
+  About windows, taskbar with clock, Start menu, a pointer driven by a PS/2
+  mouse (QEMU's default pointer; `kernel/src/ps2_mouse.c`) or a USB mouse. A Terminal icon opens a window that runs kernel shell commands (the recovery shell) and `exec <path>` for ring-3 programs, with output shown in the window. Moving the pointer redraws only the arrow; typing in the Text Editor window (`note.txt` in the root, arrows, Home, End, Delete, a Save button) redraws only that window; dragging a title bar moves an outline and redraws the window on release. Tested in QEMU only (screenshots; PS/2 and USB mouse emulation); not on
+  real hardware. Clicking the background does not close windows.
+- ✅ Kernel event log (`log` command): a 512-event ring of scheduler, syscall,
+  process, shell, input and exception events, printed automatically on a CPU
+  exception. Machine-tested (`tests/shell-test.py`).
 - ✅ Input-device objects.
 
 **M12 exit gate:** not passed. The object frameworks exist. The network stack and
@@ -278,7 +303,8 @@ the compositor do not.
 - ✅ HID boot-protocol keyboard and mouse, decoded to the same events as PS/2.
 - ✅ `usb` shell command and a QEMU test that proves input from a hub-attached keyboard.
 - 🚧 Verification on real hardware (2010 iMac 11,2).
-- ⛔ Hot-plug, hub status-change interrupts, mouse consumer, USB storage.
+- ✅ Sign-in screen USB status line (controllers, devices, keyboard and mouse report counts).
+- ⛔ Hot-plug, hub status-change interrupts, mouse wheel, USB storage.
 
 ---
 

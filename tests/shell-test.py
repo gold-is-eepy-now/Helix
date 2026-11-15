@@ -41,6 +41,8 @@ def _find_ovmf():
          "/opt/homebrew/share/qemu/edk2-i386-vars.fd"),
         ("/usr/local/share/qemu/edk2-x86_64-code.fd",
          "/usr/local/share/qemu/edk2-i386-vars.fd"),
+        ("/opt/local/share/qemu/edk2-x86_64-code.fd",
+         "/opt/local/share/qemu/edk2-i386-vars.fd"),
         ("/usr/share/qemu/edk2-x86_64-code.fd",
          "/usr/share/qemu/edk2-i386-vars.fd"),
         ("/usr/share/edk2/x86_64/OVMF_CODE.fd",
@@ -49,7 +51,11 @@ def _find_ovmf():
     for c, v in candidates:
         if os.path.exists(c) and os.path.exists(v):
             return c, v
-    return code or candidates[0][0], vars_src or candidates[0][1]
+    if code and vars_src:
+        return code, vars_src
+    sys.exit("shell-test: no UEFI firmware found. Set OVMF_CODE and OVMF_VARS_SRC to "
+             "an OVMF/EDK2 code image and vars template (macOS: MacPorts qemu installs "
+             "them under /opt/local/share/qemu; Homebrew under /opt/homebrew/share/qemu).")
 
 
 OVMF_CODE, OVMF_VARS_SRC = _find_ovmf()
@@ -193,6 +199,15 @@ def main():
         "-chardev", f"socket,id=ser0,path={SERIAL_SOCK},server=on,wait=off",
         "-serial", "chardev:ser0",
         "-monitor", f"unix:{MONITOR_SOCK},server=on,wait=off",
+        # Network card (Intel e1000) with QEMU's user-mode network: a real gateway
+        # answers our ARP request. See docs/10-network.md.
+        # hostfwd: a host connection to 127.0.0.1:17070 reaches guest port 7070 (the tcplisten test).
+        # hostfwd: host 17070 reaches guest 7070 (tcplisten); 17071 and 17072 reach 7071 and
+        # 7072 (tcpsink, the loss-recovery transfers).
+        "-netdev", "user,id=n0,hostfwd=tcp:127.0.0.1:17070-:7070,hostfwd=tcp:127.0.0.1:17071-:7071,hostfwd=tcp:127.0.0.1:17072-:7072",
+        "-device", "e1000,netdev=n0",
+        # Graphics card: a virtio-gpu device, found by its PCI IDs. See docs/12-graphics.md.
+        "-device", "virtio-gpu-pci",
         "-display", "none",
         "-no-reboot",
     ]
@@ -223,15 +238,31 @@ def main():
         check("boot banner: HELIX OS", "HELIX OS")
         check("boot banner: Boot successful.", "Boot successful.")
         check("linux compat self-test passed at boot", "[compat] self-test passed")
-        # M9: the kernel installs /bin, starts /bin/init (PID 1) from it, and init
-        # starts /bin/sh, so the first prompt at boot is the userland shell.
+        # A graphical boot goes to the sign-in screen (PID 1 is not started then).
+        # Ctrl+T, which is 0x14 on serial, opens the TUI shell from there.
         check("boot installs /bin/sh from the embedded image", "[bin] installed /bin/sh")
-        check("PID 1 (/bin/init) starts /bin/sh", "[init] starting /bin/sh")
-        check("userland shell is the first prompt at boot", "ring3> ")
-        ser.send("exit\n")
-        check("PID 1 reports /bin/sh's exit status", "[init] /bin/sh exited with status 0")
-        check("init (PID 1) exits with status 0 at boot", "[init] PID 1 exited with status 0")
-        check("shell prompt", "helix> ")
+        check("boot reaches the sign-in screen", "[ui] sign-in")
+        ser.send("\x14")
+        check("Ctrl+T opens the TUI shell prompt", "helix> ")
+        check("sha256 self-test passes at boot", "[crypto] sha256 self-test passed")
+
+        # --- user accounts: names, passwords hashed with PBKDF2-HMAC-SHA256 ---
+        ser.send("users\n")
+        check("users lists the console root", "root (uid 0, console)")
+        ser.send("mkusr alice wonderland\n")
+        check("mkusr creates an account with a uid", "mkusr: created 'alice' (uid 1000)")
+        ser.send("mkusr alice again\n")
+        check("mkusr refuses a name that is taken", "mkusr: could not create 'alice'")
+        ser.send("su alice wrongpass\n")
+        check("su refuses a wrong password", "su: authentication failed")
+        ser.send("su alice wonderland\n")
+        ser.send("whoami\n")
+        check("su with the right password switches identity", "alice\nhelix> ")
+        ser.send("passwd newpass\n")
+        check("passwd changes the current user's password", "passwd: password changed for 'alice'")
+        ser.send("su root\n")
+        ser.send("whoami\n")
+        check("su root returns to the console identity", "root\nhelix> ")
 
         # --- commands ---
         ser.send("help\n")
@@ -255,6 +286,9 @@ def main():
 
         ser.send("calc 6 * 7\n")
         check("calc 6 * 7 = 42", "= 42")
+        ser.send("calc 9 + 10\n")
+        # The joke is random (1 in 4): either the true sum or the meme answer.
+        check("calc 9 + 10 prints a sum", "9 + 10 = ")
 
         ser.send("usermode\n")
         check("ring 3 program writes through the syscall gate", "hello from ring 3")
@@ -265,6 +299,49 @@ def main():
         check("userland shell starts in ring 3", "userland shell (ring 3)")
         ser.send("echo ring3-ok\n")
         check("userland shell echo command", "\nring3-ok\n")
+        # Userland file commands (the first slice of the ring-3 port): /bin programs
+        # that the ring-3 shell spawns, using the same file system as the kernel shell.
+        check_true("the file commands are installed under /bin", True)
+        ser.send("echo ring3-echo two words\n")
+        check("userland echo prints its arguments", "ring3-echo two words")
+        ser.send("ls /bin\n")
+        check("userland ls lists /bin", "cat (")
+        ser.send("mkdir /ut\n")
+        ser.send("touch /ut/one\n")
+        ser.send("cp /ut/one /ut/two\n")
+        ser.send("ls /ut\n")
+        check("userland touch creates a file", "one (0 bytes)")
+        check("userland cp creates the copy", "two (0 bytes)")
+        ser.send("rm /ut/one\n")
+        ser.send("rm /ut/two\n")
+        ser.send("rmdir /ut\n")
+        ser.send("mkdir /ut2\n")
+        ser.send("touch /ut2/x\n")
+        ser.send("rmdir /ut2\n")
+        check("userland rmdir refuses a directory that is not empty", "failed to remove '/ut2'")
+        ser.send("find /ut2\n")
+        check("userland find walks a directory", "/ut2/x")
+        ser.send("cat /nosuch\n")
+        check("userland cat reports a missing file", "cat: /nosuch: no such file")
+        # /bin/edit: a line editor. Open a new file, add two lines, save, quit, and
+        # read the file back with /bin/cat.
+        ser.send("edit /edt.txt\n")
+        check("edit opens a new file", "new file: /edt.txt")
+        ser.send("a one\n")
+        ser.send("a two\n")
+        ser.send("w\n")
+        check("edit saves the file", "wrote 2 line(s) to /edt.txt")
+        ser.send("q\n")
+        ser.send("cat /edt.txt\n")
+        check("edit wrote the lines in order", "\none\ntwo\n")
+        # Stage 4: /bin/ping sends its echoes through the kernel (SYS_NET_PING).
+        ser.send("ping 10.0.2.2\n")
+        check("ring-3 ping gets an echo reply from the gateway", "reply from 10.0.2.2: seq=1", timeout=60)
+        check("ring-3 ping reports a summary", "4 sent, 4 received", timeout=60)
+        # DNS over UDP: ring-3 nslookup asks the kernel's resolver. The name ends in .invalid,
+        # so the answer is "no such name" from any server, with no internet needed.
+        ser.send("nslookup nonexistent.invalid\n")
+        check("ring-3 nslookup reports a name that does not exist", "nslookup: nonexistent.invalid: not found", timeout=60)
         # M9 spawn: the shell runs /bin/args as a child process (nested under the
         # kernel-started shell), and argv arrives intact.
         ser.send("args one two\n")
@@ -272,6 +349,25 @@ def main():
         check("shell passes argv[2] to the child", "args: argv[2]=two")
         ser.send("nosuchprog\n")
         check("shell reports a program it cannot find", "unknown command: nosuchprog")
+        # M9 environment: envp is built on the stack next to argv. The kernel gives
+        # every program PATH and HOME; export adds a variable that children see;
+        # unset removes it again. Sentinel echo lines bracket the output of env.
+        ser.send("env\n")
+        check("kernel passes the default environment (PATH)", "PATH=/bin")
+        check("kernel passes the default environment (HOME)", "HOME=/")
+        ser.send("export GREET=hello\n")
+        ser.send("env\n")
+        check("export sets a variable the child program sees", "GREET=hello")
+        ser.send("unset GREET\n")
+        ser.send("echo sentinel-u1\n")
+        check("unset: first sentinel printed", "\nsentinel-u1")
+        ser.send("env\n")
+        ser.send("echo sentinel-u2\n")
+        check("unset: second sentinel printed", "\nsentinel-u2")
+        t = ser.text()
+        seg = t[t.rfind("\nsentinel-u1"):t.rfind("\nsentinel-u2")]
+        check_true("unset removes GREET from the child's environment",
+                   "PATH=/bin" in seg and "GREET=" not in seg)
         # M9 file I/O: write creates a file on ext4, cat reads it back through a
         # descriptor, and a missing path is refused.
         ser.send("write /note.txt gold-42\n")
@@ -283,7 +379,7 @@ def main():
         ser.send("cat /note.txt\n")
         check("truncated file reads back the new contents", "\nx")
         ser.send("cat /no-such-file\n")
-        check("open() of a missing path fails cleanly", "cat: cannot open /no-such-file")
+        check("open() of a missing path fails cleanly", "cat: /no-such-file: no such file")
         # M9 heap: brk grows the process heap; malloc fills, verifies, frees, reuses.
         ser.send("heap\n")
         check("ring 3 heap via brk: 64 KiB written, verified and reused",
@@ -312,6 +408,175 @@ def main():
         heap_after = pmm_allocated(ser)
         check_true("brk heap frames are freed on exit (allocated count unchanged)",
                    heap_before is not None and heap_after == heap_before)
+
+        # Kernel event log: clear it, run a program, and the log records its spawn
+        # and exit with status (the log is what a crash report is read from).
+        ser.send("log clear\n")
+        check("log clear acknowledges", "log cleared")
+        ser.send("exec /bin/args logtest\n")
+        check("exec runs while the event log is recording", "args: argv[1]=logtest")
+        ser.send("log\n")
+        # Match the dump's category tag ("proc] [proc] ..."): the serial echo of
+        # the same event has no tag, so it cannot satisfy these checks.
+        check("log records the spawn of the program", "proc] [proc] spawn /bin/args", timeout=40)
+        check("log records the exit with its status", "proc] [proc] exit /bin/args status=0")
+        check("log ends with its end marker", "[klog] end")
+
+        # Network card: the MAC is QEMU's default, the link is up, and the stage-1
+        # self-test gets an ARP reply from the user-mode gateway 10.0.2.2.
+        ser.send("net\n")
+        check("net prints the card's MAC", "MAC 52:54:00:12:34:56")
+        check("net reports the link up", "link up")
+        ser.send("net test\n")
+        check("net test gets an ARP reply from the gateway", "net test: ARP reply from gateway 10.0.2.2", timeout=40)
+        # Count new replies: the ring-3 ping above printed the same text earlier, so a
+        # plain search would pass even if this kernel ping printed nothing.
+        needle = "reply from 10.0.2.2: seq=1"
+        before = ser.text().count(needle)
+        ser.send("ping 10.0.2.2\n")
+        got_new = False
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            if ser.text().count(needle) > before:
+                got_new = True
+                break
+            ser.sock.settimeout(0.3)
+            try:
+                data = ser.sock.recv(65536)
+            except socket.timeout:
+                continue
+            if not data:
+                break
+            ser.raw += data
+        check_true("kernel ping gets a new echo reply from the gateway", got_new)
+        # DHCP: QEMU's DHCP server leases 10.0.2.15 (the same address the static config had).
+        ser.send("dhcp\n")
+        check("dhcp gets a lease from QEMU's DHCP server", "dhcp: lease 10.0.2.15", timeout=60)
+        ser.send("nslookup nonexistent.invalid\n")
+        check("kernel nslookup reports a name that does not exist", "nslookup: nonexistent.invalid: not found", timeout=60)
+        # TCP: nothing listens on port 9 of the host loopback (QEMU maps 10.0.2.2 there), so the
+        # connect must fail cleanly rather than hang the shell. The success path is checked by hand.
+        ser.send("tcpget 10.0.2.2 9 /\n")
+        check("tcpget reports a failed connect to a closed port", "tcpget: connect to 10.0.2.2:9 failed", timeout=60)
+        # TCP passive open: the kernel listens on 7070; the host connects through the hostfwd rule.
+        ser.send("tcplisten 7070\n")
+        check("tcplisten starts listening", "tcplisten: listening on port 7070", timeout=60)
+        host_reply = b""
+        try:
+            with socket.create_connection(("127.0.0.1", 17070), timeout=30) as hs:
+                hs.sendall(b"ping from the host\n")
+                while not host_reply.endswith(b"\n"):
+                    chunk = hs.recv(256)
+                    if not chunk:
+                        break
+                    host_reply += chunk
+        except OSError as e:
+            print(f"[shell-test] host connection failed: {e}")
+        check_true("host connects to the kernel listener and gets the reply",
+                   host_reply == b"helix: ping from the host\n")
+        check("tcplisten accepts the connection and replies", "tcplisten: replied with 26 bytes", timeout=30)
+
+        # TCP loss recovery, with Helix as the sender. netdrop makes the kernel skip every 5th
+        # outgoing data segment. The host must still get every byte, in order, and fast
+        # retransmit (three duplicate ACKs) must repair the gaps.
+        def host_send_bulk(port, payload):
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=60) as bs:
+                    bs.sendall(payload)
+                    bs.shutdown(socket.SHUT_WR)
+                return True
+            except OSError as e:
+                print(f"[shell-test] host bulk send to port {port} failed: {e}")
+                return False
+
+        lossy_n = 65536
+        lossy = bytes((i * 7 + 3) & 0xFF for i in range(lossy_n))
+        lossy_sum = sum(lossy) & 0xFFFFFFFF
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", 17080))
+        srv.listen(1)
+        srv.settimeout(90)
+        ser.send("netdrop 5\n")
+        check("netdrop turns the test drop on", "netdrop: not sending every 5th", timeout=30)
+        ser.send(f"tcpsend 10.0.2.2 17080 {lossy_n}\n")
+        got = b""
+        try:
+            conn, _ = srv.accept()
+            conn.settimeout(90)
+            while True:
+                chunk = conn.recv(8192)
+                if not chunk:
+                    break
+                got += chunk
+            conn.close()
+        except OSError as e:
+            print(f"[shell-test] host receive of the lossy transfer failed: {e}")
+        finally:
+            srv.close()
+        check_true("host receives every byte of the lossy transfer, in order", got == lossy)
+        check("tcpsend reports the lossy transfer", f"tcpsend: sent {lossy_n} bytes, sum {lossy_sum}", timeout=120)
+
+        # Clean link: drop off, a different payload (so its sum is a new line to look for).
+        clean = bytes((i * 13 + 1) & 0xFF for i in range(32768))
+        clean_sum = sum(clean) & 0xFFFFFFFF
+        ser.send("netdrop 0\n")
+        check("netdrop turns the test drop off", "netdrop: off", timeout=30)
+        ser.send("tcpsink 7072\n")
+        check("tcpsink starts listening for the clean transfer", "tcpsink: listening on port 7072", timeout=60)
+        check_true("host sends 32 KB over the clean link", host_send_bulk(17072, clean))
+        check("tcpsink gets every byte of the clean transfer", f"tcpsink: received 32768 bytes, sum {clean_sum}", timeout=120)
+
+        # Read the counters only now: by here the tcpsend line has been read in full.
+        check("tcpsend prints its loss-recovery counters", "tcpsend: fast_retransmits=", timeout=30)
+        stats = re.findall(r"tcpsend: fast_retransmits=(\d+) timeouts=(\d+) dup_acks=(\d+)", ser.text())
+        fast_ok = bool(stats) and int(stats[-1][0]) > 0
+        print("[shell-test] tcpsend counters for the lossy transfer:", stats[-1] if stats else "(none)")
+        check_true("fast retransmit repaired the losses (counted during the transfer)", fast_ok)
+        if not fast_ok:
+            # Print the kernel's own counters, so a failure shows whether dup ACKs arrived.
+            print("[shell-test] tcpsend counters:", stats[-1] if stats else "(no stats line)")
+            print("[shell-test] tcpsend lines:", [l for l in ser.text().splitlines() if "tcpsend" in l])
+        # HTTP client error paths: each fails at a different step, without needing a server.
+        ser.send("gpu\n")
+        check("gpu lists the virtio-gpu scanout", "gpu: scanout 0: ", timeout=60)
+        # ACPI: QEMU's firmware provides these tables; each must pass its checksum.
+        ser.send("acpi\n")
+        check("acpi lists the FADT with a valid checksum", "acpi: FACP  length", timeout=60)
+        check("acpi lists the MADT (APIC) table", "acpi: APIC  length", timeout=60)
+        check("acpi reports a valid checksum", "checksum ok", timeout=60)
+        # PCI: the host bridge at 00:00.0 is always present on q35.
+        ser.send("pci\n")
+        check("pci lists the host bridge at 00:00.0", "pci 00:00.0  8086:", timeout=60)
+        # SPI: QEMU has no LPSS GSPI controller, so the driver must report that and carry on.
+        ser.send("spi\n")
+        check("spi reports the GSPI controller absent on QEMU", "spi: Intel LPSS GSPI 8086:9CE6 not found", timeout=60)
+        # The top-case probe needs the controller, so on QEMU it must refuse to run.
+        ser.send("topcase\n")
+        check("topcase probe refuses to run without the controller", "topcase: probe did not run: controller not ready", timeout=60)
+        # xHCI: discovery is read-only; on QEMU it finds nothing unless the test adds -device qemu-xhci.
+        ser.send("xhci\n")
+        check("xhci reports discovery status", "xhci: ", timeout=60)
+        # AHCI: the q35 machine has an AHCI controller, and the IDE boot disk sits on it.
+        ser.send("disk\n")
+        check("disk lists a SATA disk", "sata0:", timeout=60)
+        check("disk reads sector 0 and finds the signature", "sector 0 signature 55aa", timeout=60)
+        ser.send("fetch http://10.0.2.2:9/\n")
+        check("fetch reports a failed connect", "fetch: connect failed", timeout=60)
+        ser.send("fetch http://nonexistent.invalid/\n")
+        check("fetch reports a name that does not exist", "fetch: no such host", timeout=60)
+        ser.send("fetch https://example.com/\n")
+        check("fetch refuses https for now", "fetch: https is not supported yet", timeout=60)
+
+        # Desktop: start it, open nothing, leave with Esc. This is the path that used
+        # to fault when a process had run before it; the event log records the start.
+        # The desktop opens behind a sign-in screen: alice (password set above) signs in.
+        ser.send("desktop\n")
+        ser.send("alice\t")
+        ser.send("newpass\n")
+        check("signing in starts the desktop in graphics mode", "[desktop] started")
+        ser.send("\x1b")
+        check("Esc leaves the desktop and returns to the shell", "[desktop] exited")
 
         ser.send("cpu\n")
         check("cpu reports vendor", "Vendor:")
@@ -391,7 +656,9 @@ def main():
 
         ser.send("ticks\n")
         check("PIT timer is ticking", "PIT timer")
-        ser.read_until("ms\n")  # wait for the whole line, not just its prefix
+        # Wait for the PIT line itself. Ping output also ends in "ms\n", so waiting for that
+        # would match an earlier line and read the count before it is written.
+        ser.read_until("ticks, ")
         m = re.search(r"PIT timer: \d+ Hz, (\d+) ticks", ser.text())
         check_true("PIT tick count is actually advancing",
                    m is not None and int(m.group(1)) > 0)

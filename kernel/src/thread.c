@@ -12,6 +12,9 @@
  * the middle of some other function when the timer preempted it.
  */
 #include "thread.h"
+#include "klog.h"
+#include "usermode.h"
+#include "gdt.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -31,6 +34,26 @@
 /* RFLAGS value for a freshly created thread: interrupts enabled (bit 1 is
  * the architecturally fixed "always 1"). */
 #define THREAD_INITIAL_RFLAGS 0x202ULL
+#define RFLAGS_IF (1ULL << 9)
+
+/* Switches must not be preempted. The timer ISR runs thread_tick, which reads
+ * g_current as "the thread being interrupted". thread_yield and friends move
+ * g_current *before* the register state is saved, so a timer tick in that gap
+ * would save the outgoing thread's state into the incoming thread's context
+ * (and leave the outgoing one with a stale rip). The result is a thread that
+ * later resumes at address 0. Clearing IF for the duration of a switch closes
+ * the window; the caller restores its own IF afterwards. */
+static uint64_t irq_save_disable(void) {
+    uint64_t flags;
+    __asm__ volatile("pushfq; popq %0; cli" : "=r"(flags) : : "memory");
+    return flags;
+}
+
+static void irq_restore(uint64_t flags) {
+    if (flags & RFLAGS_IF) {
+        __asm__ volatile("sti" : : : "memory");
+    }
+}
 
 struct thread {
     uint64_t id;
@@ -111,24 +134,34 @@ thread_t *thread_create(void (*entry)(void)) {
     /* A new thread has no saved state; its resume point is simply `entry`
      * running on the fresh stack (16-byte aligned, per the SysV ABI). */
     t->ctx.rip = (uint64_t)(uintptr_t)entry;
-    t->ctx.rsp = vaddr + THREAD_STACK_BYTES - 16u;
+    /* The first resume `ret`s into entry with rsp = this value. The SysV ABI wants
+     * rsp == 8 (mod 16) at a function's first instruction, so leave 8 bytes, not 16. */
+    t->ctx.rsp = vaddr + THREAD_STACK_BYTES - 8u;
     t->ctx.rflags = THREAD_INITIAL_RFLAGS;
     t->ctx.cs = 0x08;  /* kernel code selector */
     t->ctx.ss = 0x10;  /* kernel data selector */
+    klog_event(KLOG_SCHED, "thread %llu created", (unsigned long long)t->id);
     return t;
 }
 
 void thread_yield(void) {
     thread_t *cur = g_current;
     if (cur == NULL) return;
+    uint64_t irq = irq_save_disable();
     thread_t *next = rr_next(g_run_queue, cur);
-    if (next == cur) return;
+    if (next == cur) {
+        irq_restore(irq);
+        return;
+    }
     cur->state = THREAD_READY;
     next->state = THREAD_RUNNING;
     g_current = next; /* the switch never returns here; record who now runs */
     /* Saves cur's callee-saved registers and this call's resume rip/rsp/
-     * rflags into cur->ctx, then loads next's context and jumps into it. */
+     * rflags into cur->ctx, then loads next's context and jumps into it.
+     * When this thread is scheduled again, control returns here and the
+     * restore below runs with this thread's own saved IF bit. */
     thread_switch_to(&cur->ctx, &next->ctx);
+    irq_restore(irq);
 }
 
 void thread_tick(void) {
@@ -136,6 +169,12 @@ void thread_tick(void) {
     if (cur == NULL || cur->state != THREAD_RUNNING) return;
     cur->ticks++;
     if (cur->ticks < THREAD_QUANTUM_TICKS) return;
+    /* Two cases must not switch threads: the interrupt came from ring 3 (the
+     * user code has no kernel context to save), or a process is active (its
+     * address space and kernel stack are global state; switching away and
+     * back in the middle of a process corrupts them). Keep the quantum, retry
+     * on the next tick. */
+    if (g_interrupt_frame[18] != SEL_KERNEL_CODE || usermode_is_active()) return;
 
     /* The timer ISR interrupted `cur`; rebuild its context from the frame so
      * the switch resumes it exactly where it was interrupted. */
@@ -167,6 +206,8 @@ void thread_tick(void) {
 
     thread_t *next = rr_next(g_run_queue, cur);
     if (next == cur) return;
+    klog_event(KLOG_SCHED, "preempt %llu -> %llu", (unsigned long long)cur->id,
+               (unsigned long long)next->id);
     cur->state = THREAD_READY;
     next->state = THREAD_RUNNING;
     g_current = next;
@@ -181,11 +222,20 @@ void thread_block_current(void) {
      * saved context; the load-only switch lands back here. Such a thread must
      * fall through instead of parking again. */
     if (cur->state == THREAD_READY || cur->state == THREAD_DONE) return;
+    uint64_t irq = irq_save_disable();
     thread_set_state(cur, THREAD_WAITING);
     thread_t *next = rr_next(g_run_queue, cur);
-    if (next == cur) return;
+    if (next == cur) {
+        irq_restore(irq);
+        return;
+    }
+    klog_event(KLOG_SCHED, "block %llu -> %llu", (unsigned long long)cur->id,
+               (unsigned long long)next->id);
     g_current = next;
-    thread_switch_load(&next->ctx);
+    /* Save this thread's full state, then run next. The thread resumes here later
+     * (thread_resume_context), so its saved context must be the real one. */
+    thread_switch_to(&cur->ctx, &next->ctx);
+    irq_restore(irq);
 }
 
 void thread_set_state(thread_t *thread, thread_state_t state) {
@@ -193,6 +243,8 @@ void thread_set_state(thread_t *thread, thread_state_t state) {
 }
 
 void thread_resume_context(thread_context_t *ctx, thread_t *thread) {
+    irq_save_disable(); /* the resumed context restores its own IF bit */
+    klog_event(KLOG_SCHED, "resume %llu", thread ? (unsigned long long)thread->id : 0ull);
     g_current = thread;
     thread_switch_load(ctx);
 }
@@ -208,6 +260,7 @@ void thread_exit_current(void) {
         *pp = cur->next;
         cur->next = NULL;
     }
+    klog_event(KLOG_SCHED, "thread %llu exited", (unsigned long long)cur->id);
     kfree(cur);
     g_current = g_run_queue;
 }

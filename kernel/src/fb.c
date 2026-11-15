@@ -13,6 +13,7 @@
 #include <limine.h>
 
 #include "font8x8.h" /* public-domain 8x8 font, const unsigned char [128][8] */
+#include "virtio_gpu.h"
 
 #define GLYPH_W 8u
 #define GLYPH_H 8u
@@ -20,7 +21,11 @@
 #define MARGIN_X 16u
 #define MARGIN_Y 16u
 
-static struct limine_framebuffer *g_fb;
+static struct limine_framebuffer *g_fb;     /* where drawing goes: the firmware framebuffer or g_virt */
+static struct limine_framebuffer g_virt;    /* the virtio-gpu backing memory, described like a framebuffer */
+static bool g_on_virtio;
+static bool g_dirty;                        /* something changed since the last fb_present */
+static size_t g_dx0, g_dy0, g_dx1, g_dy1;   /* the changed rectangle: [x0,x1) x [y0,y1) */
 static size_t g_cursor_x;
 static size_t g_cursor_y;
 static uint32_t g_fg;
@@ -71,10 +76,26 @@ uint32_t fb_rgb(uint8_t r, uint8_t g, uint8_t b) {
          | scale_channel(b, g_fb->blue_mask_size, g_fb->blue_mask_shift);
 }
 
+static void mark_dirty(size_t x, size_t y) {
+    if (!g_dirty) {
+        g_dx0 = x;
+        g_dy0 = y;
+        g_dx1 = x + 1;
+        g_dy1 = y + 1;
+        g_dirty = true;
+        return;
+    }
+    if (x < g_dx0) g_dx0 = x;
+    if (y < g_dy0) g_dy0 = y;
+    if (x + 1 > g_dx1) g_dx1 = x + 1;
+    if (y + 1 > g_dy1) g_dy1 = y + 1;
+}
+
 static void put_pixel(size_t x, size_t y, uint32_t color) {
     if (x >= g_fb->width || y >= g_fb->height) {
         return;
     }
+    if (g_on_virtio) mark_dirty(x, y);
     size_t bytes_per_pixel = g_fb->bpp / 8u;
     uint8_t *pixel = (uint8_t *)g_fb->address
                    + y * g_fb->pitch
@@ -84,15 +105,56 @@ static void put_pixel(size_t x, size_t y, uint32_t color) {
     }
 }
 
+/* Read a pixel back in the same packing put_pixel writes. Off-screen reads
+ * return 0. The desktop uses this to save what is under the pointer. */
+uint32_t fb_get_pixel(uint32_t x, uint32_t y) {
+    if (!fb_ready() || x >= g_fb->width || y >= g_fb->height) {
+        return 0;
+    }
+    size_t bytes_per_pixel = g_fb->bpp / 8u;
+    const uint8_t *pixel = (const uint8_t *)g_fb->address
+                         + (size_t)y * g_fb->pitch
+                         + (size_t)x * bytes_per_pixel;
+    uint32_t color = 0;
+    for (size_t i = 0; i < bytes_per_pixel; i++) {
+        color |= (uint32_t)pixel[i] << (8u * i);
+    }
+    return color;
+}
+
+/* One colour channel of a packed framebuffer pixel, scaled to 0..255. */
+static uint32_t channel8(uint32_t color, uint8_t size, uint8_t shift) {
+    if (size == 0 || size > 16) return 0;
+    uint32_t max = (1u << size) - 1u;
+    return ((color >> shift) & max) * 255u / max;
+}
+
+/* Draws a w x h picture of straight-alpha B,G,R,A pixels at (x, y), blended over
+ * what is already on screen. Transparent pixels leave the screen alone. */
+void fb_blit_bgra(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint8_t *px) {
+    if (!fb_ready() || px == NULL) return;
+    for (uint32_t j = 0; j < h; j++) {
+        for (uint32_t i = 0; i < w; i++) {
+            const uint8_t *s = px + 4u * (j * w + i);
+            uint32_t a = s[3];
+            if (a == 0) continue;
+            uint32_t under = fb_get_pixel(x + i, y + j);
+            uint32_t ur = channel8(under, g_fb->red_mask_size, g_fb->red_mask_shift);
+            uint32_t ug = channel8(under, g_fb->green_mask_size, g_fb->green_mask_shift);
+            uint32_t ub = channel8(under, g_fb->blue_mask_size, g_fb->blue_mask_shift);
+            uint32_t r = (s[2] * a + ur * (255u - a)) / 255u;
+            uint32_t g = (s[1] * a + ug * (255u - a)) / 255u;
+            uint32_t b = (s[0] * a + ub * (255u - a)) / 255u;
+            put_pixel(x + i, y + j, fb_rgb((uint8_t)r, (uint8_t)g, (uint8_t)b));
+        }
+    }
+}
+
 void fb_clear(uint32_t color) {
     if (!fb_ready()) {
         return;
     }
-    for (size_t y = 0; y < g_fb->height; y++) {
-        for (size_t x = 0; x < g_fb->width; x++) {
-            put_pixel(x, y, color);
-        }
-    }
+    fb_fill_rect(0, 0, (uint32_t)g_fb->width, (uint32_t)g_fb->height, color);
     g_cursor_x = MARGIN_X;
     g_cursor_y = MARGIN_Y;
     g_cursor_drawn = false;
@@ -152,6 +214,59 @@ static void scroll_up(void) {
     for (size_t i = total - shift; i < total; i++) {
         base[i] = 0;
     }
+    if (g_on_virtio) {                    /* the whole screen moved */
+        mark_dirty(0, 0);
+        g_dx1 = g_fb->width;
+        g_dy1 = g_fb->height;
+    }
+}
+
+bool fb_use_virtio(void *pixels, uint32_t width, uint32_t height) {
+    if (!fb_ready() || pixels == NULL || width == 0 || height == 0) return false;
+    /* The backing uses 32-bit B8G8R8X8. Colours are already packed for the firmware
+     * framebuffer, so the layouts must agree or every colour would change. */
+    if (g_fb->bpp != 32 || g_fb->red_mask_size != 8 || g_fb->red_mask_shift != 16 ||
+        g_fb->green_mask_size != 8 || g_fb->green_mask_shift != 8 ||
+        g_fb->blue_mask_size != 8 || g_fb->blue_mask_shift != 0) {
+        return false;
+    }
+    size_t cw = width < g_fb->width ? width : g_fb->width;
+    size_t ch = height < g_fb->height ? height : g_fb->height;
+    g_virt = *g_fb;
+    g_virt.address = pixels;
+    g_virt.width = width;
+    g_virt.height = height;
+    g_virt.pitch = (uint64_t)width * 4u;
+    /* Keep what is on screen: copy the firmware framebuffer's rows across. */
+    for (size_t y = 0; y < ch; y++) {
+        const uint8_t *src = (const uint8_t *)g_fb->address + y * g_fb->pitch;
+        uint8_t *dst = (uint8_t *)pixels + y * g_virt.pitch;
+        for (size_t i = 0; i < cw * 4u; i++) dst[i] = src[i];
+    }
+    g_fb = &g_virt;
+    g_on_virtio = true;
+    g_dirty = true;
+    g_dx0 = 0;
+    g_dy0 = 0;
+    g_dx1 = width;
+    g_dy1 = height;
+    return true;
+}
+
+void fb_present(void) {
+    /* Never re-enter: logging from here would draw text, which would present again. */
+    static bool in_present;
+    if (in_present || !g_on_virtio || !g_dirty) return;
+    in_present = true;
+    size_t x1 = g_dx1 > g_fb->width ? g_fb->width : g_dx1;
+    size_t y1 = g_dy1 > g_fb->height ? g_fb->height : g_dy1;
+    g_dirty = false;
+    if (x1 > g_dx0 && y1 > g_dy0) {
+        /* A failed flush leaves the rest of the picture as it was; the next change retries. */
+        (void)virtio_gpu_present((uint32_t)g_dx0, (uint32_t)g_dy0,
+                                 (uint32_t)(x1 - g_dx0), (uint32_t)(y1 - g_dy0));
+    }
+    in_present = false;
 }
 
 static void draw_cursor(void) {
@@ -186,7 +301,7 @@ static void newline(void) {
     }
 }
 
-void fb_putchar(char c) {
+static void putchar_raw(char c) {
     if (!fb_ready() || g_graphics_mode) {
         return;
     }
@@ -200,6 +315,15 @@ void fb_putchar(char c) {
     }
     if (c == '\r') {
         g_cursor_x = MARGIN_X;
+        draw_cursor();
+        return;
+    }
+    if (c == '\b') {
+        /* Like a terminal: move left, erase nothing. Programs that want to
+         * delete a character send "\b \b", and the space does the erasing. */
+        if (g_cursor_x > MARGIN_X) {
+            g_cursor_x -= GLYPH_W;
+        }
         draw_cursor();
         return;
     }
@@ -222,6 +346,11 @@ void fb_putchar(char c) {
     draw_cursor();
 }
 
+void fb_putchar(char c) {
+    putchar_raw(c);
+    fb_present();                   /* the shell echoes each key: show it now */
+}
+
 void fb_write(const char *s) {
     for (; *s != '\0'; s++) {
         fb_putchar(*s);
@@ -229,7 +358,7 @@ void fb_write(const char *s) {
 }
 
 void fb_backspace(void) {
-    if (!fb_ready()) {
+    if (!fb_ready() || g_graphics_mode) {
         return;
     }
     erase_cursor();
@@ -243,6 +372,7 @@ void fb_backspace(void) {
         }
     }
     draw_cursor();
+    fb_present();                   /* like fb_putchar: show the change now */
 }
 
 bool fb_get_info(uint64_t *width, uint64_t *height, uint64_t *bpp) {
@@ -259,4 +389,128 @@ bool fb_get_info(uint64_t *width, uint64_t *height, uint64_t *bpp) {
         *bpp = g_fb->bpp;
     }
     return true;
+}
+
+/* ------------------------------------------------------------------ */
+/* Graphics primitives for the desktop (desktop.c).                    */
+/* ------------------------------------------------------------------ */
+
+/* Stop the text console from drawing while a program owns the screen. */
+void fb_graphics_begin(void) {
+    g_graphics_mode = true;
+    g_cursor_drawn = false;
+}
+
+uint32_t fb_width(void) {
+    return fb_ready() ? (uint32_t)g_fb->width : 0;
+}
+
+uint32_t fb_height(void) {
+    return fb_ready() ? (uint32_t)g_fb->height : 0;
+}
+
+void fb_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
+    if (!fb_ready()) {
+        return;
+    }
+    size_t fw = g_fb->width, fh = g_fb->height;
+    if (x >= fw || y >= fh || w == 0 || h == 0) {
+        return;
+    }
+    size_t x1 = (size_t)x + w;
+    size_t y1 = (size_t)y + h;
+    if (x1 > fw) x1 = fw;
+    if (y1 > fh) y1 = fh;
+    if (g_on_virtio) {                  /* one rectangle, not one update per pixel */
+        mark_dirty(x, y);
+        mark_dirty(x1 - 1, y1 - 1);
+    }
+    size_t bytes_per_pixel = g_fb->bpp / 8u;
+    for (size_t j = y; j < y1; j++) {
+        uint8_t *row = (uint8_t *)g_fb->address + j * g_fb->pitch + (size_t)x * bytes_per_pixel;
+        if (bytes_per_pixel == 4) {
+            for (size_t i = x; i < x1; i++, row += 4) {
+                __builtin_memcpy(row, &color, 4);
+            }
+        } else {
+            for (size_t i = x; i < x1; i++) {
+                for (size_t b = 0; b < bytes_per_pixel; b++) {
+                    *row++ = (uint8_t)(color >> (8u * b));
+                }
+            }
+        }
+    }
+}
+
+/* Draw one 8x8 glyph per character, left to right. With `opaque` false only the
+ * set pixels are drawn, so text can sit on a coloured background. */
+/* A vertical gradient drawn once and copied to the screen on each frame, so
+ * redrawing the desktop does not recompute every pixel. */
+#define WALL_CAP (1280u * 800u)
+static uint32_t g_wall[WALL_CAP];
+static bool g_wall_ready;
+static const struct limine_framebuffer *g_wall_fb;
+static uint32_t g_wall_w, g_wall_h, g_wall_top, g_wall_bottom;
+
+static uint32_t wall_mix(uint32_t a, uint32_t b, uint32_t t, uint32_t n) {
+    if (n == 0) n = 1;
+    int out[3];
+    for (int i = 0; i < 3; i++) {
+        int sa = (int)((a >> (16 - 8 * i)) & 0xFFu);
+        int sb = (int)((b >> (16 - 8 * i)) & 0xFFu);
+        out[i] = sa + (sb - sa) * (int)t / (int)n;
+    }
+    return fb_rgb((uint8_t)out[0], (uint8_t)out[1], (uint8_t)out[2]);
+}
+
+bool fb_draw_wallpaper(uint32_t top_rgb, uint32_t bottom_rgb) {
+    if (!fb_ready() || g_fb->bpp != 32) return false;
+    uint32_t w = (uint32_t)g_fb->width, h = (uint32_t)g_fb->height;
+    if ((size_t)w * h > WALL_CAP) return false;
+    if (!g_wall_ready || g_wall_fb != g_fb || g_wall_w != w || g_wall_h != h ||
+        g_wall_top != top_rgb || g_wall_bottom != bottom_rgb) {
+        for (uint32_t y = 0; y < h; y++) {
+            uint32_t c = wall_mix(top_rgb, bottom_rgb, y, h - 1u);
+            for (uint32_t x = 0; x < w; x++) g_wall[(size_t)y * w + x] = c;
+        }
+        g_wall_ready = true;
+        g_wall_fb = g_fb;
+        g_wall_w = w;
+        g_wall_h = h;
+        g_wall_top = top_rgb;
+        g_wall_bottom = bottom_rgb;
+    }
+    for (uint32_t y = 0; y < h; y++) {
+        uint32_t *row = (uint32_t *)((uint8_t *)g_fb->address + (size_t)y * g_fb->pitch);
+        const uint32_t *src = &g_wall[(size_t)y * w];
+        for (uint32_t x = 0; x < w; x++) row[x] = src[x];
+    }
+    if (g_on_virtio) {
+        mark_dirty(0, 0);
+        g_dx1 = w;
+        g_dy1 = h;
+    }
+    return true;
+}
+
+void fb_draw_text(uint32_t x, uint32_t y, const char *s, uint32_t fg, uint32_t bg, bool opaque) {
+    if (!fb_ready()) {
+        return;
+    }
+    for (; *s != '\0'; s++, x += GLYPH_W) {
+        unsigned char glyph = (unsigned char)*s;
+        if (glyph >= 128) {
+            glyph = '?';
+        }
+        for (uint32_t row = 0; row < GLYPH_H; row++) {
+            unsigned char bits = font8x8_basic[glyph][row];
+            for (uint32_t col = 0; col < GLYPH_W; col++) {
+                if (bits & (1u << col)) {
+                    put_pixel((size_t)x + col, (size_t)y + row, fg);
+                } else if (opaque) {
+                    put_pixel((size_t)x + col, (size_t)y + row, bg);
+                }
+            }
+        }
+    }
 }

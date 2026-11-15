@@ -30,7 +30,8 @@ bool pci_find_class(uint8_t class_code, uint8_t subclass, uint8_t prog_if, size_
                     pci_function_t *out);
 
 /* Find the index-th function with the given vendor / device ID, scanning bus
- * 0 to 255. Returns false when there is no such function. */
+ * 0 to 255. Pass index 0 for the first match. Returns false when there is no
+ * such function. */
 bool pci_find_device(uint16_t vendor_id, uint16_t device_id, size_t index,
                      pci_function_t *out);
 

@@ -165,6 +165,64 @@ Also, in the same change:
   (`<`) in the kernel shell — a console capture sink collects the command's
   output and the shell writes it to ext4 with shared path resolution — plus
   ext4-backed `cat`/`ls`, machine-tested via `tests/shell-test.py`.
+- **Implemented (environment, M9):** `envp` on the initial stack, libc
+  `getenv`/`setenv`/`unsetenv`, kernel-shell `export`/`unset`, `/bin/env`.
+  Machine-tested.
+- **Implemented (kernel event log):** `klog` ring of scheduler, syscall, process,
+  shell, input and exception events; `log` command; dumped on CPU exceptions.
+  Machine-tested.
+- **Implemented (graphics, step 1, QEMU-tested only):** a virtio 1.0 PCI transport
+  (`kernel/src/virtio.c`) and the virtio-gpu display list (`virtio_gpu.c`, shell `gpu`).
+  The desktop still draws to the UEFI GOP framebuffer. See docs/12-graphics.md.
+- **Implemented (accounts and sign-in, QEMU-tested only):** user accounts in
+  `/etc/users` (PBKDF2-HMAC-SHA256 hashes, RDRAND salts; `users`, `mkusr`, `su`,
+  `passwd`, `whoami`) and a graphical sign-in screen that `desktop` shows first.
+  SHA-256 checked against published vectors on the host (`tests/sha256-unit.c`).
+- **Implemented (boot to sign-in, QEMU-tested only):** with a framebuffer, boot goes
+  to the sign-in screen (`ui.c`) after holding the boot log on screen for 15 seconds, so it can be read on a machine with no keyboard. Ctrl+Alt+T (Ctrl+T on serial) opens the TUI
+  shell on screen and returns. Esc on the desktop signs out. Without a framebuffer, the
+  serial shell runs as before.
+- **Implemented (ACPI tables and PCI listing, QEMU-tested only):** the RSDP from Limine, the XSDT/RSDT and FADT (with the DSDT), each table's checksum; `acpi` and `pci` shell commands. No AML interpreter yet. See docs/16-acpi.md.
+- **Implemented (SPI, controller detect and init, QEMU-tested only for the absent path):** generic SPI layer (`spi.c`) and the Intel LPSS GSPI controller 8086:9CE6 (`intel_lpss_gspi.c`): BAR0, reset, readback verification, polled 8-bit transfers. No transfer has run on hardware; the Air is untested. Clock rate fixed at the slowest SCR. See docs/17-spi.md.
+- **Implemented (Apple top-case, read-only probe, QEMU-tested only for the refusal path):** `topcase` clocks one 256-byte frame from the keyboard with no commands sent; the CRC variant is unconfirmed. Not run on the Air. See docs/18-topcase.md.
+- **Implemented (AHCI SATA, stage 1, read-only, QEMU-tested only):** finds the AHCI controller by class, maps ABAR, initialises each implemented port, identifies disks, and reads sectors with READ DMA EXT as `sataN` block devices; `disk` lists them and checks the sector 0 signature. No writes. Not run on the Macs. See docs/20-ahci.md.
+- **Implemented (xHCI, read-only discovery, QEMU-tested with qemu-xhci):** finds the controller by class, maps its registers, reads ports; writes nothing. HCIVERSION read 0x0000 under QEMU, not yet explained. See docs/19-xhci.md.
+- **Implemented (USB controller listing, read-only):** every USB controller in PCI config space is printed at boot with its IDs and BAR0. See docs/07-usb.md.
+- **Implemented (desktop, basic, QEMU-tested only):** `desktop` command: blue
+  Windows-7-style wallpaper (cached gradient), glass window frames with rounded
+  corners, taskbar with Start orb, desktop, My Computer (an Explorer-style window: folders, a file preview, Up, New folder, New file, Copy, Edit, Delete), Network (ping and name lookup), Settings (a light and dark theme, in memory), About, Terminal, Text Editor and Browser windows (the Browser loads plain http:// pages and shows them as text; the Terminal runs kernel shell
+  commands and `exec <path>`, output shown in the window; keyboard-only programs
+  are refused), taskbar with clock, Start menu, pointer
+  driven by a PS/2 mouse (QEMU's default) or a USB mouse; dragging a title bar moves an outline and redraws the window on release; pointer moves redraw only the arrow; typing in the Text Editor redraws only its window. No compositor; not
+  tested on real hardware.
+- **Implemented (desktop redesign, slice 2, QEMU-tested only):** five themes (Aero Blue default, Aero Dark, Classic, Light, Dark) cycled from Settings or `t`; taskbar with hover, running dots, minimised-window buttons, tray glyphs (drawn, not live) and Show Desktop; Start menu with pinned, recent and all-programs lists, a search box, and places plus Shut Down; right-click desktop menu (Refresh, Settings, About Helix); minimise, maximise and restore for windows; double-click a title bar to maximise; resize from the bottom-right grip (200x120 minimum); Alt+Tab focuses the next window and Alt+F4 closes the focused one (PS/2 keyboard); solid window shadows. Translucency and blur are not done (no backbuffer). Not tested on real hardware.
+- **Implemented (userland line editor, QEMU-tested only):** `/bin/edit FILE`, a ring-3 line editor (add, insert, replace, delete, print, save, quit) that reads and writes the file through the ordinary file calls.
+- **Implemented (network, stage 1, QEMU-tested only):** Intel e1000 driver
+  (`kernel/src/e1000.c`): PCI discovery, MMIO, descriptor rings, raw frame
+  send/receive. The `net` command shows the MAC, link and counters; `net test`
+  gets an ARP reply from QEMU's gateway. See docs/10-network.md.
+- **Implemented (network, stages 2–3, QEMU-tested only):** Ethernet framing, ARP with
+  a 16-entry cache, IPv4 send/receive with checksum and subnet routing, ICMP echo.
+  The kernel-shell `ping <a.b.c.d>` and the ring-3 `/bin/ping` (via `SYS_NET_PING`) get
+  replies from the QEMU gateway 10.0.2.2, with microsecond round-trip times. Not
+  verified to the internet: this host's ICMP policy stops QEMU's user network from
+  forwarding echo requests.
+- **Implemented (network, stages 6–7, QEMU-tested only):** UDP with bound ports, a DNS
+  A-record client (`nslookup`, ring-3 `/bin/nslookup` via `SYS_NET_RESOLVE`), and a DHCP
+  client (`dhcp`) that replaces the static address when run. DNS over UDP to the internet
+  is checked by hand (`github.com` resolves). No DHCP at boot or renewal.
+- **Implemented (network, stage 8, QEMU-tested only):** TCP client (`kernel/src/net_tcp.c`):
+  connect, in-order receive with a window, go-back-N send, close. Kernel `tcpget`
+  fetched a 16 KB page from a host web server under QEMU. Passive open added
+  (`net_tcp_listen`/`net_tcp_accept`, `tcplisten`): the suite connects from the host through
+  QEMU's hostfwd and gets a reply. No sockets API yet. See docs/10-network.md.
+  Loss recovery (RFC 5681 congestion window, fast retransmit on three duplicate ACKs,
+  timeout restart) is tested with `netdrop` and `tcpsend`: the suite sends 64 KB with every
+  5th segment skipped and checks the host gets every byte. No SACK yet.
+- **Implemented (network, stages 9–10, QEMU-tested only):** HTTP/1.1 GET client
+  (`kernel/src/net_http.c`: Content-Length, chunked, redirects reported) with kernel
+  `fetch`, and a desktop Browser window that shows plain http:// pages as text (checked
+  with QEMU screenshots, not by the suite). No HTTPS yet.
 - **Implemented (LC-1, Linux compat):** `compat/include/linux/*` headers (types, slab, spinlock, atomic, mutex, module_init, printk) and a self-test driver run at boot. See docs/08-linux-compat.md.
 - **Implemented (Mac/Darwin compat):** `mac-darwin-compat/` subsystem with 64-bit Mach-O loader, Darwin BSD & Mach trap translation, Darwin process runtime (`darwin_runtime.c`), Darwin `launchd` PID 1 daemon with plist service loading and `launchctl` CLI (`launchd.c`), Mac-like case-insensitive filesystem, extended attributes (xattr), property list (.plist) engine, .app bundle resolution, CLI tools (`sw_vers`, `defaults`, `plutil`, `uname`, `otool`, `open`, `launchctl`), and AppKit/Cocoa GUI translation to Helix X11 server (`Calculator.app`, `TextEdit.app`), machine-tested (157 checks).
 - **Implemented (DoneJS compat):** `donejs-compat/` freestanding C11 JavaScript runtime ported for Helix OS, featuring AST tree-walking interpreter, CommonJS modules (`require`), standard library (`path`, `fs`, `process`, `util`, `assert`, `events`, `buffer`, `os`, `stream`), Promises, microtasks, timers (`setTimeout`), and event loop draining. Machine-tested (hosted suite).
@@ -176,12 +234,13 @@ Also, in the same change:
   the "no T2 present" path. SEP key services, disk-encryption integration,
   Apple Secure Boot verification and real-hardware testing are not done. See
   docs/09-apple-t2.md.
-- **Not implemented:** the full C library and an environment (userspace has a
-  libc subset in `userspace/libc`: string, stdlib, stdio, unistd, errno, but
-  `getenv` finds nothing and there is no `fork`; the M9 exit gate is not yet
-  passed), the `installer` / live install environment (needs a disk driver and
-  partitioning), isolated driver services, networking, graphics, POSIX
-  translation layer.
+- **Not implemented:** the full C library (userspace has a libc subset in
+  `userspace/libc`: string, stdlib, stdio, unistd, errno; there is no `fork`;
+  the M9 exit gate is not yet passed), the `installer` / live install
+  environment (needs a disk driver and partitioning), isolated driver services,
+  a network stack above the HTTP client (HTTPS and TLS, a general sockets API),
+  a real graphics stack (the desktop is a basic framebuffer demo with no
+  compositor), POSIX translation layer.
 
 Do not write documentation or commit messages that imply unimplemented systems
 exist.

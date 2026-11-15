@@ -40,14 +40,21 @@ thread_switch_to:
 
 .global thread_switch_load
 .type thread_switch_load, @function
-thread_switch_load:           /* rdi = in_ctx */
+thread_switch_load:           /* rdi = in_ctx; interrupts must be off on entry */
     movq %rdi, %r12
-    movq 120(%r12), %rsp      /* incoming thread's stack */
-    subq $16, %rsp            /* build the resume slot below it */
+    movq 120(%r12), %rsp      /* incoming thread's stack: its saved rsp is X */
+    /* Park three values just below X so the restore ends with rsp == X:
+     *   X-24: incoming r12   (restored before popfq; nothing pops this slot)
+     *   X-16: rflags         (popfq)
+     *   X- 8: rip            (ret)
+     * The resumed thread then sees exactly the rsp it saved. */
+    subq $24, %rsp
+    movq 88(%r12), %rax
+    movq %rax, 0(%rsp)
     movq 136(%r12), %rax
-    movq %rax, (%rsp)         /* rflags slot */
+    movq %rax, 8(%rsp)
     movq 128(%r12), %rax
-    movq %rax, 8(%rsp)        /* rip slot */
+    movq %rax, 16(%rsp)
     movq 8(%r12), %rcx
     movq 16(%r12), %rdx
     movq 24(%r12), %rsi
@@ -61,10 +68,13 @@ thread_switch_load:           /* rdi = in_ctx */
     movq 96(%r12), %r13
     movq 104(%r12), %r14
     movq 112(%r12), %r15
+    movq (%r12), %rax         /* incoming rax: the ctx base is still in r12 here */
+    movq 0(%rsp), %r12        /* incoming r12 from its parking slot */
+    addq $8, %rsp             /* rsp -> rflags slot */
+    /* Interrupts come back on with popfq; only ret follows, and every register is
+     * already correct by then, so a tick in this window saves the right state. */
     popfq
-    movq (%r12), %rax         /* incoming rax: rax is also the scratch above */
-    movq 88(%r12), %r12       /* incoming r12: last use of the ctx base */
-    ret                       /* pops the rip slot we pushed */
+    ret                       /* pops the rip slot; rsp is now X */
 .size thread_switch_load, .-thread_switch_load
 
 /* thread_save_current(out_ctx = rdi): store the full context of the calling

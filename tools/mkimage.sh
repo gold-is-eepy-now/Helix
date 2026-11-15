@@ -32,6 +32,7 @@ LIMINE_DIR="${LIMINE_DIR:-$BUILD_DIR/deps/limine-binary}"
 IMAGE="${IMAGE:-$BUILD_DIR/helix.img}"
 LIMINE_CONF="${LIMINE_CONF:-limine.conf}"
 DOOM_WAD="${DOOM_WAD:-}"
+ICON_PACK="${ICON_PACK:-}"
 SIZE_MB="${SIZE_MB:-64}"
 
 # Geometry chosen so one "cylinder" is exactly 1 MiB, matching the layout
@@ -76,16 +77,21 @@ fi
 
 echo "[mkimage] installing Limine, config and kernel"
 mcopy -i "$IMAGE@@${PART_OFFSET}" "$LIMINE_DIR/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
-mcopy -i "$IMAGE@@${PART_OFFSET}" "$LIMINE_CONF"           ::/boot/limine/limine.conf
 mcopy -i "$IMAGE@@${PART_OFFSET}" "$KERNEL"                ::/boot/kernel
-if [ -n "$DOOM_WAD" ]; then
-    # Limine config is generated in the build directory so the source config
-    # stays independent of a user's locally supplied, licensed game data.
-    DOOM_CONF="$BUILD_DIR/limine-doom.conf"
-    cp "$LIMINE_CONF" "$DOOM_CONF"
-    printf '    module_path: boot():/boot/doom/doom1.wad\n    module_string: helix-doom-wad\n' >> "$DOOM_CONF"
-    mcopy -i "$IMAGE@@${PART_OFFSET}" "$DOOM_WAD" ::/boot/doom/doom1.wad
-    mcopy -o -i "$IMAGE@@${PART_OFFSET}" "$DOOM_CONF" ::/boot/limine/limine.conf
+# The Limine config is generated in the build directory so the source config stays
+# independent of locally supplied game data. Each optional module adds one entry.
+FINAL_CONF="$BUILD_DIR/limine-final.conf"
+cp "$LIMINE_CONF" "$FINAL_CONF"
+if [ -n "$ICON_PACK" ]; then
+    [ -f "$ICON_PACK" ] || { echo "mkimage: icon pack not found: $ICON_PACK" >&2; exit 1; }
+    mmd -i "$IMAGE@@${PART_OFFSET}" ::/boot/icons
+    mcopy -i "$IMAGE@@${PART_OFFSET}" "$ICON_PACK" ::/boot/icons/oxygen-32.pak
+    printf '    module_path: boot():/boot/icons/oxygen-32.pak\n    module_string: helix-oxygen-32\n' >> "$FINAL_CONF"
 fi
+if [ -n "$DOOM_WAD" ]; then
+    mcopy -i "$IMAGE@@${PART_OFFSET}" "$DOOM_WAD" ::/boot/doom/doom1.wad
+    printf '    module_path: boot():/boot/doom/doom1.wad\n    module_string: helix-doom-wad\n' >> "$FINAL_CONF"
+fi
+mcopy -o -i "$IMAGE@@${PART_OFFSET}" "$FINAL_CONF" ::/boot/limine/limine.conf
 
 echo "[mkimage] done: $IMAGE"

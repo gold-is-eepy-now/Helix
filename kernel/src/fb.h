@@ -23,11 +23,23 @@ void fb_set_colors(uint32_t fg, uint32_t bg);
 /* Fill the whole screen with one packed colour and home the cursor. */
 void fb_clear(uint32_t color);
 
+/* Alpha-blended picture: w x h straight-alpha B,G,R,A pixels at (x, y). */
+void fb_blit_bgra(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint8_t *px);
+
 /* Present packed 0x00RRGGBB pixels, scaling them to fit while preserving the
  * source aspect ratio. This switches the framebuffer into graphics mode and
  * disables text cursor updates until fb_graphics_end(). */
 bool fb_present_rgb(const uint32_t *pixels, uint32_t width, uint32_t height);
 void fb_graphics_end(void);
+
+/* Draw into the virtio-gpu backing memory (pixels, width x height, 32-bit) instead of the
+ * firmware framebuffer. The current contents are copied across. False when the firmware
+ * framebuffer is not in the 32-bit B8G8R8 layout the backing uses. */
+bool fb_use_virtio(void *pixels, uint32_t width, uint32_t height);
+
+/* Send the changed part of the drawing to the screen. Does nothing unless fb_use_virtio
+ * is in effect or nothing changed. Called after each batch of drawing. */
+void fb_present(void);
 
 /* Draw a NUL-terminated string / one character at the cursor. */
 void fb_write(const char *s);
@@ -38,5 +50,17 @@ void fb_backspace(void);
 
 /* Report the framebuffer geometry. Returns false if there is no framebuffer. */
 bool fb_get_info(uint64_t *width, uint64_t *height, uint64_t *bpp);
+
+/* Graphics for the desktop. fb_graphics_begin silences the text console; the
+ * caller ends it with fb_graphics_end, which clears the screen for text again. */
+void fb_graphics_begin(void);
+uint32_t fb_width(void);
+uint32_t fb_height(void);
+void fb_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color);
+uint32_t fb_get_pixel(uint32_t x, uint32_t y);
+void fb_draw_text(uint32_t x, uint32_t y, const char *s, uint32_t fg, uint32_t bg, bool opaque);
+/* Fill the screen with a vertical gradient (0xRRGGBB colours). The gradient is cached
+ * and copied, so repeated calls are cheap. False if the screen cannot use the cache. */
+bool fb_draw_wallpaper(uint32_t top_rgb, uint32_t bottom_rgb);
 
 #endif /* HELIX_FB_H */

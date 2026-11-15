@@ -31,6 +31,7 @@
 #include "io.h"
 #include "kstring.h"
 #include "pci.h"
+#include "panic.h"
 #include "pmm.h"
 #include "vmm.h"
 #include "time.h"
@@ -833,6 +834,47 @@ static void root_port(uhci_hc_t *hc, unsigned n) {
 
 /* ------------------------------------------------------------- status */
 
+void usb_host_summary(usb_summary_t *out) {
+    out->controllers = g_hc_count;
+    out->devices = g_dev_count;
+    out->keyboards = out->mice = 0;
+    out->keyboard_reports = out->keyboard_errors = 0;
+    out->mouse_reports = out->mouse_errors = 0;
+    for (unsigned i = 0; i < g_dev_count; i++) {
+        const usb_device_t *d = &g_dev[i];
+        for (unsigned k = 0; k < d->ep_count; k++) {
+            const usb_ep_t *e = &d->eps[k];
+            if (e->kind == KIND_KEYBOARD) {
+                out->keyboards++;
+                out->keyboard_reports += e->reports;
+                out->keyboard_errors += e->errors;
+            } else if (e->kind == KIND_MOUSE) {
+                out->mice++;
+                out->mouse_reports += e->reports;
+                out->mouse_errors += e->errors;
+            }
+        }
+    }
+}
+
+bool usb_host_device_info(unsigned i, usb_device_info_t *out) {
+    if (i >= g_dev_count) return false;
+    const usb_device_t *d = &g_dev[i];
+    memset(out, 0, sizeof *out);
+    out->vid = d->vid;
+    out->pid = d->pid;
+    out->dev_class = d->dev_class;
+    out->is_hub = d->is_hub;
+    out->controller_io = d->hc != NULL ? d->hc->io : 0;
+    out->path_len = d->path.len > USB_INFO_PATH_MAX ? USB_INFO_PATH_MAX : d->path.len;
+    for (unsigned k = 0; k < out->path_len; k++) out->path[k] = d->path.ports[k];
+    for (unsigned k = 0; k < d->ep_count; k++) {
+        if (d->eps[k].kind == KIND_KEYBOARD) out->keyboard = true;
+        if (d->eps[k].kind == KIND_MOUSE) out->mouse = true;
+    }
+    return true;
+}
+
 void usb_host_print_status(void) {
     console_write("usb: ");
     console_write_dec(g_hc_count);
@@ -910,4 +952,28 @@ bool usb_host_init(uint64_t hhdm_offset) {
         for (unsigned n = 0; n < 2; n++) root_port(hc, n);
     }
     return g_hc_count != 0;
+}
+
+/* Boot diagnostic: every USB controller in PCI config space, whether or not we drive it.
+ * Read-only. The vendor and device IDs are what the iMac's real controllers need, since the
+ * hardware leads in the spec were not confirmed. prog_if picks the interface: 00 UHCI,
+ * 10 OHCI, 20 EHCI, 30 xHCI. */
+#define USB_PCI_MAX 16u
+
+void usb_report_pci_controllers(void) {
+    static const uint8_t progs[4] = {0x00u, 0x10u, 0x20u, 0x30u};
+    static const char *names[4] = {"UHCI", "OHCI", "EHCI", "xHCI"};
+    unsigned total = 0;
+    for (unsigned k = 0; k < 4u; k++) {
+        for (size_t i = 0; i < USB_PCI_MAX; i++) {
+            pci_function_t f;
+            if (!pci_find_class(0x0Cu, 0x03u, progs[k], i, &f)) break;
+            uint32_t bar0 = pci_config_read32(f.bus, f.device, f.function, 0x10u);
+            kprintf("[usb] pci %02x:%02x.%u %s  %04x:%04x  bar0 0x%08x\n", f.bus, f.device,
+                    f.function, names[k], (unsigned)f.vendor_id, (unsigned)f.device_id,
+                    (unsigned)bar0);
+            total++;
+        }
+    }
+    if (total == 0) kprintf("[usb] no USB controllers in PCI config space\n");
 }

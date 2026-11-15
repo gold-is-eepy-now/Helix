@@ -47,12 +47,17 @@ native object model. They are not the foundation.
 | Object manager and rights-bearing kernel handles | ✅ working, machine-tested (M5) |
 | Capability objects, rights reduction and revocation | ✅ working, machine-tested (M6) |
 | Scheduler, threads, IPC | ✅ threads/scheduler working, machine-tested (M7); ✅ IPC rendezvous channels working, machine-tested (M8) |
-| User space / ELF / syscalls | 🚧 ring-3 entry, syscall gate, console input, ELF64 loader, file I/O on the root, brk heap, nested `execve` with argv, `/bin` installed at boot and `/bin/init` starting `/bin/sh`, machine-tested (M9); libc-style runtime still partial |
+| User space / ELF / syscalls | 🚧 ring-3 entry, syscall gate, console input, ELF64 loader, file I/O on the root, brk heap, nested `execve` with argv and environment, `/bin` installed at boot and `/bin/init` starting `/bin/sh`, machine-tested (M9); libc-style runtime still partial |
 | Userland shell (`usershell`) | 🚧 ring-3 program with its own line editor, history, built-ins and `/bin` programs, machine-tested; runtime is minimal (not a libc) |
+| Graphics (`docs/12-graphics.md`) | 🚧 virtio-gpu device found and its display list read (QEMU only); the desktop still draws to the GOP framebuffer |
+| Sign-in, desktop and TUI shell | 🚧 boot goes to a graphical sign-in screen (accounts in `/etc/users`, PBKDF2 hashes); Ctrl+Alt+T opens the TUI shell and returns; Esc on the desktop signs out; QEMU-tested only |
+| Graphical desktop (`desktop`) | 🚧 Windows-7-style desktop: glass window frames, taskbar with Start orb, My Computer (Explorer-style folder browsing, a file preview, New folder, New file, Copy, Edit, Delete), Network (ping and name lookup), Settings (five themes, Aero Blue default), About, Terminal, Text Editor, Browser (plain http:// pages as text), clock, taskbar with hover, running dots and Show Desktop, two-column Start menu with search, right-click desktop menu, minimise and maximise, window shadows, PS/2 or USB mouse pointer; no translucency or blur yet; QEMU-tested only |
+| Line editor (`/bin/edit FILE`) | 🚧 ring-3 program: type commands (`a`, `i`, `r`, `d`, `p`, `w`, `q`); QEMU-tested only |
+| Kernel event log (`log`) | ✅ 512-event ring of kernel activity, dumped automatically on a CPU exception; machine-tested |
 | Shell command history (Up/Down, `history`) | ✅ working in the kernel shell; a userland shell still to come |
 | Driver framework | ✅ complete (M10) |
-| Storage and filesystems | ✅ complete (M11) |
-| Networking, display, and input objects | 🚧 objects exist (M12); no network stack or compositor yet |
+| Storage and filesystems | 🚧 ext4 root and file commands working; AHCI SATA read-only access (`disk`) QEMU-tested only, no writes; FAT32 not implemented (M11, see docs/20-ahci.md) |
+| Networking, display, and input objects | 🚧 objects exist (M12); e1000 driver, Ethernet/ARP, IPv4, ICMP echo, UDP, DNS, DHCP, TCP client, HTTP/1.1 client (QEMU only; ICMP to internet addresses blocked on the test host); no HTTPS or compositor yet |
 | Linux / BSD / POSIX compatibility | 🚧 in progress (runtime subsystem) |
 | Mac / Darwin compatibility | ✅ working, machine-tested (Mach-O loader, Darwin syscalls, Mac-like FS, xattrs, plist/bundle, CLI/GUI via X11) |
 | USB HID support | 🚧 UHCI host, root ports, hubs and HID keyboard/mouse in QEMU; not yet verified on real iMac hardware (see docs/07-usb.md) |

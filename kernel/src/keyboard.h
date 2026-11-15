@@ -19,11 +19,23 @@ enum {
     KBD_KEY_PAGE_UP,
     KBD_KEY_PAGE_DOWN,
     KBD_KEY_DELETE,
+    KBD_KEY_F4,
 };
 
-/* Codes returned by keyboard_read for the arrow keys (outside the byte range). */
-#define SHELL_KEY_UP   0x101
-#define SHELL_KEY_DOWN 0x102
+/* Codes returned by keyboard_read and input_getchar for the editing keys. They
+ * sit outside the byte range, so a key code never collides with a typed character. */
+/* Switches between the graphical session and the TUI shell. Ctrl+Alt+T on the
+ * keyboard; Ctrl+T (0x14) arrives this way on the serial console. */
+#define KBD_SWITCH_KEY   0x14
+#define SHELL_KEY_UP     0x101
+#define SHELL_KEY_DOWN   0x102
+#define SHELL_KEY_LEFT   0x103
+#define SHELL_KEY_RIGHT  0x104
+#define SHELL_KEY_HOME   0x105
+#define SHELL_KEY_END    0x106
+#define SHELL_KEY_DELETE 0x107
+#define SHELL_KEY_ALT_TAB 0x108  /* Alt+Tab: focus the next window */
+#define SHELL_KEY_ALT_F4  0x109  /* Alt+F4: close the focused window */
 
 typedef struct {
     int key;       /* printable ASCII or one of KBD_KEY_* */

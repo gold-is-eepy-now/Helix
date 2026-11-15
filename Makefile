@@ -36,7 +36,7 @@ else
 KERNEL_BUILD_DIR := $(if $(filter /%,$(BUILD_DIR)),$(BUILD_DIR),../$(BUILD_DIR))
 endif
 
-LIMINE_VERSION := v12.9.3
+LIMINE_VERSION := v12.9.6
 LIMINE_URL     := https://github.com/Limine-Bootloader/Limine/releases/download/$(LIMINE_VERSION)/limine-binary.tar.gz
 DEPS_DIR       := $(BUILD_DIR)/deps
 LIMINE_DIR     := $(DEPS_DIR)/limine-binary
@@ -65,7 +65,10 @@ deps:
 	@if [ ! -f "$(LIMINE_DIR)/BOOTX64.EFI" ]; then \
 		mkdir -p "$(DEPS_DIR)"; \
 		echo "[deps] downloading Limine $(LIMINE_VERSION)"; \
-		curl -fL --silent --show-error -o "$(DEPS_DIR)/limine-binary.tar.gz" "$(LIMINE_URL)"; \
+		curl -fL --silent --show-error --retry 5 --retry-delay 10 --retry-all-errors \
+		  -o "$(DEPS_DIR)/limine-binary.tar.gz" "$(LIMINE_URL)" \
+		  || { rm -f "$(DEPS_DIR)/limine-binary.tar.gz"; \
+		       echo "[deps] Limine download failed (the server may be busy). Re-run make to retry."; exit 1; }; \
 		tar xzf "$(DEPS_DIR)/limine-binary.tar.gz" -C "$(DEPS_DIR)"; \
 	fi
 	@echo "[deps] Limine ready in $(LIMINE_DIR)"
@@ -76,7 +79,10 @@ deps:
 linux-submodule:
 	@if [ "$(LINUX_SUBMODULE_INITIALIZED)" != "yes" ]; then \
 		echo "[submodule] Initializing Linux kernel submodule at $(LINUX_SUBMODULE_DIR)..."; \
-		git submodule update --init --recursive $(LINUX_SUBMODULE_DIR); \
+		git rev-parse --git-dir >/dev/null 2>&1 \
+		  || { echo "[submodule] ERROR: this is not a git checkout (no .git). Submodules need a git clone; a zip or archive cannot be initialised."; exit 1; }; \
+		git submodule update --init --recursive $(LINUX_SUBMODULE_DIR) \
+		  || { echo "[submodule] ERROR: could not initialise $(LINUX_SUBMODULE_DIR)"; exit 1; }; \
 		echo "[submodule] Linux kernel submodule ready."; \
 	else \
 		echo "[submodule] Linux kernel submodule already initialized."; \
@@ -110,6 +116,15 @@ linux-drivers-sound: linux-submodule
 linux-drivers-kvm: linux-submodule
 	@$(MAKE) -C runtime LIB_SRCDIR="$(LINUX_SUBMODULE_DIR)" kvm
 
+# Colon-named aliases: `make linux-drivers:ethernet` is the spelling in the docs.
+# GNU make needs the colon escaped in a target name.
+linux-drivers\:ethernet: linux-drivers-ethernet
+linux-drivers\:wifi: linux-drivers-wifi
+linux-drivers\:graphics: linux-drivers-graphics
+linux-drivers\:sound: linux-drivers-sound
+linux-drivers\:kvm: linux-drivers-kvm
+linux-drivers\:virtio: linux-drivers-virtio
+
 linux-drivers-virtio: linux-submodule
 	@$(MAKE) -C runtime LIB_SRCDIR="$(LINUX_SUBMODULE_DIR)" virtio
 
@@ -117,13 +132,19 @@ linux-drivers-virtio: linux-submodule
 userspace-apps:
 	@$(MAKE) -C runtime LIB_SRCDIR="$(LINUX_SUBMODULE_DIR)" userspace-apps
 
-image: kernel deps
+ICON_PACK := $(BUILD_DIR)/icons/oxygen-32.pak
+
+icons:
+	@mkdir -p $(BUILD_DIR)/icons && python3 tools/gen-oxygen-icons.py $(ICON_PACK)
+
+image: kernel deps icons
 	@BUILD_DIR="$(BUILD_DIR)" \
 	 KERNEL="$(BUILD_DIR)/kernel" \
 	 LIMINE_DIR="$(LIMINE_DIR)" \
 	 IMAGE="$(IMAGE)" \
 	 LIMINE_CONF="$(CURDIR)/limine.conf" \
 	 DOOM_WAD="$(DOOM_WAD)" \
+	 ICON_PACK="$(ICON_PACK)" \
 	 sh tools/mkimage.sh
 
 # Bootable UEFI CD/DVD image (attach as an optical drive).
@@ -150,6 +171,14 @@ test: image
 	@BUILD_DIR="$(BUILD_DIR)" python3 tests/usb-test.py "$(IMAGE)"
 	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/usb-hid-unit" tests/usb-hid-unit.c kernel/src/usb_hid.c && "$(BUILD_DIR)/test/usb-hid-unit"
 	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/t2-unit" tests/t2-unit.c kernel/src/t2_protocol.c && "$(BUILD_DIR)/test/t2-unit"
+	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/sha256-unit" tests/sha256-unit.c kernel/src/sha256.c && "$(BUILD_DIR)/test/sha256-unit"
+	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/crypto-unit" tests/crypto-unit.c kernel/src/sha256.c kernel/src/x25519.c kernel/src/chacha20poly1305.c && "$(BUILD_DIR)/test/crypto-unit"
+	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/hkdf-unit" tests/hkdf-unit.c kernel/src/hkdf.c kernel/src/sha256.c && "$(BUILD_DIR)/test/hkdf-unit"
+	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/tls13-h-unit" tests/tls13-h-unit.c kernel/src/tls13.c kernel/src/hkdf.c kernel/src/sha256.c && "$(BUILD_DIR)/test/tls13-h-unit"
+	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/tls13-record-unit" tests/tls13-record-unit.c kernel/src/tls13_record.c kernel/src/tls13_hello.c kernel/src/chacha20poly1305.c && "$(BUILD_DIR)/test/tls13-record-unit"
+	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/tls13-server-unit" tests/tls13-server-unit.c kernel/src/tls13_server.c && "$(BUILD_DIR)/test/tls13-server-unit"
+	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/tls13-client-unit" tests/tls13-client-unit.c kernel/src/tls13_client.c kernel/src/tls13.c kernel/src/tls13_record.c kernel/src/tls13_hello.c kernel/src/tls13_server.c kernel/src/hkdf.c kernel/src/sha256.c kernel/src/chacha20poly1305.c kernel/src/x25519.c && "$(BUILD_DIR)/test/tls13-client-unit"
+	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/x509-unit" tests/x509-unit.c kernel/src/x509.c kernel/src/trust_roots.c && "$(BUILD_DIR)/test/x509-unit"
 	@$(MAKE) -C runtime test CC="$(HOST_CC)"
 	@$(MAKE) -C mac-darwin-compat test CC="$(HOST_CC)"
 	@$(MAKE) -C donejs-compat test CC="$(HOST_CC)"

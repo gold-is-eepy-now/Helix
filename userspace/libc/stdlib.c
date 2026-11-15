@@ -77,7 +77,3 @@ int atoi(const char *s) {
     return (int)strtol(s, NULL, 10);
 }
 
-char *getenv(const char *name) {
-    (void)name;
-    return NULL;
-}
