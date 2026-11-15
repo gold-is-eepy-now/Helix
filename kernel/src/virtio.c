@@ -133,7 +133,11 @@ static bool read_caps(virtio_dev_t *dev) {
 
 bool virtio_open(virtio_dev_t *dev, uint16_t device_id) {
     memset(dev, 0, sizeof *dev);
+<<<<<<< HEAD
     if (!pci_find_device((uint16_t)VIRTIO_VENDOR_ID, device_id, 0, &dev->fn)) return false;
+=======
+    if (!pci_find_device((uint16_t)VIRTIO_VENDOR_ID, device_id, &dev->fn)) return false;
+>>>>>>> origin/desktop-test
 
     uint32_t cmd = cfg32(&dev->fn, PCI_COMMAND);
     pci_config_write32(dev->fn.bus, dev->fn.device, dev->fn.function, PCI_COMMAND,

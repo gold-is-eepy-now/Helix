@@ -24,6 +24,9 @@ uint32_t pci_config_read32(uint8_t bus, uint8_t device, uint8_t function, uint8_
 void pci_config_write32(uint8_t bus, uint8_t device, uint8_t function, uint8_t offset,
                         uint32_t value);
 
+/* Find the first function with this vendor and device ID, on any bus. */
+bool pci_find_device(uint16_t vendor_id, uint16_t device_id, pci_function_t *out);
+
 /* Find the index-th function with the given class / subclass / programming
  * interface, scanning bus 0 to 255. Returns false when there is no such function. */
 bool pci_find_class(uint8_t class_code, uint8_t subclass, uint8_t prog_if, size_t index,
