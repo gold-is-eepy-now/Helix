@@ -149,11 +149,7 @@ bool intel_lpss_gspi_init(void) {
     if (g_lpss.ctrl.ready) return true;
 
     pci_function_t f;
-<<<<<<< HEAD
     if (!pci_find_device((uint16_t)INTEL_LPSS_GSPI_VENDOR, (uint16_t)INTEL_LPSS_GSPI_DEVICE, 0, &f)) {
-=======
-    if (!pci_find_device((uint16_t)INTEL_LPSS_GSPI_VENDOR, (uint16_t)INTEL_LPSS_GSPI_DEVICE, &f)) {
->>>>>>> origin/desktop-test
         klog_note(KLOG_INPUT, "[spi] Intel LPSS GSPI 8086:9CE6 not found (expected on QEMU)\n");
         fill_info();
         return false;

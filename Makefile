@@ -170,10 +170,7 @@ test: image
 	@BUILD_DIR="$(BUILD_DIR)" python3 tests/shell-test.py "$(IMAGE)"
 	@BUILD_DIR="$(BUILD_DIR)" python3 tests/usb-test.py "$(IMAGE)"
 	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/usb-hid-unit" tests/usb-hid-unit.c kernel/src/usb_hid.c && "$(BUILD_DIR)/test/usb-hid-unit"
-<<<<<<< HEAD
 	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/t2-unit" tests/t2-unit.c kernel/src/t2_protocol.c && "$(BUILD_DIR)/test/t2-unit"
-=======
->>>>>>> origin/desktop-test
 	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/sha256-unit" tests/sha256-unit.c kernel/src/sha256.c && "$(BUILD_DIR)/test/sha256-unit"
 	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/crypto-unit" tests/crypto-unit.c kernel/src/sha256.c kernel/src/x25519.c kernel/src/chacha20poly1305.c && "$(BUILD_DIR)/test/crypto-unit"
 	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/hkdf-unit" tests/hkdf-unit.c kernel/src/hkdf.c kernel/src/sha256.c && "$(BUILD_DIR)/test/hkdf-unit"
@@ -182,15 +179,9 @@ test: image
 	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/tls13-server-unit" tests/tls13-server-unit.c kernel/src/tls13_server.c && "$(BUILD_DIR)/test/tls13-server-unit"
 	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/tls13-client-unit" tests/tls13-client-unit.c kernel/src/tls13_client.c kernel/src/tls13.c kernel/src/tls13_record.c kernel/src/tls13_hello.c kernel/src/tls13_server.c kernel/src/hkdf.c kernel/src/sha256.c kernel/src/chacha20poly1305.c kernel/src/x25519.c && "$(BUILD_DIR)/test/tls13-client-unit"
 	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/x509-unit" tests/x509-unit.c kernel/src/x509.c kernel/src/trust_roots.c && "$(BUILD_DIR)/test/x509-unit"
-<<<<<<< HEAD
 	@$(MAKE) -C runtime test CC="$(HOST_CC)"
 	@$(MAKE) -C mac-darwin-compat test CC="$(HOST_CC)"
 	@$(MAKE) -C donejs-compat test CC="$(HOST_CC)"
-=======
-	@$(MAKE) -C runtime test
-	@$(MAKE) -C mac-darwin-compat test
-	@$(MAKE) -C donejs-compat test
->>>>>>> origin/desktop-test
 
 mac-darwin-compat:
 	@$(MAKE) -C mac-darwin-compat all
