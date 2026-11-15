@@ -49,6 +49,7 @@
 #include "ahci.h"
 #include "block_device.h"
 #include "fat32.h"
+#include "usb_storage.h"
 #include "spi.h"
 #include "net_tcp.h"
 #include "net_icmp.h"
@@ -1167,26 +1168,37 @@ static void cmd_fat(int argc, char **argv) {
     fat32_unmount(fs);
 }
 
+static void disk_report(block_device_t *dev, const char *what, const char *what2, uint64_t blocks,
+                        uint64_t block_size) {
+    kprintf("%s: %s%s, %llu blocks of %u bytes (%llu MiB)\n", dev->name, what, what2, (unsigned long long)blocks,
+            (unsigned)block_size, (unsigned long long)(blocks * block_size / (1024u * 1024u)));
+    uint8_t sector[4096];
+    if (block_size <= sizeof sector && block_device_read(dev, 0, sector, 1) == 1 && block_size >= 512) {
+        /* The boot signature is the byte 0x55 at offset 510 then 0xAA at 511,
+         * so print in file order to show it as 55aa. */
+        kprintf("%s: sector 0 signature %02x%02x\n", dev->name, sector[510], sector[511]);
+    } else {
+        kprintf("%s: could not read sector 0\n", dev->name);
+    }
+}
+
 static void cmd_disk(int argc, char **argv) {
     (void)argc;
     (void)argv;
     int n = ahci_disk_count();
-    if (n == 0) {
-        kprintf("disk: no SATA disk found on an AHCI controller\n");
+    int u = usb_storage_disk_count();
+    if (n == 0 && u == 0) {
+        kprintf("disk: no SATA or USB disk found\n");
         return;
     }
     for (int i = 0; i < n; i++) {
         const ahci_disk_t *d = ahci_disk(i);
-        kprintf("%s: %s, %llu sectors (%llu MiB)\n", d->dev->name, d->model,
-                (unsigned long long)d->sectors, (unsigned long long)(d->sectors / 2048));
-        uint8_t sector[512];
-        if (block_device_read(d->dev, 0, sector, 1) == 1) {
-            /* The boot signature is the byte 0x55 at offset 510 then 0xAA at 511,
-             * so print in file order to show it as 55aa. */
-            kprintf("%s: sector 0 signature %02x%02x\n", d->dev->name, sector[510], sector[511]);
-        } else {
-            kprintf("%s: could not read sector 0\n", d->dev->name);
-        }
+        disk_report(d->dev, d->model, "", d->sectors, 512);
+    }
+    for (int i = 0; i < u; i++) {
+        const usb_disk_t *d = usb_storage_disk(i);
+        kprintf("%s: USB %s %s\n", d->dev->name, d->vendor, d->product);
+        disk_report(d->dev, "", "", d->block_count, d->block_size);
     }
 }
 

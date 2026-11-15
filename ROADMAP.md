@@ -300,7 +300,8 @@ the compositor do not.
 - ✅ `usb` shell command and a QEMU test that proves input from a hub-attached keyboard.
 - 🚧 Verification on real hardware (2010 iMac 11,2).
 - ✅ Sign-in screen USB status line (controllers, devices, keyboard and mouse report counts).
-- ⛔ Hot-plug, hub status-change interrupts, mouse wheel, USB storage.
+- ✅ USB mass storage, read-only: UHCI bulk transfers, Bulk-Only Transport and SCSI READ(10) (`usb_storage.c`, docs/22-usb-storage.md). QEMU-tested only, on a root port and behind a hub.
+- ⛔ Hot-plug, hub status-change interrupts, mouse wheel, USB storage writes, EHCI/xHCI data paths.
 
 ---
 
