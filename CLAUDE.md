@@ -17,6 +17,16 @@ say it works. If a command failed, show the real output. If a subsystem is a
 stub, say it is a stub. Honesty about state is more important than looking
 productive.
 
+## MelDev branch exception
+
+The `MelDev` branch is the project owner's personal branch for experiments. On
+`MelDev`, the compile-and-boot requirements in "Milestone discipline", "Build and
+test", and "The required sequence after every change" do not apply. Changes made
+there may be unverified.
+
+The honesty rule above still applies on `MelDev`. Say what was and was not built
+or run, and do not describe unverified work as working.
+
 ## Milestone discipline
 
 Before touching code, read [ROADMAP.md](ROADMAP.md). Work on the current
