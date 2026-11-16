@@ -4,10 +4,10 @@
 (`drivers/input/keyboard/`, fetched from github.com/torvalds/linux, master, on 2026-11-16).
 They are **GPL-2.0-only**, copyright Federico Lorenzi and Ronald Tschalär.
 
-This folder exists only on the `super-duper-experimental` branch, like `experiments/gnumach`.
-**Nothing here is part of the Helix kernel, nothing is built from it, and it must never be
-merged into `desktop-test` or any branch that ships under Helix's BSD-3-Clause licence.**
-Copying code or structure from it into `kernel/` would put GPL code in Helix.
+Helix is licensed GPL-2.0-only (see `/LICENSE`), the same licence, so this driver may be brought into
+the Helix tree as long as the copyright notices, the SPDX line and the licence header stay with it.
+It is kept here unchanged as the upstream reference; any adapted copy lives in `kernel/` with those
+notices kept and with changes marked.
 
 ## Status
 

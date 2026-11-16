@@ -320,15 +320,20 @@ boots.
 
 ## License
 
-Helix is released under the BSD 3-Clause License (see `LICENSE`). Anyone may use,
-modify, redistribute and sell it, including in closed products, as long as the
-copyright notice and licence text are kept.
+Helix is released under the GNU General Public License, version 2 only (`GPL-2.0-only`, see
+`LICENSE`). You may use, study, modify and redistribute it, including commercially, as long as
+distributed copies and derived works stay under the same licence and come with their source.
 
-Third-party components keep their own licenses: `limine.h` is 0BSD, and the embedded
-8×8 font (`kernel/src/font8x8.h`) is public domain.
+This is the same licence as the Linux kernel, so Linux code that is `GPL-2.0-only` or
+`GPL-2.0-or-later` may be brought into Helix, as long as its copyright notices and licence headers
+are kept. Code under other licences (for example GPL-3.0 only, or anything with an advertising or
+patent clause that conflicts) must not be added without checking compatibility first.
 
-Because Helix is permissive, Linux code (GPLv2) must not be copied into it. Linux
-ideas are reimplemented from specifications instead. Code under `experiments/` is not
-part of Helix: `experiments/gnumach/` is GNU Mach (GPL, see its `COPYING`), and
-`experiments/linux-on-helix/` is a Linux kernel config and build script. Those
-experiments stay on their branch and are not merged into the main line.
+Third-party components keep their own licences: `limine.h` is 0BSD, the embedded 8×8 font
+(`kernel/src/font8x8.h`) is public domain, DoomGeneric is GPL-2.0-or-later, and the Oxygen icons in
+`assets/oxygen/` are LGPL-3.0-or-later (see that directory; they are data, not linked code). Code under
+`experiments/` is kept as it came from upstream with its own licence (`experiments/gnumach/` is GNU
+Mach, GPL, see its `COPYING`; `experiments/applespi/` is Linux's applespi driver, GPL-2.0).
+
+History: until 2026-11-16 this branch carried the BSD 3-Clause licence. Copies of Helix taken under
+that licence before the change stay under it; the change applies to this branch from that date on.
