@@ -50,6 +50,7 @@
 #include "block_device.h"
 #include "fat32.h"
 #include "usb_storage.h"
+#include "nvme.h"
 #include "spi.h"
 #include "net_tcp.h"
 #include "net_icmp.h"
@@ -1187,9 +1188,14 @@ static void cmd_disk(int argc, char **argv) {
     (void)argv;
     int n = ahci_disk_count();
     int u = usb_storage_disk_count();
-    if (n == 0 && u == 0) {
-        kprintf("disk: no SATA or USB disk found\n");
+    int v = nvme_disk_count();
+    if (n == 0 && u == 0 && v == 0) {
+        kprintf("disk: no SATA, NVMe or USB disk found\n");
         return;
+    }
+    for (int i = 0; i < v; i++) {
+        const nvme_disk_t *d = nvme_disk(i);
+        disk_report(d->dev, d->model, "", d->block_count, d->block_size);
     }
     for (int i = 0; i < n; i++) {
         const ahci_disk_t *d = ahci_disk(i);
@@ -1200,6 +1206,74 @@ static void cmd_disk(int argc, char **argv) {
         kprintf("%s: USB %s %s\n", d->dev->name, d->vendor, d->product);
         disk_report(d->dev, "", "", d->block_count, d->block_size);
     }
+}
+
+/* blktest <dev> <lba> [keep]: write a known pattern to one 4 KiB run of blocks, read it back,
+ * compare, then (unless "keep") put the original bytes back and verify that too. The
+ * restore makes it safe on a disk with data, as long as nothing else writes meanwhile. */
+static void cmd_blktest(int argc, char **argv) {
+    if (argc < 3) {
+        kprintf("usage: blktest <device> <lba> [keep]\n");
+        return;
+    }
+    block_device_t *dev = block_device_find(argv[1]);
+    if (dev == NULL) {
+        kprintf("blktest: no block device named %s\n", argv[1]);
+        return;
+    }
+    if (dev->write == NULL || dev->block_size == 0 || dev->block_size > 4096) {
+        kprintf("blktest: %s has no usable write path\n", dev->name);
+        return;
+    }
+    uint64_t lba = 0;
+    for (const char *p = argv[2]; *p != 0; p++) {
+        if (*p < '0' || *p > '9') {
+            kprintf("blktest: bad LBA %s\n", argv[2]);
+            return;
+        }
+        lba = lba * 10 + (uint64_t)(*p - '0');
+    }
+    bool keep = argc > 3 && strcmp(argv[3], "keep") == 0;
+    uint64_t blocks = 4096 / dev->block_size;
+    static uint8_t orig[4096], pattern[4096], back[4096];
+    if (lba + blocks > dev->block_count) {
+        kprintf("blktest: LBA %llu is past the end of %s\n", (unsigned long long)lba, dev->name);
+        return;
+    }
+    if (block_device_read(dev, lba, orig, blocks) != blocks) {
+        kprintf("blktest: %s could not read the original blocks\n", dev->name);
+        return;
+    }
+    for (uint32_t i = 0; i < 4096; i++) pattern[i] = (uint8_t)(i * 31u + (uint32_t)lba);
+    if (block_device_write(dev, lba, pattern, blocks) != blocks) {
+        kprintf("blktest: %s write FAILED\n", dev->name);
+        return;
+    }
+    if (dev->flush != NULL && !dev->flush(dev)) {
+        kprintf("blktest: %s flush FAILED\n", dev->name);
+        return;
+    }
+    memset(back, 0, sizeof back);
+    if (block_device_read(dev, lba, back, blocks) != blocks || memcmp(back, pattern, 4096) != 0) {
+        kprintf("blktest: %s read back DIFFERS from what was written at LBA %llu\n", dev->name,
+                (unsigned long long)lba);
+        (void)block_device_write(dev, lba, orig, blocks);
+        return;
+    }
+    if (keep) {
+        kprintf("blktest: %s LBA %llu: wrote and verified 4096 bytes (pattern kept)\n", dev->name,
+                (unsigned long long)lba);
+        return;
+    }
+    if (block_device_write(dev, lba, orig, blocks) != blocks ||
+        (dev->flush != NULL && !dev->flush(dev)) ||
+        block_device_read(dev, lba, back, blocks) != blocks || memcmp(back, orig, 4096) != 0) {
+        kprintf("blktest: %s could not restore the original blocks at LBA %llu\n", dev->name,
+                (unsigned long long)lba);
+        return;
+    }
+    kprintf("blktest: %s LBA %llu: wrote, verified and restored 4096 bytes\n", dev->name,
+            (unsigned long long)lba);
 }
 
 static void cmd_xhci(int argc, char **argv) {
@@ -2803,6 +2877,7 @@ const command_t helix_commands[] = {
     {"acpi", "list the firmware's ACPI tables", cmd_acpi},
     {"spi", "Intel LPSS GSPI controller state (MacBook Air SPI)", cmd_spi},
     {"xhci", "xHCI (USB 3) controller discovery, read-only", cmd_xhci},
+    {"blktest", "write a pattern to a block device, read it back, restore it (or keep it)", cmd_blktest},
     {"disk", "list SATA disks on the AHCI controller and read sector 0", cmd_disk},
     {"fat", "read a FAT32 volume on a block device: info, ls, cat, sum", cmd_fat},
     {"tcplisten", "accept one TCP connection on a port, answer one line, close", cmd_tcplisten},

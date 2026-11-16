@@ -36,6 +36,7 @@
 #include "pmm.h"
 #include "ramdisk_driver.h"
 #include "ahci.h"
+#include "nvme.h"
 #include "driver.h"
 #include "block_device.h"
 #include "shell.h"
@@ -411,6 +412,7 @@ void kmain(void) {
      * vmm_init has set the page-table pointer. Registers sataN disks; read-only. */
     if (ahci_init()) kprintf("[ahci] %d SATA disk(s) registered\n", ahci_disk_count());
     else kprintf("[ahci] no AHCI controller found\n");
+    (void)nvme_init();          /* NVMe namespaces become nvmeN block devices; silent when absent */
 
     gdt_init();
 

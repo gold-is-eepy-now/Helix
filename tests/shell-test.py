@@ -222,6 +222,9 @@ def main():
     shutil.copyfile(OVMF_VARS_SRC, VARS)
     fat_img = os.path.join(os.path.dirname(VARS), "helix-fat-test.img")
     fat_big = make_fat_image(fat_img)
+    nvme_img = os.path.join(os.path.dirname(VARS), "helix-nvme-test.img")
+    if fat_big is not None:
+        shutil.copyfile(fat_img, nvme_img)    # same volume, on an NVMe namespace
 
     cmd = [
         "qemu-system-x86_64",
@@ -230,6 +233,8 @@ def main():
         "-drive", f"if=pflash,format=raw,unit=1,file={VARS}",
         "-drive", f"file={IMAGE},format=raw,if=ide,index=0,media=disk",
         *(["-drive", f"file={fat_img},format=raw,if=ide,index=1,media=disk"] if fat_big is not None else []),
+        *(["-drive", f"file={nvme_img},format=raw,if=none,id=nvm", "-device", "nvme,serial=helix0,drive=nvm"]
+          if fat_big is not None else []),
         "-chardev", f"socket,id=ser0,path={SERIAL_SOCK},server=on,wait=off",
         "-serial", "chardev:ser0",
         "-monitor", f"unix:{MONITOR_SOCK},server=on,wait=off",
@@ -615,6 +620,25 @@ def main():
             check("fat cat reads a file in a subdirectory", "nested file", timeout=60)
             ser.send("fat sata1 sum /big.bin\n")
             check("fat sum of the 100000-byte file matches the host", f"fat: /big.bin 100000 bytes, sum {fat_sum}", timeout=120)
+            # NVMe: the same volume on a namespace of QEMU's emulated controller.
+            ser.send("disk\n")
+            check("disk lists the NVMe namespace", "nvme0: QEMU NVMe Ctrl", timeout=60)
+            # (different paths from the sata1 commands, so the checks cannot match their old output)
+            ser.send("fat nvme0 ls /DOCS\n")
+            check("fat lists a subdirectory through the NVMe driver", "f 12 NESTED.TXT", timeout=60)
+            ser.send("fat nvme0 sum /BIG.BIN\n")
+            check("fat sum over NVMe matches the host", f"fat: /BIG.BIN 100000 bytes, sum {fat_sum}", timeout=120)
+            ser.send("blktest nvme0 100\n")
+            check("NVMe write, read back and restore at LBA 100", "blktest: nvme0 LBA 100: wrote, verified and restored 4096 bytes", timeout=60)
+            ser.send("blktest nvme0 69000 keep\n")
+            check("NVMe write and read back at LBA 69000", "blktest: nvme0 LBA 69000: wrote and verified 4096 bytes (pattern kept)", timeout=60)
+            with open(nvme_img, "rb") as f:
+                f.seek(69000 * 512)
+                on_host = f.read(4096)
+            want = bytes((i * 31 + 69000) & 0xFF for i in range(4096))
+            check_true("the pattern written through NVMe is in the host's image file", on_host == want)
+            ser.send("blktest nvme0 99999999\n")
+            check("blktest refuses an LBA past the end", "is past the end of nvme0", timeout=60)
             ser.send("fat sata1 cat /NOSUCH.TXT\n")
             check("fat cat reports a missing file", "fat: /NOSUCH.TXT is not a file, or was not found", timeout=60)
         ser.send("fetch http://10.0.2.2:9/\n")

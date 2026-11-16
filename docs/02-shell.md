@@ -309,7 +309,8 @@ shows it; typing `myprog arg1 arg2` runs it.
 | `version` | name, version, codename |
 | `usb` | USB controllers, hubs, and HID devices with their reports |
 | `fat <dev> info\|ls [path]\|cat <path>\|sum <path>` | read a FAT32 volume on a block device such as `sata1` (read-only; `cat` stops after 4096 bytes and shows non-printable bytes as `.`; see docs/21-fat32.md) |
-| `disk` | list SATA disks on the AHCI controller (`sataN`) and USB mass-storage disks (`usbN`), with size, and print the signature of sector 0 (read-only; see docs/20-ahci.md and docs/22-usb-storage.md) |
+| `blktest <dev> <lba> [keep]` | write a known 4 KiB pattern to a block device, flush, read it back and compare, then restore the original data (or keep the pattern with `keep`). Needs a device with a write path (`nvme0` today; AHCI and USB are read-only). See docs/23-nvme.md |
+| `disk` | list SATA disks on the AHCI controller (`sataN`), NVMe namespaces (`nvme0`) and USB mass-storage disks (`usbN`), with size, and print the signature of sector 0 (read-only; see docs/20-ahci.md and docs/22-usb-storage.md) |
 | `echo` | prints its arguments |
 | `history` | lists the lines typed so far, numbered (Up/Down recall them) |
 | `usermode` | runs a built-in test program in ring 3; it writes a line through the syscall gate and exits with status 7 |
