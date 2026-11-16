@@ -168,6 +168,11 @@ Also, in the same change:
 - **Implemented (environment, M9):** `envp` on the initial stack, libc
   `getenv`/`setenv`/`unsetenv`, kernel-shell `export`/`unset`, `/bin/env`.
   Machine-tested.
+- **Implemented (shell scripting, QEMU-tested):** `sh <file>` runs a helixsh
+  script (comments, blank lines, variables via `export`/`unset`/`$VAR`,
+  `if`/`then`/`else`/`fi`, `test` predicates including `[ ... ]`); status
+  tracking (`true`/`false`/builtin/program). `kernel/src/shell_script.c`,
+  machine-tested via `tests/shell-test.py`. See docs/02-shell.md "Scripts".
 - **Implemented (kernel event log):** `klog` ring of scheduler, syscall, process,
   shell, input and exception events; `log` command; dumped on CPU exceptions.
   Machine-tested.
