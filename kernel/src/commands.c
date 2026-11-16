@@ -1341,8 +1341,10 @@ static void cmd_exec(int argc, char **argv) {
         console_write("exec: could not run ");
         console_write(argv[1]);
         console_putc('\n');
+        shell_set_status(127);
         return;
     }
+    shell_set_status((int)status);
     console_write("exec: ");
     console_write(argv[1]);
     console_write(" exited with status ");
@@ -2664,12 +2666,14 @@ static void cmd_umount(int argc, char **argv) {
 
 static void cmd_true(int argc, char **argv) {
     (void)argc; (void)argv;
+    shell_set_status(0);  /* `if true then` needs to hear it: fn returns void */
     console_write("true: returning success (exit code 0)\n");
     return;
 }
 
 static void cmd_false(int argc, char **argv) {
     (void)argc; (void)argv;
+    shell_set_status(1);
     console_write("false: returning failure (exit code 1)\n");
     return;
 }
@@ -2761,6 +2765,11 @@ const command_t helix_commands[] = {
     {"umount",  "unmount a filesystem",                 cmd_umount},
     {"true",    "do nothing, successfully",              cmd_true},
     {"false",   "do nothing, unsuccessfully",           cmd_false},
+
+    {"sh",      "run a helixsh script file: sh <file.sh> (if/else/fi, # comments, $VAR)", cmd_sh},
+    {"export",  "set a shell variable: export NAME=VALUE (no arguments: list them)", cmd_export},
+    {"unset",   "remove a shell variable: unset NAME",   cmd_unset},
+    {"test",    "test a condition: test -f FILE | test A = B | test A -eq B (also [ ... ])", cmd_test},
 };
 
 const size_t helix_command_count = sizeof(helix_commands) / sizeof(helix_commands[0]);

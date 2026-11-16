@@ -45,7 +45,34 @@ bool shell_is_builtin(const char *name);
 void shell_run_until_switch(void);
 void shell_run_line(char *line);
 
+/* Run one command line and return its exit status. `line` is copied into a
+ * private buffer before parsing, so the caller's buffer is not touched. Used
+ * by the .sh script runner (kernel/src/shell_script.c). */
+int shell_exec_line(char *line);
+
+/* Shell variables (export / unset / $NAME). */
+bool shell_var_set(const char *name, const char *value);
+const char *shell_var_get(const char *name);
+void shell_var_unset(const char *name);
+void shell_vars_print(void);
+
+/* Expand $NAME and ${NAME} in `in` into `out` (capacity `outsz`, NUL
+ * included). Returns the number of bytes written. */
+size_t shell_expand(const char *in, char *out, size_t outsz);
+
+/* Exit status of the last command. A command that knows its own status calls
+ * shell_set_status(); command functions return void, so execute() otherwise
+ * assumes 0 (or 127 for a name that is not in the table). */
+void shell_set_status(int status);
+int shell_status(void);
+
 /* Print the command history, numbered from 1 (oldest first). */
 void shell_history_print(void);
+
+/* Commands implemented outside commands.c, registered in its table. */
+void cmd_export(int argc, char **argv);
+void cmd_unset(int argc, char **argv);
+void cmd_test(int argc, char **argv);
+void cmd_sh(int argc, char **argv);
 
 #endif /* HELIX_SHELL_H */

@@ -262,6 +262,58 @@ read back what `>` wrote.
 
 ---
 
+## Scripts (`.sh`)
+
+`sh <file>` runs a file of helixsh commands, one per line. This is the whole
+scripting story today (`kernel/src/shell_script.c`):
+
+- **Comments and blank lines.** A line whose first non-space character is `#`
+  is ignored. A trailing `# ...` on a command line is *not* stripped (there is
+  no quoting yet, so `#` inside a line is ordinary text).
+- **Variables.** `export NAME=VALUE` stores a value, `unset NAME` removes it,
+  `export` with no arguments lists what is set. `$NAME` and `${NAME}` expand
+  in every command line, interactive or scripted; an unset name expands to
+  nothing. The table holds 32 variables.
+- **Conditionals.** `if <command>` runs `then`-block when the command's exit
+  status is 0, `else`-block when it is not, and `fi` ends it. The optional
+  trailing `then` keyword may be written or left out.
+- **Conditions.** `test` (and its `[ ... ]` spelling) is what `if` usually
+  tests:
+  `test -f FILE`, `-d DIR`, `-e PATH`, `-z STR`, `-n STR`, `STR`,
+  `A = B`, `A != B`, and integer `A -eq B` / `-ne` / `-lt` / `-gt` / `-le` / `-ge`.
+- **Status.** Every command sets the shell's last status: `true` is 0, `false`
+  is 1, a name that is not in the table is 127, `test` reports its own answer,
+  and `exec` passes the program's exit code through.
+
+```text
+helix> export GREETING=hello
+helix> echo $GREETING world
+hello world
+helix> sh /demo/report.sh
+```
+
+`/demo/report.sh`:
+
+```text
+# a comment line
+export WHO=helix
+echo report for $WHO
+if test -f /etc/hostname then
+  echo hostname is present
+else
+  echo no hostname
+fi
+```
+
+**Ceiling (deliberate):** no loops, no functions, no quoting, no `elif`, no
+`$?`, no `$1`/`$@` for the script's own arguments, and `sh` takes no arguments
+to pass on. Each one needs another pass over the line; add them when a script
+in this tree needs one. Scripts also share the shell's other limits: a line is
+at most 255 characters, a script file at most 256 KiB, and `if` nesting is 16
+levels deep.
+
+---
+
 ## The commands — the first Helix "programs"
 
 Adding a program is two steps: write the function, add a row in `helix_commands`.
@@ -311,6 +363,10 @@ shows it; typing `myprog arg1 arg2` runs it.
 | `disk` | list SATA disks on the AHCI controller, with model and size, and print the signature of sector 0 (read-only; see docs/20-ahci.md) |
 | `t2info` | Apple T2 security SoC: mailbox function, BAR addresses, firmware handshake state, device object and control capability (see docs/09-apple-t2.md) |
 | `echo` | prints its arguments |
+| `sh <file>` | run a helixsh script file: one command per line, `#` comments, `$NAME` expansion, `if`/`else`/`fi` (see "Scripts" above) |
+| `export NAME=VALUE` | set a shell variable; with no arguments, list the ones that are set |
+| `unset NAME` | remove a shell variable |
+| `test ...` | condition for `if`: `-f`/`-d`/`-e`/`-z`/`-n`, `A = B`, `A -eq B` (also spelled `[ ... ]`) |
 | `history` | lists the lines typed so far, numbered (Up/Down recall them) |
 | `usermode` | runs a built-in test program in ring 3; it writes a line through the syscall gate and exits with status 7 |
 | `users` | lists accounts: the console `root` (uid 0) and the accounts in `/etc/users` |
