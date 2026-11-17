@@ -18,7 +18,7 @@ shell.
 | HID boot mouse: report decoding | ✅ host unit tests; enumerated in QEMU; drives the desktop pointer (`usb_hid_get_mouse_event`) |
 | Apple iMac 11,2 hardware | ⛔ **not tested** (no hardware here) |
 | Hot-plug, hub status-change interrupts | ⛔ not implemented; devices are found at boot only |
-| USB storage | ⛔ not implemented on this stack |
+| USB mass storage (Bulk-Only, read-only) | ✅ QEMU-tested (root port and behind a hub); see docs/22-usb-storage.md |
 
 The tests that back the ✅ rows are described at the end of this document.
 

@@ -257,13 +257,13 @@ Isolation and a real device driver are still to do.
 - ✅ ext4 read/write driver with extents, 64-bit group descriptors, filetype, flex_bg, extra_isize.
 - ✅ ext4 mount from ramdisk block device as root filesystem.
 - ✅ UNIX-like shell commands: cd, pwd, ls, cat, mkdir, rmdir, touch, rm, cp, mv, df, uname, whoami, chmod, chown, find.
-- ⛔ FAT32: not implemented (no FAT code in the kernel).
+- 🚧 FAT32 stage 1: read-only driver (`kernel/src/fat32.c`, `fat` command, docs/21-fat32.md). Long names, subdirectories, cluster chains; checked against mkfs.fat/mtools images on the host and on a second QEMU disk. No writes, no partition tables, not mounted into the file tree.
 - 🚧 Installer script: `tools/install.sh` exists; its population of /etc, /var and /home was not re-verified in this audit.
 
 - 🚧 AHCI (SATA) stage 1: read-only disk access, QEMU-tested only (`disk` command, docs/20-ahci.md). Writes and hardware tests are still to do.
 
-**M11 exit gate:** partly passed. ext4 read/write and root mount work. FAT32 is
-not implemented. AHCI reads work under QEMU only.
+**M11 exit gate:** partly passed. ext4 read/write and root mount work. FAT32 reads work
+(whole-device, read-only). AHCI reads work under QEMU only.
 
 ## M12 — Networking and graphics 🚧
 
@@ -304,7 +304,8 @@ the compositor do not.
 - ✅ `usb` shell command and a QEMU test that proves input from a hub-attached keyboard.
 - 🚧 Verification on real hardware (2010 iMac 11,2).
 - ✅ Sign-in screen USB status line (controllers, devices, keyboard and mouse report counts).
-- ⛔ Hot-plug, hub status-change interrupts, mouse wheel, USB storage.
+- ✅ USB mass storage, read-only: UHCI bulk transfers, Bulk-Only Transport and SCSI READ(10) (`usb_storage.c`, docs/22-usb-storage.md). QEMU-tested only, on a root port and behind a hub.
+- ⛔ Hot-plug, hub status-change interrupts, mouse wheel, USB storage writes, EHCI/xHCI data paths.
 
 ---
 

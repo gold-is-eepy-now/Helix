@@ -360,7 +360,8 @@ shows it; typing `myprog arg1 arg2` runs it.
 | `time` | current wall-clock time in UTC (`21:34:26`) |
 | `version` | name, version, codename |
 | `usb` | USB controllers, hubs, and HID devices with their reports |
-| `disk` | list SATA disks on the AHCI controller, with model and size, and print the signature of sector 0 (read-only; see docs/20-ahci.md) |
+| `fat <dev> info\|ls [path]\|cat <path>\|sum <path>` | read a FAT32 volume on a block device such as `sata1` (read-only; `cat` stops after 4096 bytes and shows non-printable bytes as `.`; see docs/21-fat32.md) |
+| `disk` | list SATA disks on the AHCI controller (`sataN`) and USB mass-storage disks (`usbN`), with size, and print the signature of sector 0 (read-only; see docs/20-ahci.md and docs/22-usb-storage.md) |
 | `t2info` | Apple T2 security SoC: mailbox function, BAR addresses, firmware handshake state, device object and control capability (see docs/09-apple-t2.md) |
 | `echo` | prints its arguments |
 | `sh <file>` | run a helixsh script file: one command per line, `#` comments, `$NAME` expansion, `if`/`else`/`fi` (see "Scripts" above) |

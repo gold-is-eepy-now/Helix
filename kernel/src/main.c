@@ -47,6 +47,7 @@
 #include "usb_hid.h"
 #include "syscall.h"
 #include "usb_host.h"
+#include "usb_storage.h"
 #include "acpi.h"
 #include "intel_lpss_gspi.h"
 #include "xhci.h"
@@ -282,6 +283,7 @@ static void kernel_main_continue(void) {
     if (!usb_host_init(hhdm_request.response->offset)) {
         console_write("no UHCI controller found or started\n");
     }
+    usb_storage_init();         /* USB mass storage found on the bus becomes usbN block devices */
 
     /* The network card (Intel e1000). Absent cards are reported by `net`, not at boot. */
     e1000_init();

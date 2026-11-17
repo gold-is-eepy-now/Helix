@@ -47,6 +47,9 @@
 #include "apple_topcase_spi.h"
 #include "xhci.h"
 #include "ahci.h"
+#include "block_device.h"
+#include "fat32.h"
+#include "usb_storage.h"
 #include "spi.h"
 #include "net_tcp.h"
 #include "net_icmp.h"
@@ -1088,26 +1091,115 @@ static void cmd_tcpsend(int argc, char **argv) {
             fast_after - fast_before, timeouts_after - timeouts_before, dup_after - dup_before);
 }
 
+static bool fat_ls_cb(void *ctx, const fat32_entry_t *e) {
+    (void)ctx;
+    kprintf("%c %u %s\n", e->is_dir ? 'd' : 'f', e->size, e->name);
+    return false;
+}
+
+/* fat <device> info | ls [path] | cat <path> | sum <path>
+ * Read-only access to a FAT32 volume that starts at sector 0 of a block device (for
+ * example `fat sata1 ls /`). Each call mounts and unmounts the volume. See docs/21-fat32.md. */
+static void cmd_fat(int argc, char **argv) {
+    if (argc < 3) {
+        kprintf("usage: fat <device> info | ls [path] | cat <path> | sum <path>\n");
+        return;
+    }
+    block_device_t *dev = block_device_find(argv[1]);
+    if (dev == NULL) {
+        kprintf("fat: no block device named %s (the disk command lists them)\n", argv[1]);
+        return;
+    }
+    fat32_fs_t *fs = fat32_mount(dev, 0);
+    if (fs == NULL) {
+        kprintf("fat: %s is not a FAT32 volume (%s)\n", argv[1], fat32_mount_error());
+        return;
+    }
+    const char *sub = argv[2];
+    if (strcmp(sub, "info") == 0) {
+        uint32_t bps = 0, spc = 0, clusters = 0, free_clusters = 0;
+        fat32_info(fs, &bps, &spc, &clusters, &free_clusters);
+        kprintf("fat32: label %s, %u bytes per sector, %u sectors per cluster, %u clusters, %u free\n",
+                fat32_label(fs), bps, spc, clusters, free_clusters);
+    } else if (strcmp(sub, "ls") == 0) {
+        const char *path = argc > 3 ? argv[3] : "/";
+        if (!fat32_list(fs, path, fat_ls_cb, NULL)) {
+            kprintf("fat: %s is not a directory, or was not found\n", path);
+        }
+    } else if (strcmp(sub, "cat") == 0 && argc > 3) {
+        fat32_entry_t e;
+        if (!fat32_stat(fs, argv[3], &e) || e.is_dir) {
+            kprintf("fat: %s is not a file, or was not found\n", argv[3]);
+        } else {
+            uint8_t chunk[128];
+            uint32_t shown = 0;
+            while (shown < 4096) {
+                int64_t n = fat32_read(fs, argv[3], shown, chunk, sizeof chunk);
+                if (n <= 0) break;
+                for (int64_t i = 0; i < n; i++) {
+                    uint8_t ch = chunk[i];
+                    kprintf("%c", (ch == '\n' || (ch >= 32 && ch < 127)) ? (char)ch : '.');
+                }
+                shown += (uint32_t)n;
+            }
+            if (e.size > shown) kprintf("\nfat: (output stops after %u of %u bytes)\n", shown, e.size);
+        }
+    } else if (strcmp(sub, "sum") == 0 && argc > 3) {
+        fat32_entry_t e;
+        if (!fat32_stat(fs, argv[3], &e) || e.is_dir) {
+            kprintf("fat: %s is not a file, or was not found\n", argv[3]);
+        } else {
+            uint8_t chunk[512];
+            uint64_t total = 0;
+            uint32_t sum = 0;
+            bool ok = true;
+            for (;;) {
+                int64_t n = fat32_read(fs, argv[3], total, chunk, sizeof chunk);
+                if (n < 0) { ok = false; break; }
+                if (n == 0) break;
+                for (int64_t i = 0; i < n; i++) sum += chunk[i];
+                total += (uint64_t)n;
+            }
+            if (ok) kprintf("fat: %s %u bytes, sum %u\n", argv[3], (uint32_t)total, sum);
+            else kprintf("fat: read error in %s after %u bytes\n", argv[3], (uint32_t)total);
+        }
+    } else {
+        kprintf("usage: fat <device> info | ls [path] | cat <path> | sum <path>\n");
+    }
+    fat32_unmount(fs);
+}
+
+static void disk_report(block_device_t *dev, const char *what, const char *what2, uint64_t blocks,
+                        uint64_t block_size) {
+    kprintf("%s: %s%s, %llu blocks of %u bytes (%llu MiB)\n", dev->name, what, what2, (unsigned long long)blocks,
+            (unsigned)block_size, (unsigned long long)(blocks * block_size / (1024u * 1024u)));
+    uint8_t sector[4096];
+    if (block_size <= sizeof sector && block_device_read(dev, 0, sector, 1) == 1 && block_size >= 512) {
+        /* The boot signature is the byte 0x55 at offset 510 then 0xAA at 511,
+         * so print in file order to show it as 55aa. */
+        kprintf("%s: sector 0 signature %02x%02x\n", dev->name, sector[510], sector[511]);
+    } else {
+        kprintf("%s: could not read sector 0\n", dev->name);
+    }
+}
+
 static void cmd_disk(int argc, char **argv) {
     (void)argc;
     (void)argv;
     int n = ahci_disk_count();
-    if (n == 0) {
-        kprintf("disk: no SATA disk found on an AHCI controller\n");
+    int u = usb_storage_disk_count();
+    if (n == 0 && u == 0) {
+        kprintf("disk: no SATA or USB disk found\n");
         return;
     }
     for (int i = 0; i < n; i++) {
         const ahci_disk_t *d = ahci_disk(i);
-        kprintf("%s: %s, %llu sectors (%llu MiB)\n", d->dev->name, d->model,
-                (unsigned long long)d->sectors, (unsigned long long)(d->sectors / 2048));
-        uint8_t sector[512];
-        if (block_device_read(d->dev, 0, sector, 1) == 1) {
-            /* The boot signature is the byte 0x55 at offset 510 then 0xAA at 511,
-             * so print in file order to show it as 55aa. */
-            kprintf("%s: sector 0 signature %02x%02x\n", d->dev->name, sector[510], sector[511]);
-        } else {
-            kprintf("%s: could not read sector 0\n", d->dev->name);
-        }
+        disk_report(d->dev, d->model, "", d->sectors, 512);
+    }
+    for (int i = 0; i < u; i++) {
+        const usb_disk_t *d = usb_storage_disk(i);
+        kprintf("%s: USB %s %s\n", d->dev->name, d->vendor, d->product);
+        disk_report(d->dev, "", "", d->block_count, d->block_size);
     }
 }
 
@@ -2724,6 +2816,7 @@ const command_t helix_commands[] = {
     {"spi", "Intel LPSS GSPI controller state (MacBook Air SPI)", cmd_spi},
     {"xhci", "xHCI (USB 3) controller discovery, read-only", cmd_xhci},
     {"disk", "list SATA disks on the AHCI controller and read sector 0", cmd_disk},
+    {"fat", "read a FAT32 volume on a block device: info, ls, cat, sum", cmd_fat},
     {"tcplisten", "accept one TCP connection on a port, answer one line, close", cmd_tcplisten},
     {"tcpsink", "accept one TCP connection and count the bytes it sends", cmd_tcpsink},
     {"tcpsend", "connect to a host, send COUNT bytes of a fixed pattern, close", cmd_tcpsend},

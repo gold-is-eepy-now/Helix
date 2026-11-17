@@ -182,6 +182,37 @@ def pmm_allocated(ser):
     return int(found[-1]) if len(found) > before else None
 
 
+def make_fat_image(path):
+    """Build a small FAT32 volume for the `fat` command checks. Returns the big file's bytes,
+    or None (with a printed note) when dosfstools or mtools is missing."""
+    import shutil
+    env = dict(os.environ, MTOOLS_SKIP_CHECK="1", LANG="C.UTF-8", LC_ALL="C.UTF-8",
+               PATH=os.environ.get("PATH", "") + ":/usr/sbin:/sbin")
+    for tool in ("mkfs.fat", "mcopy", "mmd"):
+        if shutil.which(tool, path=env["PATH"]) is None:
+            print(f"[shell-test] SKIP fat checks: {tool} not found (install dosfstools and mtools)")
+            return None
+    big = bytes((i * 7 + (i // 512) * 13 + 5) % 251 for i in range(100000))
+    tmp = os.path.dirname(path)
+    files = {"hello.txt": b"Hello from FAT32!\n", "long.txt": b"long name works\n",
+             "nested.txt": b"nested file\n", "big.bin": big}
+    for name, data in files.items():
+        with open(os.path.join(tmp, "fat-src-" + name), "wb") as f:
+            f.write(data)
+    def run(*args):
+        subprocess.run(args, check=True, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    with open(path, "wb") as f:
+        f.truncate(34 * 1024 * 1024)
+    run("mkfs.fat", "-F", "32", "-s", "1", "-n", "HELIXFAT", path)
+    src = lambda n: os.path.join(tmp, "fat-src-" + n)
+    run("mcopy", "-i", path, src("hello.txt"), "::/HELLO.TXT")
+    run("mcopy", "-i", path, src("long.txt"), "::/a-rather-long-file-name.txt")
+    run("mmd", "-i", path, "::/DOCS")
+    run("mcopy", "-i", path, src("nested.txt"), "::/DOCS/NESTED.TXT")
+    run("mcopy", "-i", path, src("big.bin"), "::/BIG.BIN")
+    return big
+
+
 def main():
     if not os.path.exists(IMAGE):
         print(f"[shell-test] no image at {IMAGE}; run 'make image' first")
@@ -189,6 +220,8 @@ def main():
 
     import shutil
     shutil.copyfile(OVMF_VARS_SRC, VARS)
+    fat_img = os.path.join(os.path.dirname(VARS), "helix-fat-test.img")
+    fat_big = make_fat_image(fat_img)
 
     cmd = [
         "qemu-system-x86_64",
@@ -196,6 +229,7 @@ def main():
         "-drive", f"if=pflash,format=raw,unit=0,readonly=on,file={OVMF_CODE}",
         "-drive", f"if=pflash,format=raw,unit=1,file={VARS}",
         "-drive", f"file={IMAGE},format=raw,if=ide,index=0,media=disk",
+        *(["-drive", f"file={fat_img},format=raw,if=ide,index=1,media=disk"] if fat_big is not None else []),
         "-chardev", f"socket,id=ser0,path={SERIAL_SOCK},server=on,wait=off",
         "-serial", "chardev:ser0",
         "-monitor", f"unix:{MONITOR_SOCK},server=on,wait=off",
@@ -592,6 +626,28 @@ def main():
         ser.send("disk\n")
         check("disk lists a SATA disk", "sata0:", timeout=60)
         check("disk reads sector 0 and finds the signature", "sector 0 signature 55aa", timeout=60)
+        # FAT32: the second disk holds a volume made on the host. The boot disk is not FAT.
+        ser.send("fat sata0 info\n")
+        check("fat refuses the boot disk, which is not FAT32", "fat: sata0 is not a FAT32 volume", timeout=60)
+        ser.send("fat nosuchdisk info\n")
+        check("fat reports an unknown device", "fat: no block device named nosuchdisk", timeout=60)
+        if fat_big is not None:
+            fat_sum = sum(fat_big) & 0xFFFFFFFF
+            ser.send("fat sata1 info\n")
+            check("fat info reads the volume label", "HELIXFAT", timeout=60)
+            ser.send("fat sata1 ls /\n")
+            check("fat ls shows a short-name file with its size", "f 18 HELLO.TXT", timeout=60)
+            check("fat ls shows a long file name", "f 16 a-rather-long-file-name.txt", timeout=60)
+            check("fat ls shows a directory", "d 0 DOCS", timeout=60)
+            check("fat ls shows the multi-cluster file size", "f 100000 BIG.BIN", timeout=60)
+            ser.send("fat sata1 cat /hello.txt\n")
+            check("fat cat prints a file (path matched ignoring case)", "Hello from FAT32!", timeout=60)
+            ser.send("fat sata1 cat /DOCS/NESTED.TXT\n")
+            check("fat cat reads a file in a subdirectory", "nested file", timeout=60)
+            ser.send("fat sata1 sum /big.bin\n")
+            check("fat sum of the 100000-byte file matches the host", f"fat: /big.bin 100000 bytes, sum {fat_sum}", timeout=120)
+            ser.send("fat sata1 cat /NOSUCH.TXT\n")
+            check("fat cat reports a missing file", "fat: /NOSUCH.TXT is not a file, or was not found", timeout=60)
         ser.send("fetch http://10.0.2.2:9/\n")
         check("fetch reports a failed connect", "fetch: connect failed", timeout=60)
         ser.send("fetch http://nonexistent.invalid/\n")
