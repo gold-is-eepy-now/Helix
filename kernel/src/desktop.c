@@ -56,8 +56,10 @@
 #include "net_icmp.h"
 #include "ps2_mouse.h"
 #include "kstring.h"
+#include "userprogs.h"
 #include "panic.h"
 #include "shell.h"
+#include "usermode.h"
 #include "time.h"
 #include "usb_host.h"
 #include "usb_hid.h"
@@ -456,6 +458,23 @@ static struct {
     uint64_t del_ino;                 /* the entry that press was for */
 } g_exp;
 
+static void open_app(app_t app);
+
+/* A file "looks like text" when its extension is one the Text Editor or the Browser can
+ * show as text. */
+static bool is_text_name(const char *name) {
+    const char *dot = name;
+    while (*dot != '\0' && *dot != '.') dot++;
+    if (*dot == '\0') return true;             /* no dot: a plain name is treated as text */
+    const char *ext = dot + 1;
+    return strcmp(ext, "txt") == 0 || strcmp(ext, "md") == 0 || strcmp(ext, "markdown") == 0 ||
+           strcmp(ext, "c") == 0 || strcmp(ext, "h") == 0 || strcmp(ext, "hpp") == 0 ||
+           strcmp(ext, "js") == 0 || strcmp(ext, "mjs") == 0 || strcmp(ext, "json") == 0 ||
+           strcmp(ext, "html") == 0 || strcmp(ext, "htm") == 0 || strcmp(ext, "css") == 0 ||
+           strcmp(ext, "sh") == 0 || strcmp(ext, "py") == 0 || strcmp(ext, "yaml") == 0 ||
+           strcmp(ext, "yml") == 0 || strcmp(ext, "toml") == 0;
+}
+
 static bool exp_same(const char *a, const char *b) {
     while (*a != '\0' && *a == *b) {
         a++;
@@ -591,11 +610,23 @@ static void exp_select(uint32_t i) {
     }
 }
 
-/* Open a folder (it becomes the current one), or preview a file. */
+/* Open a folder (it becomes the current one), or act on a file. A text-like file goes to
+ * the Text Editor (which keeps its buffer across sessions); an installed /bin program by
+ * name goes to that program; everything else is only previewed. */
 static void exp_open(uint32_t i) {
     if (i >= g_exp.n) return;
     const exp_entry_t *e = &g_exp.ent[i];
     if (!e->dir) {
+        char name[EXP_NAME];
+        put_str(name, sizeof name, e->name);
+        if (is_text_name(name)) {
+            if (!editor_open_file(&g_ed, g_exp.ino[g_exp.depth], name)) {
+                put_str(g_exp.status, sizeof g_exp.status, "Save the open file first.");
+                return;
+            }
+            open_app(APP_EDITOR);
+            return;
+        }
         exp_preview(i);
         return;
     }
@@ -753,8 +784,6 @@ static void exp_delete_selected(void) {
     cat_str(g_exp.status, sizeof g_exp.status, 0, "Deleted ");
     cat_str(g_exp.status, sizeof g_exp.status, strlen(g_exp.status), name);
 }
-
-static void open_app(app_t app);
 
 /* Open the selected file in the Text Editor. The editor refuses while it holds unsaved text. */
 static void exp_edit_selected(void) {
