@@ -17,7 +17,7 @@ journal.
 
 | Area | Dev | MelDev |
 |------|-----|--------|
-| Version string | `0.5.18-dev.20261110` | `0.5.68-dev.20261117.MELDEV` |
+| Version string | `0.5.18-dev.20261110` | `0.5.70-dev.20261117.MELDEV` |
 | Codename | `DoneJS` | `Platter` |
 | Build date | 2026-11-10 | 2026-11-17 |
 | Build string | `dev.20261110` | `dev.20261117` + `.MELDEV` suffix (MelDev marker) |
@@ -62,8 +62,10 @@ noted. All are QEMU-tested unless the row says otherwise.
 
 | Time (UTC) | Change | Commit | Notes |
 |------------|--------|--------|-------|
-| 11:05 | Bumped to `0.5.68-dev.20261117.MELDEV` for the browser change | _this commit_ | PATCH moves per change; codename stays `Platter`. |
-| 11:00 | Browser hyperlinks and pictures (TODO item 8): `html_to_text_ex()` numbers `<a href>` and records `<img src>`/alt; the Browser follows a link with Alt+L plus digits or a click on its row, and draws fetched BMP/PPM pictures (new `kernel/src/image.c`) | _this commit_ | Host unit test `tests/browser-unit.c` (37 checks) wired into `make test`. `make test` rc=0: shell-test 157 checks, USB, HID, T2, tls, x509, donejs, darwin all green. Browser rendering itself not yet checked against a live page in QEMU. |
+| 11:25 | Scrollbar API (`kernel/src/scrollbar.c`): the Browser's bar now takes its geometry and click handling from `scrollbar_geometry`/`scrollbar_click`; bumped to `0.5.70-dev.20261117.MELDEV` | _this commit_ | Host test `tests/scrollbar-unit.c` (22 checks) in `make test`. Thumb dragging and a bar for the editor/explorer lists are not done. |
+| 11:15 | Re-merged `origin/desktop-test`: brought in the read-only FAT32 driver and USB mass storage (2 commits MelDev was still missing); resolved Makefile, `docs/02-shell.md` and `version.h` by hand | [`b40275b`](https://github.com/gold-is-eepy-now/Helix/commit/b40275b) | `make test` rc=0: shell-test 166 checks, fat32-test 110 checks, USB, HID, T2, browser-unit. |
+| 11:05 | Bumped to `0.5.68-dev.20261117.MELDEV` for the browser change | [`8bb3f85`](https://github.com/gold-is-eepy-now/Helix/commit/8bb3f85) | PATCH moves per change; codename stays `Platter`. |
+| 11:00 | Browser hyperlinks and pictures (TODO item 8): `html_to_text_ex()` numbers `<a href>` and records `<img src>`/alt; the Browser follows a link with Alt+L plus digits or a click on its row, and draws fetched BMP/PPM pictures (new `kernel/src/image.c`) | [`8bb3f85`](https://github.com/gold-is-eepy-now/Helix/commit/8bb3f85) | Host unit test `tests/browser-unit.c` (37 checks) wired into `make test`. Browser rendering not yet checked against a live page in QEMU. |
 | 10:38 | Version identity set to `0.5.67-dev.20261117.MELDEV`, build date `2026-11-17` | [`b79eceb`](https://github.com/gold-is-eepy-now/Helix/commit/b79eceb) | Date follows the requested ETA of 17 November; codename stays `Platter`. |
 
 ### 2026-11-15

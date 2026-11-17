@@ -47,6 +47,7 @@
 #include "accounts.h"
 #include "klog.h"
 #include "html_text.h"
+#include "scrollbar.h"
 #include "image.h"
 #include "version.h"
 #include "net_http.h"
@@ -1070,7 +1071,7 @@ typedef struct {
     uint32_t url_len;
     char status[120];
     uint32_t text_len;
-    uint32_t top;               /* first page row shown */
+    scroll_state_t scroll;      /* which page rows are showing (see scrollbar.h) */
     html_links_t links;         /* hrefs, in the order they appear */
     html_images_t images;       /* picture sources, likewise */
     bool link_mode;             /* Alt+L was pressed: digits pick a link */
@@ -1138,7 +1139,7 @@ static void br_draw_image(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32
 }
 
 /* Lay the page text out in rows of at most BR_COLS characters, breaking at newlines, and
- * paint rows g_br.top .. top+visible-1 when paint is set. A line starting with 0x01 is an
+ * paint rows g_br.scroll.top .. top+visible-1 when paint is set. A line starting with 0x01 is an
  * image marker: it reserves BR_IMG_ROWS rows and draws the picture instead of text.
  * Returns the total row count. */
 static uint32_t br_layout(bool paint, uint32_t px, uint32_t py, uint32_t visible) {
@@ -1153,8 +1154,8 @@ static uint32_t br_layout(bool paint, uint32_t px, uint32_t py, uint32_t visible
 
         if (len >= 3 && g_br_text[start] == 0x01) {      /* an image marker line */
             uint32_t idx = (uint32_t)(g_br_text[start + 1] - '0');
-            if (paint && r >= g_br.top && r < g_br.top + visible) {
-                uint32_t ry = py + (r - g_br.top) * 12u;
+            if (paint && r >= g_br.scroll.top && r < g_br.scroll.top + visible) {
+                uint32_t ry = py + (r - g_br.scroll.top) * 12u;
                 uint32_t bx = px, by = ry, bw = (uint32_t)BR_COLS * 8u, bh = BR_IMG_ROWS * 12u;
                 fb_fill_rect(bx, by, bw, bh, c_white);
                 br_draw_image(bx + 1u, by + 1u, bw - 2u, bh - 2u, idx);
@@ -1162,7 +1163,7 @@ static uint32_t br_layout(bool paint, uint32_t px, uint32_t py, uint32_t visible
                 if (idx < g_br.images.count && g_br.images.alt[idx][0] != '\0') {
                     fb_draw_text(bx + 2u, by + bh - 11u, g_br.images.alt[idx], c_gray, 0, false);
                 }
-                g_br_row_off[r - g_br.top] = start;      /* a click here follows the link */
+                g_br_row_off[r - g_br.scroll.top] = start;      /* a click here follows the link */
             }
             r += BR_IMG_ROWS;
             if (end >= n) break;
@@ -1186,12 +1187,12 @@ static uint32_t br_layout(bool paint, uint32_t px, uint32_t py, uint32_t visible
                     }
                 }
             }
-            if (paint && r >= g_br.top && r < g_br.top + visible) {
+            if (paint && r >= g_br.scroll.top && r < g_br.scroll.top + visible) {
                 char row[BR_COLS + 1];
                 for (uint32_t j = 0; j < take; j++) row[j] = g_br_text[start + k + j];
                 row[take] = '\0';
-                fb_draw_text(px, py + (r - g_br.top) * 12u, row, c_ink, 0, false);
-                g_br_row_off[r - g_br.top] = start + k;
+                fb_draw_text(px, py + (r - g_br.scroll.top) * 12u, row, c_ink, 0, false);
+                g_br_row_off[r - g_br.scroll.top] = start + k;
             }
             r++;
             k += adv;
@@ -1247,31 +1248,20 @@ static bool browser_page_click(const window_t *w, int x, int y) {
     return true;
 }
 
-/* Scrollbar geometry for a page of rows rows, whose bar starts at by: the track sits
- * between the two arrow buttons and the thumb's size and place show how much of the
- * page is on screen and where it is. */
-static void br_bar_geometry(uint32_t by, uint32_t rows, uint32_t *track_y, uint32_t *track_h,
-                            uint32_t *thumb_y, uint32_t *thumb_h) {
-    *track_y = by + BR_ARROW;
-    *track_h = BR_VISIBLE * 12u - 2u * BR_ARROW;
-    uint32_t th = rows > BR_VISIBLE ? (*track_h * BR_VISIBLE) / rows : *track_h;
-    if (th < 14u) th = 14u;                  /* always grabbable */
-    if (th > *track_h) th = *track_h;
-    *thumb_h = th;
-    uint32_t max_top = rows > BR_VISIBLE ? rows - BR_VISIBLE : 0;
-    uint32_t room = *track_h - th;
-    *thumb_y = *track_y + (max_top > 0 ? (room * g_br.top) / max_top : 0u);
-}
-
+/* The browser's scrollbar, drawn through the shared API (scrollbar.h): the geometry
+ * comes from scrollbar_geometry, the colours from the current theme. */
 static void browser_scrollbar(uint32_t bx, uint32_t by, uint32_t rows) {
     uint32_t bar_h = BR_VISIBLE * 12u;
+    scroll_set_total(&g_br.scroll, rows);
+    scrollbar_geom_t g;
+    scrollbar_geometry(&g_br.scroll, bx, by, BR_BAR_W, bar_h, BR_ARROW, &g);
     fb_fill_rect(bx, by, BR_BAR_W, bar_h, rgb_hex(g_th->track));
     bevel(bx, by, BR_BAR_W, bar_h, false);
     fb_draw_text(bx + 3u, by + 3u, "^", c_ink, 0, false);
     fb_draw_text(bx + 3u, by + bar_h - BR_ARROW + 3u, "v", c_ink, 0, false);
-    uint32_t track_y, track_h, thumb_y, thumb_h;
-    br_bar_geometry(by, rows, &track_y, &track_h, &thumb_y, &thumb_h);
-    fill_box(bx + 2u, thumb_y, BR_BAR_W - 4u, thumb_h, 3, g_th->thumb_top, g_th->thumb_bot, true);
+    if (g.thumb_h == 0) return;
+    fill_box(bx + 2u, g.thumb_y, BR_BAR_W - 4u, g.thumb_h, 3, g_th->thumb_top, g_th->thumb_bot,
+             true);
 }
 
 static void browser_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
@@ -2355,32 +2345,21 @@ static void editor_redraw(void);
 
 static void browser_redraw(void);
 
-/* A click on the browser's scrollbar: an arrow steps one row, the track above or below
- * the thumb pages, and the thumb itself is not dragged yet. Returns true when the click
- * was on the bar, so the caller stops there. */
+/* A click on the browser's scrollbar: the shared API decides whether it was an arrow,
+ * the track or the thumb, and moves the page if so. */
 static bool browser_bar_click(const window_t *w, int x, int y) {
     uint32_t cx = w->x + 6u, cy = w->y + 26u, cw = w->w - 12u;
     uint32_t py = cy + BR_BAR_H + 12u;
     uint32_t bx = cx + cw - 6u - BR_BAR_W;
     uint32_t bar_h = BR_VISIBLE * 12u;
-    if (x < (int)bx || x >= (int)(bx + BR_BAR_W) || y < (int)py || y >= (int)(py + bar_h)) return false;
-
-    uint32_t rows = br_layout(false, 0, 0, 0);
-    uint32_t max_top = rows > BR_VISIBLE ? rows - BR_VISIBLE : 0;
-    uint32_t track_y, track_h, thumb_y, thumb_h;
-    br_bar_geometry(py, rows, &track_y, &track_h, &thumb_y, &thumb_h);
-    uint32_t uy = (uint32_t)y;
-    if (uy < py + BR_ARROW) {
-        if (g_br.top > 0) g_br.top--;
-    } else if (uy >= py + bar_h - BR_ARROW) {
-        if (g_br.top < max_top) g_br.top++;
-    } else if (uy < thumb_y) {
-        g_br.top = g_br.top > BR_VISIBLE ? g_br.top - BR_VISIBLE : 0;
-    } else if (uy >= thumb_y + thumb_h) {
-        uint32_t next = g_br.top + BR_VISIBLE;
-        g_br.top = next < max_top ? next : max_top;
+    if (x < (int)bx || x >= (int)(bx + BR_BAR_W) || y < (int)py || y >= (int)(py + bar_h)) {
+        return false;
     }
-    return true;
+    scroll_set_total(&g_br.scroll, br_layout(false, 0, 0, 0));
+    scrollbar_geom_t g;
+    scrollbar_geometry(&g_br.scroll, bx, py, BR_BAR_W, bar_h, BR_ARROW, &g);
+    scrollbar_click(&g_br.scroll, &g, (uint32_t)x, (uint32_t)y);
+    return true;                     /* the click belonged to the bar either way */
 }
 
 /* A click at (x, y). Returns PTR_EXIT for Shut Down, PTR_REDRAW when the picture
@@ -2859,13 +2838,8 @@ static void browser_redraw(void) {
 }
 
 static void browser_scroll(int delta) {
-    uint32_t rows = br_layout(false, 0, 0, 0);
-    uint32_t max_top = rows > BR_VISIBLE ? rows - BR_VISIBLE : 0;
-    if (delta < 0 && g_br.top > 0) {
-        g_br.top--;
-    } else if (delta > 0 && g_br.top < max_top) {
-        g_br.top++;
-    } else {
+    scroll_set_total(&g_br.scroll, br_layout(false, 0, 0, 0));
+    if (!scroll_rows(&g_br.scroll, delta)) {
         g_repaint = false;
         return;
     }
@@ -2898,7 +2872,7 @@ static void browser_go(void) {
         br_append(target, sizeof target, "http://");
     }
     br_append(target, sizeof target, g_br.url);
-    g_br.top = 0;
+    scroll_init(&g_br.scroll, BR_VISIBLE);
     g_br.text_len = 0;
     g_br.links.count = 0;
     g_br.images.count = 0;
