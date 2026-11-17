@@ -256,7 +256,7 @@ HELIX OS
 Native Object Kernel
 Boot successful.
 
-Helix OS 0.5.71-dev.20261117.MELDEV "Platter"
+Helix OS 0.5.72-dev.20261117.MELDEV "Platter"
 
 [helix] console: serial + framebuffer
 [helix] memory:  462 MiB usable
