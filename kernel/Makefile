@@ -136,6 +136,11 @@ $(BUILD_DIR)/obj/compat_%.o: $(COMPAT_DIR)/src/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -I$(COMPAT_DIR)/include -I$(SRC_DIR) -c $< -o $@
 
+# applespi is upstream Linux code (GPL-2.0), kept close to the original. Its designated
+# initialisers and unused callback arguments trip these warnings; they are silenced for this
+# file only, so the rest of the kernel keeps the full warning set.
+$(BUILD_DIR)/obj/compat_applespi.o: CFLAGS += -Wno-missing-field-initializers -Wno-sign-compare -Wno-unused-parameter
+
 $(BUILD_DIR)/obj/%.o: $(SRC_DIR)/%.S
 	@mkdir -p $(dir $@)
 	$(CC) -c $< -o $@

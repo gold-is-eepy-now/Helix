@@ -317,6 +317,7 @@ object system. They are not allowed to distort the native design.
 - **Linux runtime**: a Linux syscall translation layer.
 - **BSD runtime**: a BSD syscall translation layer.
 - **Mac/Darwin compatibility subsystem** (`mac-darwin-compat`): Mach-O 64-bit loader, Darwin BSD & Mach trap translator, Mac-like case-insensitive filesystem, extended attributes, plist engine, bundle runner, CLI tools (sw_vers, defaults, plutil, uname, otool, open), and Cocoa/AppKit-to-X11 GUI application bridge.
+- **Linux input shim and applespi probe** (`compat/src/input_shim.c`, `inputtest`): Linux-style input reports reach the Helix keyboard and mouse queues; applespi (GPL-2.0) builds and refuses at probe because Helix has no AML interpreter. QEMU-tested only. See docs/08-linux-compat.md section 7.
 - **DoneJS JavaScript runtime subsystem** (`donejs-compat`): Freestanding C11 AST tree-walking JavaScript interpreter, CommonJS module loader (`require`), standard library (`path`, `fs`, `process`, `util`, `assert`, `events`, `buffer`, `os`, `stream`), Promises, microtasks, timers (`setTimeout`), and event loop draining for Helix OS.
 
 ---

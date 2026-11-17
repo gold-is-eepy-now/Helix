@@ -12,6 +12,7 @@
 #define ENODEV  19
 #define EINVAL  22
 #define ENOSPC  28
+#define EBUSY   16
 #define ENOSYS  38
 #define ETIMEDOUT 110
 

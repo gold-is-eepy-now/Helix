@@ -32,6 +32,11 @@ bool usb_hid_get_keyboard_event(keyboard_event_t *event);
 /* Read and clear accumulated mouse motion. Returns false when nothing changed. */
 bool usb_hid_get_mouse_event(usb_hid_mouse_t *event);
 
+/* Injected events (no USB report involved): a key press or release by Helix key code
+ * (printable ASCII or KBD_KEY_*), and a relative mouse motion with button bits. */
+void usb_hid_inject_key(int key, bool pressed);
+void usb_hid_inject_mouse(int dx, int dy, uint8_t buttons);
+
 /* Reports received since boot, per device class. Used by the `usb` command and
  * by the USB test, which needs to tell USB input apart from PS/2 input. */
 void usb_hid_report_counts(uint32_t *keyboard_reports, uint32_t *mouse_reports);

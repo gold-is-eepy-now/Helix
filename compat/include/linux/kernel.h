@@ -4,6 +4,7 @@
 
 #include <linux/errno.h>
 #include <linux/types.h>
+#include <linux/compat_common.h>
 #include "panic.h"   /* Helix's kprintf and panic */
 
 /* Log levels: Linux prefixes messages with a one-byte level. Helix has no

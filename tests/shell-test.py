@@ -600,6 +600,11 @@ def main():
         ser.send("disk\n")
         check("disk lists a SATA disk", "sata0:", timeout=60)
         check("disk reads sector 0 and finds the signature", "sector 0 signature 55aa", timeout=60)
+        # Linux input shim: keyboard and touchpad reports reach the Helix queues, and the
+        # applespi probe path runs and refuses (no ACPI on this machine). See docs/08-linux-compat.md.
+        ser.send("inputtest\n")
+        check("inputtest: Linux input shim and applespi probe path pass", "inputtest: PASS (0 failure(s))", timeout=60)
+        check_true("inputtest reported no failed check", "inputtest: FAILED" not in ser.text())
         # FAT32: the second disk holds a volume made on the host. The boot disk is not FAT.
         ser.send("fat sata0 info\n")
         check("fat refuses the boot disk, which is not FAT32", "fat: sata0 is not a FAT32 volume", timeout=60)
@@ -814,6 +819,13 @@ def main():
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         ).returncode == 0:
             print(f"[shell-test] screenshot: {PNG}")
+
+    if os.environ.get("HELIX_TEST_LOG"):
+        try:
+            with open(os.environ["HELIX_TEST_LOG"], "w") as f:
+                f.write(ser.text())
+        except Exception as e:
+            print(f"[shell-test] could not write log: {e}")
 
     if all(checks):
         print(f"[shell-test] RESULT: PASS ({len(checks)} checks)")

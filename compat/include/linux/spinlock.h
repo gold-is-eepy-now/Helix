@@ -58,4 +58,23 @@ static inline void compat_spin_release(spinlock_t *lock) {
 #define spin_unlock(lock) \
     do { compat_spin_release(lock); __asm__ volatile("sti" ::: "memory"); } while (0)
 
+#define spin_lock_irq(lock) \
+    do { (void)compat_irq_save(); compat_spin_acquire(lock); } while (0)
+#define spin_unlock_irq(lock) spin_unlock(lock)
+
+#include <linux/compat_common.h>
+
+/* guard(spinlock_irqsave)(&lock) / scoped_guard(spinlock_irqsave, &lock): hold the lock until
+ * the enclosing scope ends. */
+typedef struct { spinlock_t *lock; unsigned long flags; } class_spinlock_irqsave_t;
+static inline class_spinlock_irqsave_t class_spinlock_irqsave_constructor(spinlock_t *lock) {
+    class_spinlock_irqsave_t g = { lock, compat_irq_save() };
+    compat_spin_acquire(lock);
+    return g;
+}
+static inline void class_spinlock_irqsave_destructor(class_spinlock_irqsave_t *g) {
+    compat_spin_release(g->lock);
+    compat_irq_restore(g->flags);
+}
+
 #endif /* HELIX_COMPAT_LINUX_SPINLOCK_H */

@@ -24,6 +24,7 @@ typedef uint32_t __be32;
 typedef uint16_t __be16;
 typedef uint32_t gfp_t;
 typedef int64_t  loff_t;
+typedef long     ssize_t;
 
 #define __init
 #define __exit
@@ -36,6 +37,11 @@ typedef int64_t  loff_t;
 #define likely(x)   __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
 
+#define U8_MAX  ((u8)0xff)
+#define U16_MAX ((u16)0xffff)
+#define U32_MAX ((u32)0xffffffffu)
+#define BITS_PER_LONG (8 * sizeof(unsigned long))
+#define BIT_MASK(n) (1UL << ((n) % BITS_PER_LONG))
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
 #define container_of(ptr, type, member) \

@@ -58,6 +58,7 @@
 #include "e1000.h"
 #include "ext4.h"
 #include "shell.h"
+#include "linux_compat.h"
 #include "usb_host.h"
 #include "usermode.h"
 
@@ -1181,6 +1182,12 @@ static void disk_report(block_device_t *dev, const char *what, const char *what2
     } else {
         kprintf("%s: could not read sector 0\n", dev->name);
     }
+}
+
+static void cmd_inputtest(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    compat_input_selftest();
 }
 
 static void cmd_disk(int argc, char **argv) {
@@ -2879,6 +2886,7 @@ const command_t helix_commands[] = {
     {"xhci", "xHCI (USB 3) controller discovery, read-only", cmd_xhci},
     {"blktest", "write a pattern to a block device, read it back, restore it (or keep it)", cmd_blktest},
     {"disk", "list SATA disks on the AHCI controller and read sector 0", cmd_disk},
+    {"inputtest", "check the Linux input shim and the applespi probe path", cmd_inputtest},
     {"fat", "read a FAT32 volume on a block device: info, ls, cat, sum", cmd_fat},
     {"tcplisten", "accept one TCP connection on a port, answer one line, close", cmd_tcplisten},
     {"tcpsink", "accept one TCP connection and count the bytes it sends", cmd_tcpsink},

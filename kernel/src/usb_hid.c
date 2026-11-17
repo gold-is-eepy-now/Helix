@@ -189,6 +189,22 @@ bool usb_hid_get_mouse_event(usb_hid_mouse_t *event) {
     return moved || event->buttons != 0;
 }
 
+/* Injection from other input sources (the Linux input shim, compat/src/input_shim.c).
+ * They enter the same queues the USB boot-protocol decoders fill, so the shell and the
+ * desktop see them exactly like USB keys and mouse motion. */
+void usb_hid_inject_key(int key, bool pressed) {
+    push(key, pressed);
+}
+
+void usb_hid_inject_mouse(int dx, int dy, uint8_t buttons) {
+    int sum_x = g_mouse.dx + dx;
+    int sum_y = g_mouse.dy + dy;
+    g_mouse.dx = (int16_t)(sum_x > 32767 ? 32767 : sum_x < -32768 ? -32768 : sum_x);
+    g_mouse.dy = (int16_t)(sum_y > 32767 ? 32767 : sum_y < -32768 ? -32768 : sum_y);
+    g_mouse.buttons = (uint8_t)(buttons & 0x07u);
+    g_mouse_reports++;
+}
+
 void usb_hid_report_counts(uint32_t *keyboard_reports, uint32_t *mouse_reports) {
     if (keyboard_reports != NULL) *keyboard_reports = g_keyboard_reports;
     if (mouse_reports != NULL) *mouse_reports = g_mouse_reports;

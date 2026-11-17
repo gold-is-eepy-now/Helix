@@ -29,6 +29,7 @@ enum {
     ABS_MT_TRACKING_ID, ABS_COUNT
 };
 enum { INPUT_PROP_POINTER = 0, INPUT_PROP_BUTTONPAD, INPUT_PROP_COUNT };
+enum { REL_X = 0, REL_Y, REL_COUNT };
 enum { MT_TOOL_FINGER = 0 };
 enum {
     KEY_0,
@@ -110,6 +111,7 @@ enum {
     KEY_R,
     KEY_RIGHT,
     KEY_RIGHTALT,
+    KEY_RIGHTCTRL,
     KEY_RIGHTBRACE,
     KEY_RIGHTMETA,
     KEY_RIGHTSHIFT,
@@ -149,6 +151,7 @@ struct input_dev {
     struct input_id id;
     unsigned long evbit[1];
     unsigned long ledbit[1];
+    unsigned long led[1];          /* current LED states (set by the system; read by drivers) */
     unsigned long propbit[1];
     struct input_absinfo absinfo[ABS_COUNT];
     unsigned long absbit[1];
@@ -158,7 +161,10 @@ struct input_dev {
     int (*event)(struct input_dev *dev, unsigned int type, unsigned int code, int value);
     struct device dev;
     struct input_mt *mt;
-    void *helix_device;            /* the input_device_t this registered as */
+    /* Shim state (compat/src/input_shim.c): modifier hold counts (shift, ctrl, alt) so a
+     * modifier is announced once, and the left-button state for pointer devices. */
+    int held[3];
+    bool btn_left;
     bool registered;
 };
 
@@ -178,6 +184,5 @@ void input_sync(struct input_dev *dev);
 
 static inline void input_set_drvdata(struct input_dev *dev, void *data) { dev->drvdata = data; }
 static inline void *input_get_drvdata(struct input_dev *dev) { return dev->drvdata; }
-static inline void input_set_abs_params_unused(void) {}
 
 #endif /* HELIX_COMPAT_LINUX_INPUT_H */

@@ -7,4 +7,8 @@
  * Returns the number that failed (0 means all succeeded). */
 int compat_run_initcalls(void);
 
+/* Checks for the `inputtest` shell command: the Linux input shim and the applespi probe
+ * path (compat/src/input_selftest.c). Prints one line per check; returns failures. */
+int compat_input_selftest(void);
+
 #endif /* HELIX_LINUX_COMPAT_H */

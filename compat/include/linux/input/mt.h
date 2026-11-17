@@ -21,6 +21,7 @@ struct input_mt_pos {
 struct input_mt_slot {
     bool present;
     int tracking_id;
+    s32 x, y;                          /* last reported position of this slot */
 };
 
 struct input_mt {
@@ -30,6 +31,7 @@ struct input_mt {
     int next_id;
     struct input_mt_slot slots[INPUT_MT_MAX_SLOTS];
     bool used[INPUT_MT_MAX_SLOTS];     /* touched since the last input_mt_sync_frame */
+    bool was_present[INPUT_MT_MAX_SLOTS]; /* present at the previous input_sync */
     struct input_mt_pos last[INPUT_MT_MAX_SLOTS];
 };
 

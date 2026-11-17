@@ -134,3 +134,65 @@ next one starts.
 
 See the commit that adds `compat/` and `docs/08-linux-compat.md`. The boot log
 prints the self-test result. The tests live in `tests/shell-test.py`.
+
+## 7. Input and the applespi driver (QEMU-tested only)
+
+Built on top of LC-1 without loading any `.ko`: applespi (GPL-2.0, from upstream
+Linux, kept under `experiments/applespi/` as the reference and copied into
+`compat/src/` for the build) compiles and links against the compat headers, and its
+module registers at boot. Its probe path runs; it refuses to start on this machine.
+
+**What was added**
+
+- Headers (`compat/include/linux/`): `input.h` and `input/mt.h` (the key and
+  multitouch subset), `spi/spi.h`, `acpi.h`, `efi.h`, `device.h`, `wait.h`,
+  `workqueue.h`, `leds.h`, `debugfs.h`, `fs.h`, `string.h`, `delay.h`, `ktime.h`,
+  `crc16.h`, `unaligned.h`, `compat_common.h` (bit ops, `ERR_PTR`, `guard()` and
+  `scoped_guard()` cleanup scopes), and `asm/barrier.h`.
+- `compat/src/input_shim.c`: a Linux input device on top of Helix's keyboard and
+  mouse queues in `usb_hid.c` (`usb_hid_inject_key`, `usb_hid_inject_mouse`). Keys
+  map to Helix key codes; Shift, Ctrl and Alt are announced once per pair. A touchpad
+  moves the pointer by its first finger's travel divided by 16. The divisor is a guess,
+  not calibrated.
+- `compat/src/spi_shim.c`: SPI drivers register; `compat_spi_add_device()` offers a
+  device to the driver whose ACPI id matches. `spi_async()` queues messages, and
+  `compat_spi_pump()` completes them with `-ENODEV`, because no ACPI-described SPI
+  device is bound to Helix's controller layer yet.
+- `compat/src/acpi_shim.c`: every ACPI call returns `AE_NOT_SUPPORTED`.
+- `compat/src/misc_shim.c`: time from the TSC clock, busy-wait delays, CRC-16,
+  `snprintf` and a minimal `sscanf`, leds (recorded, not visible), debugfs (accepted
+  and discarded), a workqueue run by the SPI pump, and EFI with no runtime services.
+- `compat/src/applespi_trace.h`: no-op stand-ins for the upstream tracepoints.
+- `compat/src/input_selftest.c`: the `inputtest` shell command. It runs keyboard and
+  touchpad reports through the shim, checks the Helix queues, and checks that the
+  applespi probe is reached and returns `-ENODEV`.
+- Warning flags for `compat_applespi.o` only (`kernel/Makefile`): upstream's
+  designated initialisers and unused callback arguments are silenced for that file.
+
+**What is not true yet**
+
+- applespi cannot run on the 2010-2017 MacBook it targets. It needs ACPI methods
+  (`UIST`, `SIEN`, `SIST`, `_GPE`) and properties from the DSDT. Helix has table
+  parsing (docs/16-acpi.md) but no AML interpreter and no GPE support, so the driver
+  refuses at probe. That is the honest state.
+- No SPI transfer has run against hardware or against an emulated controller. Only
+  the refusal path has run, and only under QEMU TCG.
+- Input events do not reach Helix's `input_device_t` objects; they land in
+  `usb_hid`'s queues, which the shell and desktop already read.
+- Only the keys in the `linux/input.h` enum map to Helix codes. Other keys are dropped.
+- `msleep()` busy-waits; there is no sleeping in compat drivers yet.
+- Tracepoints do nothing. `%*ph` in applespi's warnings is not parsed by Helix's
+  formatter, so those lines print the raw spec.
+
+**Next steps for this area:** an AML interpreter and GPE dispatch (the real
+blocker for applespi), then an SPI transfer path for an ACPI-described device, then
+the touchpad calibration.
+
+**Test:** `inputtest` in the shell suite (`tests/shell-test.py`). Its output on QEMU
+(TCG, no /dev/kvm) is:
+
+    inputtest: ok   KEY_A press types 'a'
+    inputtest: ok   KEY_A with shift held types 'A'
+    inputtest: ok   touchpad finger moving 160 units moves the pointer 10 px
+    inputtest: ok   applespi refuses without ACPI: probe returns -ENODEV
+    inputtest: PASS (0 failure(s))

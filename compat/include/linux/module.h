@@ -9,6 +9,10 @@
 #define HELIX_COMPAT_LINUX_MODULE_H
 
 #include <linux/init.h>
+#include <linux/kernel.h>
+#include <linux/slab.h>
+#include <linux/device.h>
+#include <linux/compat_common.h>
 
 typedef int (*initcall_t)(void);
 
@@ -22,10 +26,14 @@ typedef int (*initcall_t)(void);
 /* Metadata lives in a string the kernel never reads; it keeps the driver's
  * declaration visible in the object file, as Linux does with .modinfo. */
 #define MODULE_LICENSE(s) \
-    static const char __compat_license[] __attribute__((used)) = "license=" s
+    static const char __COMPAT_UID(__compat_license_)[] __attribute__((used)) = "license=" s
 #define MODULE_AUTHOR(s) \
-    static const char __compat_author[] __attribute__((used)) = "author=" s
+    static const char __COMPAT_UID(__compat_author_)[] __attribute__((used)) = "author=" s
 #define MODULE_DESCRIPTION(s) \
-    static const char __compat_description[] __attribute__((used)) = "description=" s
+    static const char __COMPAT_UID(__compat_description_)[] __attribute__((used)) = "description=" s
+
+#define module_param(name, type, perm)
+#define module_param_string(name, string, len, perm)
+#define MODULE_PARM_DESC(parm, desc)
 
 #endif /* HELIX_COMPAT_LINUX_MODULE_H */
