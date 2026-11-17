@@ -166,8 +166,17 @@ run: image
 run-with-linux-drivers: img-with-linux-drivers
 	@sh tools/run-qemu.sh "$(IMAGE)"
 
-test: image
-	@BUILD_DIR="$(BUILD_DIR)" python3 tests/shell-test.py "$(IMAGE)"
+# The HTTPS check needs a kernel that trusts the local test CA, so it runs on its own image
+# (see tls-test-image). That image differs from the release image only by that one root.
+TLS_TEST_DIR   := $(BUILD_DIR)/tls-test
+TLS_TEST_IMAGE := $(TLS_TEST_DIR)/helix.img
+
+tls-test-image: deps icons
+	@sh tests/tls-test-ca.sh "$(TLS_TEST_DIR)"
+	@$(MAKE) BUILD_DIR="$(TLS_TEST_DIR)" HELIX_TLS_TEST=1 image
+
+test: image tls-test-image
+	@BUILD_DIR="$(BUILD_DIR)" python3 tests/shell-test.py "$(TLS_TEST_IMAGE)"
 	@BUILD_DIR="$(BUILD_DIR)" python3 tests/usb-test.py "$(IMAGE)"
 	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/usb-hid-unit" tests/usb-hid-unit.c kernel/src/usb_hid.c && "$(BUILD_DIR)/test/usb-hid-unit"
 	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/sha256-unit" tests/sha256-unit.c kernel/src/sha256.c && "$(BUILD_DIR)/test/sha256-unit"

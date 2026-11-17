@@ -16,6 +16,7 @@
 #include "net.h"
 #include "net_dns.h"
 #include "net_tcp.h"
+#include "net_tls.h"
 
 #define HTTP_TIMEOUT_MS 5000
 #define HTTP_DNS_MS     3000
@@ -65,16 +66,16 @@ static void copy_value(const uint8_t *line, uint32_t n, uint32_t after_colon, ch
 }
 
 static bool parse_url(const char *url, char *host, uint32_t host_cap, uint16_t *port,
-                      char *path, uint32_t path_cap, net_http_result_t *r) {
+                      char *path, uint32_t path_cap, bool *secure, net_http_result_t *r) {
     if (strncmp(url, "https://", 8) == 0) {
-        set_error(r, "https is not supported yet");
+        *secure = true;
+    } else if (strncmp(url, "http://", 7) == 0) {
+        *secure = false;
+    } else {
+        set_error(r, "the address must start with http:// or https://");
         return false;
     }
-    if (strncmp(url, "http://", 7) != 0) {
-        set_error(r, "the address must start with http://");
-        return false;
-    }
-    const char *p = url + 7;
+    const char *p = url + (*secure ? 8 : 7);
     uint32_t hn = 0;
     while (*p != '\0' && *p != ':' && *p != '/') {
         if (hn + 1 >= host_cap) {
@@ -88,7 +89,7 @@ static bool parse_url(const char *url, char *host, uint32_t host_cap, uint16_t *
         set_error(r, "no host name in the address");
         return false;
     }
-    uint32_t pv = 80;
+    uint32_t pv = *secure ? 443 : 80;
     if (*p == ':') {
         p++;
         pv = 0;
@@ -223,13 +224,26 @@ bool net_http_get(const char *url, uint8_t *buf, uint32_t cap, net_http_result_t
     char host[HTTP_HOST_CAP], path[HTTP_PATH_CAP];
     uint16_t port = 80;
     uint8_t ip[4];
-    if (!parse_url(url, host, sizeof host, &port, path, sizeof path, r)) return false;
+    bool secure = false;
+    if (!parse_url(url, host, sizeof host, &port, path, sizeof path, &secure, r)) return false;
     if (!resolve_host(host, ip, r)) return false;
 
     int conn = net_tcp_connect(ip, port, HTTP_TIMEOUT_MS);
     if (conn < 0) {
         set_error(r, "connect failed");
         return false;
+    }
+
+    /* HTTPS: the TLS session is opened (and the certificate checked) before any request
+     * is sent. A refused certificate ends the request here with the reason in r->error. */
+    net_tls_t *tls = NULL;
+    if (secure) {
+        tls = net_tls_open(conn, host, r->error, sizeof r->error);
+        if (tls == NULL) {
+            net_tls_close(tls);
+            net_tcp_close(conn);
+            return false;
+        }
     }
 
     char req[HTTP_REQ_CAP];
@@ -239,11 +253,14 @@ bool net_http_get(const char *url, uint8_t *buf, uint32_t cap, net_http_result_t
         !append(req, &qn, sizeof req,
                 "\r\nUser-Agent: Helix/0.5\r\nAccept: text/html, text/plain, */*\r\n"
                 "Connection: close\r\n\r\n")) {
+        net_tls_close(tls);
         net_tcp_close(conn);
         set_error(r, "request too long");
         return false;
     }
-    if (net_tcp_send(conn, (const uint8_t *)req, qn, HTTP_TIMEOUT_MS) < 0) {
+    if (secure ? net_tls_send(tls, conn, (const uint8_t *)req, qn) < 0
+               : net_tcp_send(conn, (const uint8_t *)req, qn, HTTP_TIMEOUT_MS) < 0) {
+        net_tls_close(tls);
         net_tcp_close(conn);
         set_error(r, "send failed");
         return false;
@@ -253,19 +270,23 @@ bool net_http_get(const char *url, uint8_t *buf, uint32_t cap, net_http_result_t
     uint32_t got = 0;
     for (;;) {
         if (got >= cap) {
+            net_tls_close(tls);
             net_tcp_close(conn);
             set_error(r, "the response is larger than the buffer");
             return false;
         }
-        int n = net_tcp_recv(conn, buf + got, cap - got, HTTP_TIMEOUT_MS);
+        int n = secure ? net_tls_recv(tls, conn, buf + got, cap - got)
+                       : net_tcp_recv(conn, buf + got, cap - got, HTTP_TIMEOUT_MS);
         if (n == 0) break;
         if (n < 0) {
+            net_tls_close(tls);
             net_tcp_close(conn);
             set_error(r, got == 0 ? "no response from the server" : "the response timed out");
             return false;
         }
         got += (uint32_t)n;
     }
+    net_tls_close(tls);
     net_tcp_close(conn);
 
     /* The headers end at the first blank line. */

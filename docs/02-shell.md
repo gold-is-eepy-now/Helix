@@ -338,7 +338,7 @@ shows it; typing `myprog arg1 arg2` runs it.
 | `netdrop <n>` | test hook: do not send every Nth outgoing TCP data segment (0 turns it off). QEMU never loses packets, so this creates the loss that recovery repairs |
 | `tcplisten <port>` | listen on a TCP port, accept one connection (up to 30 s), read one line, answer `helix: <line>`, and close. Connect from the host to test it; the suite uses QEMU's hostfwd to reach guest port 7070 |
 | `gpu` | list the display outputs of the virtio-gpu device (QEMU: `-device virtio-gpu-pci`); prints "no virtio-gpu device ready" when there is none |
-| `fetch <http://host[:port]/path>` | HTTP/1.1 GET: prints the status, body length and content type, and the redirect target if there is one. Only `http://`; `https://` is refused for now. Example: `fetch http://10.0.2.2:8766/index.html` |
+| `fetch <http://host[:port]/path>` | HTTP/1.1 GET: prints the status, body length and content type, and the redirect target if there is one. Accepts `https://` too (TLS 1.3, certificate checked against the built-in roots; see docs/25-tls.md). Example: `fetch http://10.0.2.2:8766/index.html` |
 | `dhcp` | get an address, mask, router and DNS server from a DHCP server, replacing the static configuration. Runs when asked, not at boot |
 
 The ring-3 `/bin/ping <a.b.c.d>` does the same through `SYS_NET_PING` (syscall 36): the kernel sends and times each echo, and the program prints the results. `/bin/nslookup <name>` asks the kernel to resolve a name (`SYS_NET_RESOLVE`, syscall 37).
@@ -468,7 +468,7 @@ To stay inside "Never pretend it works", these are still absent:
 
 ## Text editors
 
-- **Browser window** (desktop, last icon): type an address and press Enter (`http://` is added if missing). The page is fetched over HTTP and shown as plain text: tags are dropped, scripts and styles are skipped, lines wrap at word breaks. Up and Down scroll; Esc closes the window. The fetch blocks the desktop until the response arrives or times out (5 seconds per step). Redirects (301, 302, 303, 307, 308) are followed up to three times. Only `http://` works; `https://` shows an error.
+- **Browser window** (desktop, last icon): type an address and press Enter (`http://` is added if missing). The page is fetched over HTTP or HTTPS and shown as plain text: tags are dropped, scripts and styles are skipped, lines wrap at word breaks. Up and Down scroll; Esc closes the window. The fetch blocks the desktop until the response arrives or times out (5 seconds per step). Redirects (301, 302, 303, 307, 308) are followed up to three times. `https://` works too: the certificate chain is checked, and a refusal shows the reason in the status line (for example `Could not load: certificate refused: ...`).
 - **Text Editor window** (desktop): opens `note.txt` in the root directory. Type
   with the keyboard; arrows, Home, End, Delete and Backspace move and erase.
   Click the Save button to write the file; Esc closes the window (the text is kept

@@ -60,6 +60,7 @@ typedef struct {
     int is_ca;
 
     int san_count;
+    uint8_t san_kind[X509_MAX_SAN];      /* 0x82 dNSName, or 0x87 iPAddress (4 or 16 bytes) */
     const uint8_t *san[X509_MAX_SAN];
     size_t san_len[X509_MAX_SAN];
 } x509_cert_t;

@@ -236,7 +236,9 @@ static int parse_san(x509_cert_t *c, const uint8_t *v, size_t n) {
         const uint8_t *tlv;
         size_t tlv_len;
         if (!der_next(&s, &t, &gv, &gl, &tlv, &tlv_len)) return 0;
-        if (t == 0x82 && c->san_count < X509_MAX_SAN) {     /* dNSName [2] IA5String */
+        /* dNSName [2] and iPAddress [7]; other name forms are not used for host checks. */
+        if ((t == 0x82 || t == 0x87) && c->san_count < X509_MAX_SAN) {
+            c->san_kind[c->san_count] = t;
             c->san[c->san_count] = gv;
             c->san_len[c->san_count] = gl;
             c->san_count++;

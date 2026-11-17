@@ -3,9 +3,9 @@
 #define HELIX_VERSION_H
 
 #define HELIX_NAME    "Helix OS"
-#define HELIX_VERSION "0.5.69-dev.20261117"
-#define HELIX_CODENAME "Platter"
-#define HELIX_BUILD_DATE "2026-11-17"
+#define HELIX_VERSION "0.5.70-dev.20261118"
+#define HELIX_CODENAME "Padlock"
+#define HELIX_BUILD_DATE "2026-11-18"
 #define HELIX_SHELL   "helixsh"
 
 #endif /* HELIX_VERSION_H */

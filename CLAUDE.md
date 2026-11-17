@@ -215,7 +215,12 @@ Also, in the same change:
 - **Implemented (network, stages 9–10, QEMU-tested only):** HTTP/1.1 GET client
   (`kernel/src/net_http.c`: Content-Length, chunked, redirects reported) with kernel
   `fetch`, and a desktop Browser window that shows plain http:// pages as text (checked
-  with QEMU screenshots, not by the suite). No HTTPS yet.
+  with QEMU screenshots, not by the suite).
+- **Implemented (HTTPS, QEMU-tested only, against a local test CA):** TLS 1.3 client (`net_tls.c`,
+  `tls13_verify.c`): one suite, TLS_CHACHA20_POLY1305_SHA256 with X25519; X.509 chain checks
+  (`x509_verify.c`) with RSA-SHA256 and ECDSA-P256-SHA256 signatures, validity, CA constraints,
+  and DNS/IP SAN matching; fail-closed when RDRAND or the clock is missing. `fetch` and the
+  Browser accept https://. Public internet certificates are not yet tested. See docs/25-tls.md.
 - **Implemented (Linux input shim and applespi probe, QEMU-tested only):** `compat/src/input_shim.c` maps Linux-style input reports onto Helix's keyboard and mouse queues; applespi (GPL-2.0, upstream) compiles, registers and probes, and refuses with -ENODEV because the device has no ACPI handle (ACPI_HANDLE() is NULL, so SIEN is not found) and GPE dispatch is not implemented (docs/24-aml.md). `inputtest` shell command. See docs/08-linux-compat.md section 7.
 - **Implemented (LC-1, Linux compat):** `compat/include/linux/*` headers (types, slab, spinlock, atomic, mutex, module_init, printk) and a self-test driver run at boot. See docs/08-linux-compat.md.
 - **Implemented (Mac/Darwin compat):** `mac-darwin-compat/` subsystem with 64-bit Mach-O loader, Darwin BSD & Mach trap translation, Darwin process runtime (`darwin_runtime.c`), Darwin `launchd` PID 1 daemon with plist service loading and `launchctl` CLI (`launchd.c`), Mac-like case-insensitive filesystem, extended attributes (xattr), property list (.plist) engine, .app bundle resolution, CLI tools (`sw_vers`, `defaults`, `plutil`, `uname`, `otool`, `open`, `launchctl`), and AppKit/Cocoa GUI translation to Helix X11 server (`Calculator.app`, `TextEdit.app`), machine-tested (157 checks).
@@ -224,7 +229,7 @@ Also, in the same change:
   `userspace/libc`: string, stdlib, stdio, unistd, errno; there is no `fork`;
   the M9 exit gate is not yet passed), the `installer` / live install
   environment (needs a disk driver and partitioning), isolated driver services,
-  a network stack above the HTTP client (HTTPS and TLS, a general sockets API), a real graphics stack (the desktop is a basic framebuffer demo
+  a general sockets API, TLS beyond the one cipher suite (no TLS 1.2, client certificates, session resumption, or SHA-384/512 certificate chains), public-internet HTTPS, a real graphics stack (the desktop is a basic framebuffer demo
   with no compositor), POSIX translation layer.
 
 Do not write documentation or commit messages that imply unimplemented systems

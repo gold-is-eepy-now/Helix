@@ -120,6 +120,18 @@ ifeq ($(strip $(OBJECTS)),)
 $(error No kernel sources found in $(SRC_DIR))
 endif
 
+# Test builds only (make test, see the top-level Makefile): HELIX_TLS_TEST=1 adds the test
+# CA from $(BUILD_DIR)/ca.der as a trusted root. Release builds never set this. The test
+# image lives in its own build directory, so its objects never mix with release objects.
+ifeq ($(HELIX_TLS_TEST),1)
+CFLAGS  += -DHELIX_TLS_TEST
+OBJECTS += $(BUILD_DIR)/obj/tls_test_ca.o
+$(BUILD_DIR)/obj/tls_test_ca.o: $(BUILD_DIR)/ca.der ../tools/embed_der.py
+	@mkdir -p $(dir $@)
+	python3 ../tools/embed_der.py $(BUILD_DIR)/ca.der $(BUILD_DIR)/obj/tls_test_ca.c helix_tls_test_ca
+	$(CC) $(CFLAGS) -c $(BUILD_DIR)/obj/tls_test_ca.c -o $@
+endif
+
 .PHONY: all clean
 all: $(KERNEL)
 

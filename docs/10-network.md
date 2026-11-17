@@ -148,11 +148,11 @@ attribute, but real hardware does, so the cache-disable bit is set deliberately.
    Bodies are framed by `Transfer-Encoding: chunked`, by `Content-Length`, or by the close, in
    that order. Chunked data is decoded in place. Kernel command `fetch`. Tests in the suite:
    a closed port (`connect failed`), a name that does not exist (`no such host`), and an
-   `https://` address (refused). Checked by hand against a local Python server: a plain page
+   `https://` address (handled by the TLS client, see docs/25-tls.md). Checked by hand against a local Python server: a plain page
    (200, 527 bytes), a 302 redirect (reported), and a chunked reply (42 bytes, decoded).
-   Not done: https, keep-alive, cookies, compression, and redirects in the kernel command
+   Not done: keep-alive, cookies, compression, and redirects in the kernel command
    (the Browser follows them, `fetch` only reports them).
-10. **Browser window — built and QEMU-tested (plain http:// only).** Code: `desktop.c`
+10. **Browser window — built and QEMU-tested (http:// and https://).** Code: `desktop.c`
    (the Browser app), `html_text.c` (tag stripping). Address bar, status line, and the page as
    plain text. Text is wrapped at 54 columns, breaking at spaces. Verified in QEMU with
    screenshots: an address on a local server loads and shows the text; a redirect is followed

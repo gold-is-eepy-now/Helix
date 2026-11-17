@@ -111,17 +111,24 @@ static int on_message(tls13_client_t *c, const uint8_t *m, size_t n) {
         c->state = TLS_ST_WAIT_CERT;
         return 1;
     case TLS_ST_WAIT_CERT:
-        /* Not verified yet; see tls13_client.h. */
-        if (type != HS_CERTIFICATE) return 0;
+        /* Kept whole; the chain is checked after the handshake (tls13_verify.c). */
+        if (type != HS_CERTIFICATE || n > sizeof c->cert_msg) return 0;
+        memcpy(c->cert_msg, m, n);
+        c->cert_len = n;
         sha256_update(&c->transcript, m, n);
         c->state = TLS_ST_WAIT_CV;
         return 1;
-    case TLS_ST_WAIT_CV:
-        /* Signature not verified yet; see tls13_client.h. */
-        if (type != HS_CERT_VERIFY) return 0;
+    case TLS_ST_WAIT_CV: {
+        /* The signature covers the transcript up to Certificate, so snapshot it first. */
+        if (type != HS_CERT_VERIFY || n > sizeof c->cv_msg) return 0;
+        sha256_ctx_t snap = c->transcript;
+        sha256_final(&snap, c->cv_transcript);
+        memcpy(c->cv_msg, m, n);
+        c->cv_len = n;
         sha256_update(&c->transcript, m, n);
         c->state = TLS_ST_WAIT_FIN;
         return 1;
+    }
     case TLS_ST_WAIT_FIN:
         return on_server_finished(c, m, n);
     default:
@@ -181,7 +188,17 @@ void tls13_client_init(tls13_client_t *c, const uint8_t random[32],
     c->state = TLS_ST_IDLE;
 }
 
+/* SNI carries host names only: RFC 6066 section 3 forbids IP address literals there. */
+static int is_ip_literal(const char *h) {
+    if (h == NULL || h[0] == '\0') return 0;
+    for (const char *p = h; *p; p++) {
+        if (!((*p >= '0' && *p <= '9') || *p == '.')) return 0;
+    }
+    return 1;
+}
+
 size_t tls13_client_hello(tls13_client_t *c, uint8_t *out, size_t cap, const char *host) {
+    if (is_ip_literal(host)) host = NULL;
     if (c->state != TLS_ST_IDLE) return 0;
     uint8_t msg[512];
     size_t n = tls13_build_client_hello(msg, sizeof msg, c->random, c->session_id, c->pub, host);
@@ -224,6 +241,20 @@ int tls13_client_authenticate(tls13_client_t *c) {
     if (c->state != TLS_ST_WAIT_AUTH) return 0;
     c->state = TLS_ST_READY;
     return 1;
+}
+
+const uint8_t *tls13_client_cert_msg(const tls13_client_t *c, size_t *len) {
+    *len = c->cert_len;
+    return c->cert_msg;
+}
+
+const uint8_t *tls13_client_cv_msg(const tls13_client_t *c, size_t *len) {
+    *len = c->cv_len;
+    return c->cv_msg;
+}
+
+const uint8_t *tls13_client_cv_transcript(const tls13_client_t *c) {
+    return c->cv_transcript;
 }
 
 int tls13_client_app_keys(const tls13_client_t *c, tls13_cipher_t *tx, tls13_cipher_t *rx) {

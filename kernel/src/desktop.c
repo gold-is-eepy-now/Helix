@@ -1048,7 +1048,8 @@ static void draw_editor(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
 /* ---- Browser window ----
  * An address bar, a status line, and the page as plain text. Enter fetches the address
  * with net_http_get and shows the body as text (html_to_text strips the tags). The fetch
- * blocks the desktop until the response arrives or times out. Only plain http:// works. */
+ * blocks the desktop until the response arrives or times out. http:// and https:// both work;
+ * an https page is shown only after its certificate has been checked (net_tls.c). */
 #define BR_URL_CAP   240
 #define BR_RAW_CAP   (256u * 1024u)   /* the response, then its body in place */
 #define BR_TEXT_CAP  (64u * 1024u)    /* the page as plain text */
@@ -2758,17 +2759,20 @@ static void browser_scroll(int delta) {
     browser_redraw();
 }
 
-/* Turn a Location header into an absolute http:// address. Only absolute addresses and
+/* Turn a Location header into an absolute address. Only absolute http(s) addresses and
  * root-relative paths ("/x") are handled. */
 static bool br_resolve(const char *base, const char *loc, char *out, uint32_t cap) {
     uint32_t n = 0;
     out[0] = '\0';
-    if (strncmp(loc, "http://", 7) == 0) {
+    if (strncmp(loc, "http://", 7) == 0 || strncmp(loc, "https://", 8) == 0) {
         br_append(out, cap, loc);
         return out[0] != '\0';
     }
-    if (loc[0] != '/' || strncmp(base, "http://", 7) != 0) return false;
-    const char *host_end = base + 7;
+    size_t scheme = 0;
+    if (strncmp(base, "http://", 7) == 0) scheme = 7;
+    else if (strncmp(base, "https://", 8) == 0) scheme = 8;
+    if (loc[0] != '/' || scheme == 0) return false;
+    const char *host_end = base + scheme;
     while (*host_end != '\0' && *host_end != '/') host_end++;
     for (const char *p = base; p < host_end && n + 1 < cap; p++) out[n++] = *p;
     out[n] = '\0';
@@ -2833,6 +2837,8 @@ static void browser_go(void) {
         br_append(g_br.status, sizeof g_br.status, " bytes");
         break;
     }
+    /* One line on the serial log per load, so the test suite can check the result. */
+    kprintf("[browser] %s: %s\n", target, g_br.status);
     /* The bar shows the address that was finally loaded. */
     if (target[0] != '\0') {
         uint32_t n = 0;

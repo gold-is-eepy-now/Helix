@@ -48,6 +48,14 @@ typedef struct {
     size_t hs_len;
     uint8_t pending[96];    /* bytes waiting to be sent (the client Finished record) */
     size_t pending_len;
+    /* Kept for certificate verification: the whole Certificate and CertificateVerify
+     * handshake messages, and the transcript hash the server signed (it covers everything
+     * up to and including Certificate, not CertificateVerify). */
+    uint8_t cert_msg[TLS_HS_BUF_MAX];
+    size_t cert_len;
+    uint8_t cv_msg[1024];
+    size_t cv_len;
+    uint8_t cv_transcript[32];
 } tls13_client_t;
 
 void tls13_client_init(tls13_client_t *c, const uint8_t random[32],
@@ -66,6 +74,12 @@ size_t tls13_client_take_output(tls13_client_t *c, uint8_t *out, size_t cap);
 
 /* Called by certificate verification after the chain and signature checks pass. */
 int tls13_client_authenticate(tls13_client_t *c);
+
+/* The server's certificate and signature messages, for the verifier (tls13_verify.c).
+ * Valid once the client has reached TLS_ST_WAIT_AUTH. */
+const uint8_t *tls13_client_cert_msg(const tls13_client_t *c, size_t *len);
+const uint8_t *tls13_client_cv_msg(const tls13_client_t *c, size_t *len);
+const uint8_t *tls13_client_cv_transcript(const tls13_client_t *c);
 
 /* Application traffic keys. Returns 0 until the client is authenticated (READY). */
 int tls13_client_app_keys(const tls13_client_t *c, tls13_cipher_t *tx, tls13_cipher_t *rx);

@@ -65,6 +65,9 @@ VARS = os.path.join(OUTDIR, "OVMF_VARS.fd")
 ANSI = re.compile(rb"\x1b\[[0-9;?]*[A-Za-z]")
 
 
+TLS_TEST_BODY = b"hello from the Helix TLS test server\n"
+
+
 def read_ppm(path):
     """Read a binary PPM (P6) into (width, height, bytes)."""
     data = open(path, "rb").read()
@@ -229,6 +232,9 @@ def main():
     cmd = [
         "qemu-system-x86_64",
         "-M", "q35", "-m", QEMU_MEM,
+        # RDRAND: the TLS client refuses to run without a hardware random source. The default
+        # QEMU CPU model does not advertise it.
+        "-cpu", "qemu64,+rdrand",
         "-drive", f"if=pflash,format=raw,unit=0,readonly=on,file={OVMF_CODE}",
         "-drive", f"if=pflash,format=raw,unit=1,file={VARS}",
         "-drive", f"file={IMAGE},format=raw,if=ide,index=0,media=disk",
@@ -251,6 +257,17 @@ def main():
         "-no-reboot",
     ]
     print("[shell-test] starting QEMU...")
+    # Local HTTPS servers for the TLS check. The trusted one answers with a certificate the
+    # test image trusts; the other has a certificate from a CA the kernel does not trust.
+    tls_dir = os.path.dirname(os.path.abspath(IMAGE))
+    tls_servers = [
+        subprocess.Popen(["python3", "tests/tls-test-server.py", str(port),
+                          os.path.join(tls_dir, cert), os.path.join(tls_dir, key)],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for port, cert, key in ((44443, "leaf.pem", "leaf.key"), (44444, "other_leaf.pem", "other_leaf.key"))
+    ]
+    time.sleep(1.5)
+
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     checks = []
@@ -655,8 +672,16 @@ def main():
         check("fetch reports a failed connect", "fetch: connect failed", timeout=60)
         ser.send("fetch http://nonexistent.invalid/\n")
         check("fetch reports a name that does not exist", "fetch: no such host", timeout=60)
-        ser.send("fetch https://example.com/\n")
-        check("fetch refuses https for now", "fetch: https is not supported yet", timeout=60)
+        ser.send("fetch https://nonexistent.invalid/\n")
+        check("fetch https fails in DNS before any TLS", "fetch: no such host", timeout=60)
+        # HTTPS against the local test servers (see tests/tls-test-ca.sh). The trusted server
+        # must verify and answer; the other must be refused with the reason from the checks.
+        ser.send("fetch https://10.0.2.2:44443/\n")
+        check("fetch https verifies the local test server and gets HTTP 200",
+              f"fetch: HTTP 200, {len(TLS_TEST_BODY)} byte(s)", timeout=180)
+        ser.send("fetch https://10.0.2.2:44444/\n")
+        check("fetch https refuses a certificate from an untrusted CA",
+              "fetch: certificate refused: no trusted root", timeout=180)
 
         # Desktop: start it, open nothing, leave with Esc. This is the path that used
         # to fault when a process had run before it; the event log records the start.
@@ -665,6 +690,24 @@ def main():
         ser.send("alice\t")
         ser.send("newpass\n")
         check("signing in starts the desktop in graphics mode", "[desktop] started")
+        # The Browser, opened from the icon row (Down x4, Enter), loads the local HTTPS
+        # servers: one verifies and shows the page, the other is refused. Esc closes the
+        # window, and a second Esc leaves the desktop.
+        for _ in range(4):
+            ser.send("\x1b[B")
+            time.sleep(0.2)
+        ser.send("\n")
+        time.sleep(1.0)
+        ser.send("\x08" * 60)
+        ser.send("https://10.0.2.2:44443/\n")
+        check("the Browser loads https through the verified test server",
+              "[browser] https://10.0.2.2:44443/: HTTP 200, " + str(len(TLS_TEST_BODY)) + " bytes", timeout=180)
+        ser.send("\x08" * 60)
+        ser.send("https://10.0.2.2:44444/\n")
+        check("the Browser refuses the untrusted certificate and says why",
+              "[browser] https://10.0.2.2:44444/: Could not load: certificate refused: no trusted root", timeout=180)
+        ser.send("\x1b")
+        time.sleep(0.5)
         ser.send("\x1b")
         check("Esc leaves the desktop and returns to the shell", "[desktop] exited")
 
@@ -801,6 +844,8 @@ def main():
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
+        for srv in tls_servers:
+            srv.terminate()
         shutil.rmtree(SOCK_DIR, ignore_errors=True)
 
     print("[shell-test] --- captured serial transcript (tail) ---")
