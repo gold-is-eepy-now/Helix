@@ -47,6 +47,7 @@
 #include "accounts.h"
 #include "klog.h"
 #include "html_text.h"
+#include "image.h"
 #include "version.h"
 #include "net_http.h"
 #include "net.h"
@@ -1059,18 +1060,35 @@ static void draw_editor(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
 #define BR_BAR_H     18u
 #define BR_STATUS_H  20u
 #define BR_MAX_HOPS  3
+#define BR_IMG_ROWS  5               /* text rows one picture occupies (60 px) */
+#define BR_IMG_MAX   6               /* pictures fetched per page */
+#define BR_IMG_RAW   (64u * 1024u)   /* scratch for one picture's bytes */
 
+/* A link the page offers, its number in the text, and the picture under a line. */
 typedef struct {
     char url[BR_URL_CAP];
     uint32_t url_len;
     char status[120];
     uint32_t text_len;
     uint32_t top;               /* first page row shown */
+    html_links_t links;         /* hrefs, in the order they appear */
+    html_images_t images;       /* picture sources, likewise */
+    bool link_mode;             /* Alt+L was pressed: digits pick a link */
+    char link_buf[8];
+    uint32_t link_len;
 } browser_t;
 
 static browser_t g_br = { .status = "Type an address and press Enter." };
 static uint8_t g_br_raw[BR_RAW_CAP];
 static char g_br_text[BR_TEXT_CAP];
+static image_t g_br_img[HTML_MAX_IMAGES];     /* decoded pictures, indexed like g_br.images */
+static uint32_t g_br_row_off[BR_VISIBLE];     /* text offset of each painted row, or ~0u */
+
+/* Text offset of the first painted row, used to find the link a click landed on. */
+#define BR_NO_ROW 0xffffffffu
+
+static bool br_resolve(const char *base, const char *loc, char *out, uint32_t cap);
+static void browser_follow_link(uint32_t n);
 
 /* Append s, then the decimal value, to a bounded string. */
 static void br_append(char *d, uint32_t cap, const char *s) {
@@ -1093,16 +1111,65 @@ static void br_append_uint(char *d, uint32_t cap, uint32_t v) {
     br_append(d, cap, text);
 }
 
+/* Scale an image into the box at (x, y) with at most w x h pixels, keeping its aspect
+ * ratio, and blit it. Nearest neighbour: the font is ASCII and the pictures are small. */
+static void br_draw_image(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t idx) {
+    if (idx >= HTML_MAX_IMAGES || g_br_img[idx].bgra == NULL) return;
+    const image_t *im = &g_br_img[idx];
+    uint32_t dw = im->w, dh = im->h;
+    if (dw == 0 || dh == 0) return;
+    if (dw > w || dh > h) {                       /* fit inside the box */
+        uint64_t nw = (uint64_t)dw * h;
+        uint64_t nh = (uint64_t)dh * w;
+        if (nw <= (uint64_t)dh * w) { dw = (uint32_t)((nw + dh - 1) / dh); dh = h; }
+        else { dh = (uint32_t)((nh + dw - 1) / dw); dw = w; }
+        if (dw > w) dw = w;
+        if (dh > h) dh = h;
+    }
+    for (uint32_t j = 0; j < dh; j++) {
+        for (uint32_t i = 0; i < dw; i++) {
+            uint32_t sx = i * im->w / dw;
+            uint32_t sy = j * im->h / dh;
+            const uint8_t *s = im->bgra + 4u * (sy * im->w + sx);
+            if (s[3] == 0) continue;
+            fb_fill_rect(x + i, y + j, 1, 1, fb_rgb(s[2], s[1], s[0]));
+        }
+    }
+}
+
 /* Lay the page text out in rows of at most BR_COLS characters, breaking at newlines, and
- * paint rows g_br.top .. top+visible-1 when paint is set. Returns the total row count. */
+ * paint rows g_br.top .. top+visible-1 when paint is set. A line starting with 0x01 is an
+ * image marker: it reserves BR_IMG_ROWS rows and draws the picture instead of text.
+ * Returns the total row count. */
 static uint32_t br_layout(bool paint, uint32_t px, uint32_t py, uint32_t visible) {
     uint32_t r = 0;
     uint32_t n = g_br.text_len;
     uint32_t start = 0;
+    for (uint32_t i = 0; i < visible; i++) g_br_row_off[i] = BR_NO_ROW;
     for (;;) {
         uint32_t end = start;
         while (end < n && g_br_text[end] != '\n') end++;
         uint32_t len = end - start;
+
+        if (len >= 3 && g_br_text[start] == 0x01) {      /* an image marker line */
+            uint32_t idx = (uint32_t)(g_br_text[start + 1] - '0');
+            if (paint && r >= g_br.top && r < g_br.top + visible) {
+                uint32_t ry = py + (r - g_br.top) * 12u;
+                uint32_t bx = px, by = ry, bw = (uint32_t)BR_COLS * 8u, bh = BR_IMG_ROWS * 12u;
+                fb_fill_rect(bx, by, bw, bh, c_white);
+                br_draw_image(bx + 1u, by + 1u, bw - 2u, bh - 2u, idx);
+                bevel(bx, by, bw, bh, false);
+                if (idx < g_br.images.count && g_br.images.alt[idx][0] != '\0') {
+                    fb_draw_text(bx + 2u, by + bh - 11u, g_br.images.alt[idx], c_gray, 0, false);
+                }
+                g_br_row_off[r - g_br.top] = start;      /* a click here follows the link */
+            }
+            r += BR_IMG_ROWS;
+            if (end >= n) break;
+            start = end + 1;
+            continue;
+        }
+
         uint32_t k = 0;
         do {                                   /* an empty line still takes a row */
             uint32_t rest = len - k;
@@ -1124,6 +1191,7 @@ static uint32_t br_layout(bool paint, uint32_t px, uint32_t py, uint32_t visible
                 for (uint32_t j = 0; j < take; j++) row[j] = g_br_text[start + k + j];
                 row[take] = '\0';
                 fb_draw_text(px, py + (r - g_br.top) * 12u, row, c_ink, 0, false);
+                g_br_row_off[r - g_br.top] = start + k;
             }
             r++;
             k += adv;
@@ -1132,6 +1200,51 @@ static uint32_t br_layout(bool paint, uint32_t px, uint32_t py, uint32_t visible
         start = end + 1;
     }
     return r;
+}
+
+/* The link number whose "[N] " marker begins at text offset off, or 0. */
+static uint32_t br_link_at(uint32_t off) {
+    if (off == BR_NO_ROW || off >= g_br.text_len || g_br_text[off] != '[') return 0;
+    uint32_t v = 0, i = off + 1;
+    while (i < g_br.text_len && g_br_text[i] >= '0' && g_br_text[i] <= '9') {
+        v = v * 10u + (uint32_t)(g_br_text[i] - '0');
+        if (v > 999) return 0;
+        i++;
+    }
+    if (i >= g_br.text_len || g_br_text[i] != ']') return 0;
+    return v;
+}
+
+/* Fetch every picture the page named, decode what it can, and drop the rest. Pictures
+ * whose src cannot be resolved to an http:// address are skipped: the page text already
+ * shows their alt text. */
+static void br_load_images(void) {
+    for (uint32_t i = 0; i < HTML_MAX_IMAGES; i++) {
+        image_free(&g_br_img[i]);
+        if (i >= g_br.images.count || i >= BR_IMG_MAX) continue;
+        char abs[BR_URL_CAP];
+        if (!br_resolve(g_br.url, g_br.images.src[i], abs, sizeof abs)) continue;
+        net_http_result_t r;
+        if (!net_http_get(abs, g_br_raw, BR_IMG_RAW, &r)) continue;
+        if (r.status != 200 || r.body_len == 0) continue;
+        image_t im;
+        if (image_decode(r.body, r.body_len, &im)) g_br_img[i] = im;
+    }
+}
+
+/* A click in the page area follows the link whose "[N] " marker is on that row. Returns
+ * true when a link was taken (the caller then repaints). */
+static bool browser_page_click(const window_t *w, int x, int y) {
+    uint32_t cy = w->y + 16u;                       /* below the title bar */
+    uint32_t px = w->x, py = cy + BR_BAR_H + 12u;   /* same origin browser_draw uses */
+    if ((uint32_t)x < px + 6u || (uint32_t)x >= px + w->w - 6u - BR_BAR_W) return false;
+    if ((uint32_t)y < py || (uint32_t)y >= py + BR_VISIBLE * 12u) return false;
+    uint32_t row = (uint32_t)(y - (int)py) / 12u;
+    if (row >= BR_VISIBLE || g_br_row_off[row] == BR_NO_ROW) return false;
+    uint32_t n = br_link_at(g_br_row_off[row]);
+    if (n == 0) return false;
+    browser_follow_link(n);
+    return true;
 }
 
 /* Scrollbar geometry for a page of rows rows, whose bar starts at by: the track sits
@@ -2542,7 +2655,8 @@ static int handle_click(int x, int y, uint32_t sh) {
             bool refocus = g_focus != i;
             g_focus = i;
             if (w->app == APP_EDITOR) editor_click(w, x, y);
-            if (w->app == APP_BROWSER && !refocus && !menu_was_open && browser_bar_click(w, x, y)) {
+            if (w->app == APP_BROWSER && !refocus && !menu_was_open &&
+                (browser_bar_click(w, x, y) || browser_page_click(w, x, y))) {
                 browser_redraw();                 /* repaints the window, or asks for a full repaint */
                 bool full = g_repaint;
                 g_repaint = false;
@@ -2786,6 +2900,12 @@ static void browser_go(void) {
     br_append(target, sizeof target, g_br.url);
     g_br.top = 0;
     g_br.text_len = 0;
+    g_br.links.count = 0;
+    g_br.images.count = 0;
+    g_br.link_mode = false;
+    g_br.link_len = 0;
+    g_br.link_buf[0] = '\0';
+    for (uint32_t i = 0; i < HTML_MAX_IMAGES; i++) image_free(&g_br_img[i]);
     g_br.status[0] = '\0';
     br_append(g_br.status, sizeof g_br.status, "Loading ");
     br_append(g_br.status, sizeof g_br.status, target);
@@ -2823,7 +2943,8 @@ static void browser_go(void) {
             g_br_text[n] = '\0';
             g_br.text_len = n;
         } else {
-            g_br.text_len = html_to_text(res.body, res.body_len, g_br_text, BR_TEXT_CAP);
+            g_br.text_len = html_to_text_ex(res.body, res.body_len, g_br_text, BR_TEXT_CAP,
+                                            &g_br.links, &g_br.images);
         }
         g_br.status[0] = '\0';
         br_append(g_br.status, sizeof g_br.status, "HTTP ");
@@ -2831,6 +2952,11 @@ static void browser_go(void) {
         br_append(g_br.status, sizeof g_br.status, ", ");
         br_append_uint(g_br.status, sizeof g_br.status, res.body_len);
         br_append(g_br.status, sizeof g_br.status, " bytes");
+        if (g_br.links.count > 0) {
+            br_append(g_br.status, sizeof g_br.status, ", ");
+            br_append_uint(g_br.status, sizeof g_br.status, g_br.links.count);
+            br_append(g_br.status, sizeof g_br.status, " links");
+        }
         break;
     }
     /* The bar shows the address that was finally loaded. */
@@ -2843,13 +2969,83 @@ static void browser_go(void) {
         g_br.url[n] = '\0';
         g_br.url_len = n;
     }
+    if (g_br.images.count > 0) br_load_images();   /* needs the final address as the base */
     browser_redraw();
 }
 
-/* Keys typed into the focused browser. Esc closes the window (the desktop stays up). */
+/* Follow link n: its href becomes the address and the page is fetched again. */
+static void browser_follow_link(uint32_t n) {
+    if (n == 0 || n > g_br.links.count) {
+        put_str(g_br.status, sizeof g_br.status, "No such link.");
+        browser_redraw();
+        return;
+    }
+    char abs[BR_URL_CAP];
+    if (!br_resolve(g_br.url, g_br.links.url[n - 1], abs, sizeof abs)) {
+        put_str(g_br.status, sizeof g_br.status, "That link is not an address this browser can open.");
+        browser_redraw();
+        return;
+    }
+    g_br.url[0] = '\0';
+    g_br.url_len = 0;
+    br_append(g_br.url, sizeof g_br.url, abs);
+    g_br.url_len = (uint32_t)strlen(g_br.url);
+    browser_go();
+}
+
+/* Keys typed into the focused browser. Esc closes the window (the desktop stays up).
+ * Alt+L starts link mode: the digits that follow pick a numbered link and Enter follows
+ * it, so a page can be walked without the mouse. */
 static void browser_key(int c) {
     if (c == 0x1b) {
+        if (g_br.link_mode) {
+            g_br.link_mode = false;
+            g_br.link_len = 0;
+            g_br.link_buf[0] = '\0';
+            put_str(g_br.status, sizeof g_br.status, "Link mode off.");
+            browser_redraw();
+            return;
+        }
         close_window(g_focus);
+        return;
+    }
+    if (g_br.link_mode) {
+        if (c == '\n') {
+            uint32_t n = 0;
+            for (uint32_t i = 0; i < g_br.link_len; i++) {
+                n = n * 10u + (uint32_t)(g_br.link_buf[i] - '0');
+            }
+            g_br.link_mode = false;
+            g_br.link_len = 0;
+            g_br.link_buf[0] = '\0';
+            browser_follow_link(n);
+            return;
+        }
+        if (c == 0x08 || c == 0x7f) {
+            if (g_br.link_len > 0) g_br.link_buf[--g_br.link_len] = '\0';
+        } else if (c >= '0' && c <= '9' && g_br.link_len + 1 < sizeof g_br.link_buf) {
+            g_br.link_buf[g_br.link_len++] = (char)c;
+            g_br.link_buf[g_br.link_len] = '\0';
+        } else {
+            g_repaint = false;
+            return;
+        }
+        put_str(g_br.status, sizeof g_br.status, "Link number: ");
+        br_append(g_br.status, sizeof g_br.status, g_br.link_buf);
+        browser_redraw();
+        return;
+    }
+    if (c == SHELL_KEY_ALT_L) {
+        if (g_br.links.count == 0) {
+            put_str(g_br.status, sizeof g_br.status, "This page has no links.");
+            browser_redraw();
+            return;
+        }
+        g_br.link_mode = true;
+        g_br.link_len = 0;
+        g_br.link_buf[0] = '\0';
+        put_str(g_br.status, sizeof g_br.status, "Link number: ");
+        browser_redraw();
         return;
     }
     if (c == '\t') {

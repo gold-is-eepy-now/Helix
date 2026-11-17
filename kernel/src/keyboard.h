@@ -36,6 +36,7 @@ enum {
 #define SHELL_KEY_DELETE 0x107
 #define SHELL_KEY_ALT_TAB 0x108  /* Alt+Tab: focus the next window */
 #define SHELL_KEY_ALT_F4  0x109  /* Alt+F4: close the focused window */
+#define SHELL_KEY_ALT_L   0x10a  /* Alt+L: follow a numbered link in the Browser */
 
 typedef struct {
     int key;       /* printable ASCII or one of KBD_KEY_* */

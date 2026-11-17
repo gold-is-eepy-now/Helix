@@ -161,6 +161,7 @@ int keyboard_read(void) {
     if (!event.pressed) return -1;
     if (event.key == KBD_KEY_F4 && alt_held) return SHELL_KEY_ALT_F4;
     if (event.key == '\t' && alt_held) return SHELL_KEY_ALT_TAB;
+    if ((event.key == 'l' || event.key == 'L') && alt_held) return SHELL_KEY_ALT_L;
     if ((event.key == 't' || event.key == 'T') && ctrl_held && alt_held) return KBD_SWITCH_KEY;
     if (event.key == '\n') return '\n';
     if (event.key == KBD_KEY_ENTER) return '\n';

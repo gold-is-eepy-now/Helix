@@ -195,7 +195,7 @@ Also, in the same change:
 - **Implemented (USB controller listing, read-only):** every USB controller in PCI config space is printed at boot with its IDs and BAR0. See docs/07-usb.md.
 - **Implemented (desktop, basic, QEMU-tested only):** `desktop` command: blue
   Windows-7-style wallpaper (cached gradient), glass window frames with rounded
-  corners, taskbar with Start orb, desktop, My Computer (an Explorer-style window: folders, a file preview, Up, New folder, New file, Copy, Edit, Delete), Network (ping and name lookup), Settings (a light and dark theme, in memory), About, Terminal, Text Editor and Browser windows (the Browser loads plain http:// pages and shows them as text; the Terminal runs kernel shell
+  corners, taskbar with Start orb, desktop, My Computer (an Explorer-style window: folders, a file preview, Up, New folder, New file, Copy, Edit, Delete), Network (ping and name lookup), Settings (a light and dark theme, in memory), About, Terminal, Text Editor and Browser windows (the Browser loads plain http:// pages and shows them as text, numbers every hyperlink so it can be followed with Alt+L or a click, and draws the BMP and PPM pictures the page names; the Terminal runs kernel shell
   commands and `exec <path>`, output shown in the window; keyboard-only programs
   are refused), taskbar with clock, Start menu, pointer
   driven by a PS/2 mouse (QEMU's default) or a USB mouse; dragging a title bar moves an outline and redraws the window on release; pointer moves redraw only the arrow; typing in the Text Editor redraws only its window. No compositor; not
@@ -228,6 +228,12 @@ Also, in the same change:
   (`kernel/src/net_http.c`: Content-Length, chunked, redirects reported) with kernel
   `fetch`, and a desktop Browser window that shows plain http:// pages as text (checked
   with QEMU screenshots, not by the suite). No HTTPS yet.
+- **Implemented (browser links and pictures, host unit-tested):** the Browser numbers every
+  `<a href>` as `[N]` and follows it with Alt+L plus digits, or with a click on the row
+  (`br_link_at`/`browser_follow_link`), and fetches, decodes and draws the `<img src>`
+  pictures the page names (uncompressed 24/32-bit BMP and binary PPM, `kernel/src/image.c`).
+  Link and image extraction is `html_to_text_ex()` in `kernel/src/html_text.c`. Tested on the
+  host by `tests/browser-unit.c` (37 checks); not yet checked against a live page in QEMU.
 - **Implemented (LC-1, Linux compat):** `compat/include/linux/*` headers (types, slab, spinlock, atomic, mutex, module_init, printk) and a self-test driver run at boot. See docs/08-linux-compat.md.
 - **Implemented (Mac/Darwin compat):** `mac-darwin-compat/` subsystem with 64-bit Mach-O loader, Darwin BSD & Mach trap translation, Darwin process runtime (`darwin_runtime.c`), Darwin `launchd` PID 1 daemon with plist service loading and `launchctl` CLI (`launchd.c`), Mac-like case-insensitive filesystem, extended attributes (xattr), property list (.plist) engine, .app bundle resolution, CLI tools (`sw_vers`, `defaults`, `plutil`, `uname`, `otool`, `open`, `launchctl`), and AppKit/Cocoa GUI translation to Helix X11 server (`Calculator.app`, `TextEdit.app`), machine-tested (157 checks).
 - **Implemented (DoneJS compat):** `donejs-compat/` freestanding C11 JavaScript runtime ported for Helix OS, featuring AST tree-walking interpreter, CommonJS modules (`require`), standard library (`path`, `fs`, `process`, `util`, `assert`, `events`, `buffer`, `os`, `stream`), Promises, microtasks, timers (`setTimeout`), and event loop draining. Machine-tested (hosted suite).
