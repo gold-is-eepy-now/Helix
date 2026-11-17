@@ -257,6 +257,13 @@ Also, in the same change:
   `userspace/libc`: string, stdlib, stdio, unistd, errno; there is no `fork`;
   the M9 exit gate is not yet passed), the `installer` / live install
   environment (needs a disk driver and partitioning), isolated driver services,
+  the TODO items still open on the MelDev branch list (see the TODO file the
+  project owner keeps): full CLI app port to userspace, desktop-test through
+  the X server, more file-explorer associations, desktop-API video drivers,
+  C desktop APIs to userspace, DoneJS desktop package, Win32/.NET compatibility,
+  and running Linux/Darwin/DoneJS apps, a network stack above the HTTP client
+  (HTTPS and TLS, a general sockets API), a real graphics stack (the desktop is
+  a basic framebuffer demo with no compositor), POSIX translation layer.
   a network stack above the HTTP client (HTTPS and TLS, a general sockets API),
   a real graphics stack (the desktop is a basic framebuffer demo with no
   compositor), POSIX translation layer.
