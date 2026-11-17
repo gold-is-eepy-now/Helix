@@ -256,7 +256,7 @@ HELIX OS
 Native Object Kernel
 Boot successful.
 
-Helix OS 0.5.1-dev.20261102 "Recursive"
+Helix OS 0.5.71-dev.20261117.MELDEV "Platter"
 
 [helix] console: serial + framebuffer
 [helix] memory:  462 MiB usable

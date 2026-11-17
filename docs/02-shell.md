@@ -407,7 +407,7 @@ and prints it beside a small ASCII logo:
 ```
    ##      ##   founder@helix
    ##      ##   -------------
-   ##      ##   OS:       Helix OS 0.5.1-dev.20261102
+   ##      ##   OS:       Helix OS 0.5.71-dev.20261117.MELDEV
    ###########  Kernel:   x86_64, long mode
    ###########  Uptime:   <...>
    ##      ##   Shell:    helixsh
