@@ -13,6 +13,7 @@ struct acpi_object_list;
 #define AE_OK 0x0000u
 #define AE_NOT_SUPPORTED 0x0003u
 #define AE_NOT_FOUND 0x0005u
+#define AE_ERROR 0x0001u
 #define ACPI_SUCCESS(s) ((s) == AE_OK)
 #define ACPI_FAILURE(s) ((s) != AE_OK)
 #define ACPI_GPE_LEVEL_TRIGGERED 0x00u

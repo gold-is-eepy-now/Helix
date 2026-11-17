@@ -59,6 +59,7 @@
 #include "ext4.h"
 #include "shell.h"
 #include "linux_compat.h"
+#include "aml.h"
 #include "usb_host.h"
 #include "usermode.h"
 
@@ -1182,6 +1183,76 @@ static void disk_report(block_device_t *dev, const char *what, const char *what2
     } else {
         kprintf("%s: could not read sector 0\n", dev->name);
     }
+}
+
+static void aml_print_value(const aml_value_t *v) {
+    switch (v->type) {
+    case AML_T_INT:
+        kprintf("integer 0x%x%08x\n", (unsigned)(v->integer >> 32), (unsigned)v->integer);
+        break;
+    case AML_T_STR:
+        kprintf("string \"%s\"\n", (const char *)v->data);
+        break;
+    case AML_T_BUF:
+        kprintf("buffer, %u bytes\n", (unsigned)v->len);
+        break;
+    case AML_T_PKG:
+        kprintf("package, %u elements\n", (unsigned)v->count);
+        break;
+    case AML_T_REF:
+        kprintf("reference\n");
+        break;
+    default:
+        kprintf("no value\n");
+        break;
+    }
+}
+
+static void aml_list_cb(void *ctx, const char *path, const char *kind, unsigned argc) {
+    (void)ctx;
+    if (argc) kprintf("%s  %s(%u)\n", path, kind, argc);
+    else kprintf("%s  %s\n", path, kind);
+}
+
+static void aml_hid_cb(void *ctx, const char *path, const char *kind, unsigned argc) {
+    (void)ctx;
+    (void)argc;
+    if (kind[0] != 'D') return;             /* devices only */
+    char hid[9];
+    if (aml_get_hid(path, hid)) kprintf("%s  _HID %s\n", path, hid);
+}
+
+/* aml load | tree | hid | eval <path> [int args...] */
+static void cmd_aml(int argc, char **argv) {
+    if (argc < 2 || strcmp(argv[1], "load") == 0) {
+        aml_status_t st = aml_load_firmware();
+        kprintf("aml: %s (%u objects)\n", aml_status_name(st), aml_node_count());
+        return;
+    }
+    if (!aml_loaded()) {
+        kprintf("aml: no tables loaded\n");
+        return;
+    }
+    if (strcmp(argv[1], "tree") == 0) {
+        aml_walk(aml_list_cb, NULL);
+        return;
+    }
+    if (strcmp(argv[1], "hid") == 0) {
+        aml_walk(aml_hid_cb, NULL);
+        return;
+    }
+    if (strcmp(argv[1], "eval") == 0 && argc >= 3) {
+        aml_value_t out;
+        aml_status_t st = aml_eval(argv[2], NULL, 0, &out);
+        if (st != AML_OK) {
+            kprintf("aml: %s: %s\n", argv[2], aml_status_name(st));
+            return;
+        }
+        aml_print_value(&out);
+        aml_value_free(&out);
+        return;
+    }
+    kprintf("usage: aml [load|tree|hid|eval <path>]\n");
 }
 
 static void cmd_inputtest(int argc, char **argv) {
@@ -2886,6 +2957,7 @@ const command_t helix_commands[] = {
     {"xhci", "xHCI (USB 3) controller discovery, read-only", cmd_xhci},
     {"blktest", "write a pattern to a block device, read it back, restore it (or keep it)", cmd_blktest},
     {"disk", "list SATA disks on the AHCI controller and read sector 0", cmd_disk},
+    {"aml", "ACPI AML namespace: load, tree, hid, eval <path>", cmd_aml},
     {"inputtest", "check the Linux input shim and the applespi probe path", cmd_inputtest},
     {"fat", "read a FAT32 volume on a block device: info, ls, cat, sum", cmd_fat},
     {"tcplisten", "accept one TCP connection on a port, answer one line, close", cmd_tcplisten},

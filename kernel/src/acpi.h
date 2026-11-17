@@ -28,6 +28,12 @@ bool acpi_table_at(unsigned i, acpi_table_t *out);
 /* ACPI revision from the RSDP: 0 is ACPI 1.0, 2 and later have an XSDT. 0 before init. */
 uint8_t acpi_revision(void);
 
+/* Mapped pointer to the table at index i, or NULL. */
+const void *acpi_table_data(unsigned index);
+
+/* Higher-half direct-map offset (physical + offset is a usable address). */
+uint64_t acpi_hhdm(void);
+
 /* Pointer to the first table with this four-character signature, or NULL. */
 const void *acpi_find(const char sig[4]);
 

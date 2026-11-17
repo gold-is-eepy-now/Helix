@@ -130,3 +130,14 @@ const void *acpi_find(const char sig[4]) {
     }
     return NULL;
 }
+
+/* Mapped pointer to the table at index i (for the AML loader), or NULL. */
+const void *acpi_table_data(unsigned i) {
+    if (!g_ready || i >= g_count) return NULL;
+    return map(g_tables[i].phys);
+}
+
+/* The higher-half direct-map offset, for reading physical memory from AML regions. */
+uint64_t acpi_hhdm(void) {
+    return g_hhdm;
+}

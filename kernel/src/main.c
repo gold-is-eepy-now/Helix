@@ -50,6 +50,7 @@
 #include "usb_host.h"
 #include "usb_storage.h"
 #include "acpi.h"
+#include "aml.h"
 #include "intel_lpss_gspi.h"
 #include "xhci.h"
 #include "e1000.h"
@@ -249,6 +250,10 @@ static void kernel_main_continue(void) {
     if (acpi_table_count() > 0) {
         kprintf("[acpi] ACPI revision %u, %u tables\n", (unsigned)acpi_revision() + 1u,
                 acpi_table_count());
+    }
+    /* Build the AML namespace from the DSDT and SSDTs. See docs/24-aml.md. */
+    if (acpi_table_count() > 0) {
+        aml_load_firmware();
     }
 
     /* The Intel LPSS GSPI controller (MacBook Air 7,2). Optional: absent on QEMU, and the

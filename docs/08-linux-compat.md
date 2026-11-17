@@ -173,8 +173,11 @@ module registers at boot. Its probe path runs; it refuses to start on this machi
 
 - applespi cannot run on the 2010-2017 MacBook it targets. It needs ACPI methods
   (`UIST`, `SIEN`, `SIST`, `_GPE`) and properties from the DSDT. Helix has table
-  parsing (docs/16-acpi.md) but no AML interpreter and no GPE support, so the driver
-  refuses at probe. That is the honest state.
+  parsing (docs/16-acpi.md) and an AML interpreter (docs/24-aml.md), which answers
+  `acpi_get_handle` and `acpi_evaluate_integer`. The driver still refuses at probe for two
+  reasons. First, `ACPI_HANDLE()` is NULL, so the device is not bound to its DSDT node
+  and `SIEN` is looked up at the root, where it is not found. Second, there is no GPE
+  dispatch. That is the honest state.
 - No SPI transfer has run against hardware or against an emulated controller. Only
   the refusal path has run, and only under QEMU TCG.
 - Input events do not reach Helix's `input_device_t` objects; they land in
@@ -184,8 +187,7 @@ module registers at boot. Its probe path runs; it refuses to start on this machi
 - Tracepoints do nothing. `%*ph` in applespi's warnings is not parsed by Helix's
   formatter, so those lines print the raw spec.
 
-**Next steps for this area:** an AML interpreter and GPE dispatch (the real
-blocker for applespi), then an SPI transfer path for an ACPI-described device, then
+**Next steps for this area:** bind the SPI device to its DSDT node, then GPE dispatch (the blockers for applespi), then an SPI transfer path for an ACPI-described device, then
 the touchpad calibration.
 
 **Test:** `inputtest` in the shell suite (`tests/shell-test.py`). Its output on QEMU

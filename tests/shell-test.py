@@ -600,8 +600,13 @@ def main():
         ser.send("disk\n")
         check("disk lists a SATA disk", "sata0:", timeout=60)
         check("disk reads sector 0 and finds the signature", "sector 0 signature 55aa", timeout=60)
+        ser.send("aml hid\n")
+        # The DSDT's PCI root decodes to PNP0A08 (EISA 0x080AD041): proves the namespace and
+        # the _HID evaluation both work on real firmware. See docs/24-aml.md.
+        check("aml hid: PCI root is PNP0A08", "\\_SB.PCI0  _HID PNP0A08", timeout=60)
         # Linux input shim: keyboard and touchpad reports reach the Helix queues, and the
-        # applespi probe path runs and refuses (no ACPI on this machine). See docs/08-linux-compat.md.
+        # applespi probe path runs and still refuses (its GPE/event delivery is not implemented).
+        # See docs/08-linux-compat.md.
         ser.send("inputtest\n")
         check("inputtest: Linux input shim and applespi probe path pass", "inputtest: PASS (0 failure(s))", timeout=60)
         check_true("inputtest reported no failed check", "inputtest: FAILED" not in ser.text())

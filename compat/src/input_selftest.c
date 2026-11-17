@@ -112,7 +112,8 @@ static void test_touchpad(void) {
 
 static void test_applespi_refuses(void) {
     /* The driver is registered by its module_init at boot; a device with its ACPI id must reach
-     * applespi_probe, which needs ACPI (SIEN) that Helix cannot evaluate, and refuse with -ENODEV. */
+     * applespi_probe. It looks up SIEN from the device's ACPI handle; ACPI_HANDLE() is NULL here (no
+     * device-to-DSDT binding yet), so SIEN is not found under the root and the probe refuses with -ENODEV. */
     check(compat_spi_driver_count() >= 1, "applespi driver registered at boot");
     struct spi_device spi = { 0 };
     int before = compat_spi_probe_calls();
