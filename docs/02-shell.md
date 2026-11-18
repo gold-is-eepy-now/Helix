@@ -31,8 +31,18 @@ power → UEFI → Limine → kmain()
                     ├─ boot banner (HELIX OS / ...)
                     ├─ status lines (console, memory, clock)
                     │
-                    └─ shell_run() ─────────► helix>
+                    └─ ui_run()
+                         ├─ framebuffer present ─► sign-in screen ─► desktop
+                         │                         Ctrl+Alt+T ─► TUI shell (helix>)
+                         └─ no framebuffer ──────► shell_run() ─► helix>
 ```
+
+On a machine with a framebuffer, boot goes straight to the sign-in screen, and PID 1
+(`/bin/init`) is not started. Ctrl+Alt+T (Ctrl+T on the serial console) switches to the
+TUI shell, a text shell on the screen. Ctrl+Alt+T again returns to the screen you came
+from. Esc on the desktop signs out. The ring-3 shell is still available: `exec /bin/sh`
+from the TUI shell or the desktop Terminal. Without a framebuffer the serial shell runs
+as before, and `/bin/init` starts `/bin/sh`.
 
 ---
 
@@ -252,6 +262,58 @@ read back what `>` wrote.
 
 ---
 
+## Scripts (`.sh`)
+
+`sh <file>` runs a file of helixsh commands, one per line. This is the whole
+scripting story today (`kernel/src/shell_script.c`):
+
+- **Comments and blank lines.** A line whose first non-space character is `#`
+  is ignored. A trailing `# ...` on a command line is *not* stripped (there is
+  no quoting yet, so `#` inside a line is ordinary text).
+- **Variables.** `export NAME=VALUE` stores a value, `unset NAME` removes it,
+  `export` with no arguments lists what is set. `$NAME` and `${NAME}` expand
+  in every command line, interactive or scripted; an unset name expands to
+  nothing. The table holds 32 variables.
+- **Conditionals.** `if <command>` runs `then`-block when the command's exit
+  status is 0, `else`-block when it is not, and `fi` ends it. The optional
+  trailing `then` keyword may be written or left out.
+- **Conditions.** `test` (and its `[ ... ]` spelling) is what `if` usually
+  tests:
+  `test -f FILE`, `-d DIR`, `-e PATH`, `-z STR`, `-n STR`, `STR`,
+  `A = B`, `A != B`, and integer `A -eq B` / `-ne` / `-lt` / `-gt` / `-le` / `-ge`.
+- **Status.** Every command sets the shell's last status: `true` is 0, `false`
+  is 1, a name that is not in the table is 127, `test` reports its own answer,
+  and `exec` passes the program's exit code through.
+
+```text
+helix> export GREETING=hello
+helix> echo $GREETING world
+hello world
+helix> sh /demo/report.sh
+```
+
+`/demo/report.sh`:
+
+```text
+# a comment line
+export WHO=helix
+echo report for $WHO
+if test -f /etc/hostname then
+  echo hostname is present
+else
+  echo no hostname
+fi
+```
+
+**Ceiling (deliberate):** no loops, no functions, no quoting, no `elif`, no
+`$?`, no `$1`/`$@` for the script's own arguments, and `sh` takes no arguments
+to pass on. Each one needs another pass over the line; add them when a script
+in this tree needs one. Scripts also share the shell's other limits: a line is
+at most 255 characters, a script file at most 256 KiB, and `if` nesting is 16
+levels deep.
+
+---
+
 ## The commands — the first Helix "programs"
 
 Adding a program is two steps: write the function, add a row in `helix_commands`.
@@ -298,16 +360,42 @@ shows it; typing `myprog arg1 arg2` runs it.
 | `time` | current wall-clock time in UTC (`21:34:26`) |
 | `version` | name, version, codename |
 | `usb` | USB controllers, hubs, and HID devices with their reports |
+| `fat <dev> info\|ls [path]\|cat <path>\|sum <path>` | read a FAT32 volume on a block device such as `sata1` (read-only; `cat` stops after 4096 bytes and shows non-printable bytes as `.`; see docs/21-fat32.md) |
+| `disk` | list SATA disks on the AHCI controller (`sataN`) and USB mass-storage disks (`usbN`), with size, and print the signature of sector 0 (read-only; see docs/20-ahci.md and docs/22-usb-storage.md) |
 | `t2info` | Apple T2 security SoC: mailbox function, BAR addresses, firmware handshake state, device object and control capability (see docs/09-apple-t2.md) |
 | `echo` | prints its arguments |
+| `sh <file>` | run a helixsh script file: one command per line, `#` comments, `$NAME` expansion, `if`/`else`/`fi` (see "Scripts" above) |
+| `export NAME=VALUE` | set a shell variable; with no arguments, list the ones that are set |
+| `unset NAME` | remove a shell variable |
+| `test ...` | condition for `if`: `-f`/`-d`/`-e`/`-z`/`-n`, `A = B`, `A -eq B` (also spelled `[ ... ]`) |
 | `history` | lists the lines typed so far, numbered (Up/Down recall them) |
 | `usermode` | runs a built-in test program in ring 3; it writes a line through the syscall gate and exits with status 7 |
+| `users` | lists accounts: the console `root` (uid 0) and the accounts in `/etc/users` |
+| `mkusr <name> <password>` | creates an account; passwords are stored as PBKDF2-HMAC-SHA256 hashes with a random salt |
+| `su <name> <password>` | switches the console to an account after checking its password; `su root` needs no password |
+| `passwd <new>` | changes the password of the current account (not root) |
+| `whoami` | prints the current identity |
 | `usershell` | runs the userland shell in ring 3 (an ELF loaded into its own process); type `exit` to return. Inside it: `cat <path>`, `write <path> <text>` and `heap` (a 64 KiB brk heap check) |
 | `init` | runs `/bin/init` (PID 1) in ring 3; it starts `/bin/sh` |
 | `exec` | `exec <path> [args...]`: runs a program from the root and waits for it |
-| `calc` | `calc <a> <op> <b>` for `+ - * / %` (integers only) |
+| `architect` | a joke, after the Backrooms film |
+| `calc` | `calc <a> <op> <b>` for `+ - * / %` (integers only). A joke: about one time in four, `calc 9 + 10` prints `= 21` and `you stupid` |
 | `clear` | clear the screen |
 | `color` | turn ANSI colour on/off: `color on`, `color off` |
+| `log` | show the kernel event log, oldest first: scheduler, syscalls, process spawn/exit, shell lines, input, USB mouse, exceptions. `log clear` forgets earlier events; `log serial on`/`off` echoes every event to the serial console as it happens. The log is also dumped automatically when a CPU exception is taken |
+| `net` | network card: MAC, link state, and frame counters (`net test` sends an ARP request to the QEMU gateway 10.0.2.2 and waits for the reply). Needs `-netdev user,id=n0 -device e1000,netdev=n0`; without a card it says so |
+| `ping <a.b.c.d \| name>` | four ICMP echo requests, one second each; prints each reply's round-trip time in microseconds, then a count. `ping 10.0.2.2` gets replies under QEMU. A dead address times out. A host name is resolved first |
+| `nslookup <name>` | resolve a name to an IPv4 address with the DNS server (10.0.2.3 under QEMU). Prints "not found" for a name that does not exist |
+| `tcpget <a.b.c.d> <port> <path>` | open a TCP connection, send `GET <path>` (HTTP/1.0), and print the byte count and the status line. Example: `tcpget 10.0.2.2 8765 /` against a host web server |
+| `tcpsend <a.b.c.d> <port> <count>` | connect, send `count` bytes (1 to 65536) of a fixed test pattern, close. Prints the byte sum and this transfer's fast retransmits, timeouts and duplicate ACKs |
+| `tcpsink <port>` | accept one connection, read until the peer closes, print the byte count and sum and this transfer's loss-recovery counters |
+| `netdrop <n>` | test hook: do not send every Nth outgoing TCP data segment (0 turns it off). QEMU never loses packets, so this creates the loss that recovery repairs |
+| `tcplisten <port>` | listen on a TCP port, accept one connection (up to 30 s), read one line, answer `helix: <line>`, and close. Connect from the host to test it; the suite uses QEMU's hostfwd to reach guest port 7070 |
+| `gpu` | list the display outputs of the virtio-gpu device (QEMU: `-device virtio-gpu-pci`); prints "no virtio-gpu device ready" when there is none |
+| `fetch <http://host[:port]/path>` | HTTP/1.1 GET: prints the status, body length and content type, and the redirect target if there is one. Only `http://`; `https://` is refused for now. Example: `fetch http://10.0.2.2:8766/index.html` |
+| `dhcp` | get an address, mask, router and DNS server from a DHCP server, replacing the static configuration. Runs when asked, not at boot |
+
+The ring-3 `/bin/ping <a.b.c.d>` does the same through `SYS_NET_PING` (syscall 36): the kernel sends and times each echo, and the program prints the results. `/bin/nslookup <name>` asks the kernel to resolve a name (`SYS_NET_RESOLVE`, syscall 37).
 | `halt` | halt the machine (you may close the QEMU window) |
 | `reboot` | reset the machine |
 
@@ -319,7 +407,7 @@ and prints it beside a small ASCII logo:
 ```
    ##      ##   founder@helix
    ##      ##   -------------
-   ##      ##   OS:       Helix OS 0.5.1-dev.20261102
+   ##      ##   OS:       Helix OS 0.5.71-dev.20261117.MELDEV
    ###########  Kernel:   x86_64, long mode
    ###########  Uptime:   <...>
    ##      ##   Shell:    helixsh
@@ -431,3 +519,15 @@ To stay inside "Never pretend it works", these are still absent:
   same command table can be backed by `helix/programs/`.
 - **History and completion.** We deliberately skipped up-arrow history to keep
   the line editor honest; it is a small follow-up.
+
+## Text editors
+
+- **Browser window** (desktop, last icon): type an address and press Enter (`http://` is added if missing). The page is fetched over HTTP and shown as plain text: tags are dropped, scripts and styles are skipped, lines wrap at word breaks. Up and Down scroll; Esc closes the window. The fetch blocks the desktop until the response arrives or times out (5 seconds per step). Redirects (301, 302, 303, 307, 308) are followed up to three times. Only `http://` works; `https://` shows an error.
+- **Text Editor window** (desktop): opens `note.txt` in the root directory. Type
+  with the keyboard; arrows, Home, End, Delete and Backspace move and erase.
+  Click the Save button to write the file; Esc closes the window (the text is kept
+  until the desktop exits). Typing redraws only the editor window.
+- **`/bin/edit FILE`** (ring 3): a line editor. Each line you type is a command:
+  `p` prints the file with numbers, `a TEXT` appends a line, `i N TEXT` inserts
+  before line N, `r N TEXT` replaces it, `d N` deletes it, `w` saves, `q` quits
+  (refused with unsaved changes; `q!` quits anyway), `h` lists these.

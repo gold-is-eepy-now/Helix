@@ -107,6 +107,30 @@ SCENARIOS = [
     },
 ]
 
+
+def make_fat_image(path):
+    """A 34 MiB FAT32 volume for the mass-storage scenarios. Returns the 100000-byte test
+    file's contents, or None (with a printed note) when dosfstools or mtools is missing."""
+    env = dict(os.environ, MTOOLS_SKIP_CHECK="1", LANG="C.UTF-8", LC_ALL="C.UTF-8",
+               PATH=os.environ.get("PATH", "") + ":/usr/sbin:/sbin")
+    for tool in ("mkfs.fat", "mcopy"):
+        if shutil.which(tool, path=env["PATH"]) is None:
+            print(f"[usb-test] SKIP mass-storage scenarios: {tool} not found (install dosfstools and mtools)")
+            return None
+    big = bytes((i * 7 + (i // 512) * 13 + 5) % 251 for i in range(100000))
+    hello = os.path.join(OUTDIR, "usb-hello.txt")
+    bigf = os.path.join(OUTDIR, "usb-big.bin")
+    open(hello, "wb").write(b"Hello from USB!\n")
+    open(bigf, "wb").write(big)
+    with open(path, "wb") as f:
+        f.truncate(34 * 1024 * 1024)
+    def run(*args):
+        subprocess.run(args, check=True, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    run("mkfs.fat", "-F", "32", "-s", "1", "-n", "USBSTICK", path)
+    run("mcopy", "-i", path, hello, "::/HELLO.TXT")
+    run("mcopy", "-i", path, bigf, "::/BIG.BIN")
+    return big
+
 # QEMU key names (qcodes) for "echo kbd-ok" followed by Enter.
 TYPED_KEYS = ["e", "c", "h", "o", "spc", "k", "b", "d", "minus", "o", "k", "ret"]
 NEEDLE = "\nkbd-ok"
@@ -188,13 +212,17 @@ def run_scenario(index, scenario):
             print(f"[usb-test]   {'PASS' if ok else 'FAIL'}: {label}")
             results.append((label, bool(ok)))
 
-        # PID 1 starts /bin/sh first, so the boot prompt is the userland shell. Exit
-        # it over serial to reach the kernel shell, which the rest of this test uses.
+        # This test boots with -nodefaults: no framebuffer, so there is no sign-in
+        # screen. PID 1 starts /bin/sh first, so the boot prompt is the userland shell.
+        # Exit it over serial to reach the kernel shell, which the rest of this test uses.
         check("userland shell prompt reached at boot", ser.read_until("ring3> ", 60))
         ser.send("exit\n")
         check("kernel reached the shell prompt", ser.read_until("helix> ", 60))
         for needle in scenario["expect"]:
             check(f"log: {needle}", ser.read_until(needle, 5))
+        for command, needle, wait in scenario.get("commands", []):
+            ser.send(command + "\n")
+            check(f"{command!r} prints {needle!r}", ser.read_until(needle, wait))
         if scenario["type"]:
             mon = _connect(MONITOR_SOCK)
             time.sleep(0.5)
@@ -226,7 +254,36 @@ def _connect(path):
 def main():
     os.makedirs(OUTDIR, exist_ok=True)
     all_results = []
-    for i, scenario in enumerate(SCENARIOS):
+    scenarios = list(SCENARIOS)
+    stick = os.path.join(OUTDIR, "usb-stick.img")
+    big = make_fat_image(stick)
+    if big is not None:
+        total = sum(big) & 0xFFFFFFFF
+        drive = ["-drive", f"if=none,id=stick,file={stick},format=raw"]
+        commands = [
+            ("disk", "usb0: USB", 30),
+            ("disk", "usb0: sector 0 signature 55aa", 30),
+            ("fat usb0 info", "USBSTICK", 30),
+            ("fat usb0 ls /", "f 16 HELLO.TXT", 30),
+            ("fat usb0 cat /hello.txt", "Hello from USB!", 30),
+            ("fat usb0 sum /big.bin", f"fat: /big.bin 100000 bytes, sum {total}", 240),
+        ]
+        scenarios.append({
+            "name": "USB mass storage on a root port (FAT32 stick)",
+            "devices": drive + ["-device", "usb-storage,bus=ehci.0,port=1,drive=stick"],
+            "expect": ["[usb-storage] usb0:"],
+            "type": False,
+            "commands": commands,
+        })
+        scenarios.append({
+            "name": "USB mass storage behind a hub",
+            "devices": drive + ["-device", "usb-hub,id=hub1,bus=ehci.0,port=1",
+                                "-device", "usb-storage,bus=ehci.0,port=1.1,drive=stick"],
+            "expect": ["[usb] hub at address 1", "[usb-storage] usb0:"],
+            "type": False,
+            "commands": commands[:3] + [commands[5]],
+        })
+    for i, scenario in enumerate(scenarios):
         all_results += run_scenario(i, scenario)
     failed = [label for label, ok in all_results if not ok]
     print(f"[usb-test] {len(all_results) - len(failed)}/{len(all_results)} checks passed")

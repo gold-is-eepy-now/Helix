@@ -10,6 +10,7 @@
  * now.
  */
 #include "keyboard.h"
+#include "ps2_mouse.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -66,6 +67,7 @@ static const char keymap_shift[128] = {
 };
 
 void keyboard_init(void) {
+    ps2_mouse_init();   /* the same controller serves the mouse */
     shift_down = false;
     extended = false;
     for (size_t i = 0; i < sizeof(pressed_keys) / sizeof(pressed_keys[0]); i++)
@@ -103,8 +105,10 @@ bool keyboard_read_event(keyboard_event_t *event) {
 
     uint8_t scancode = inb(KBD_DATA);
 
-    /* Bit 5 means the byte came from the mouse, not the keyboard. */
+    /* Bit 5 means the byte came from the mouse, not the keyboard. Hand it to the
+     * PS/2 mouse decoder rather than dropping it. */
     if (status & 0x20) {
+        ps2_mouse_feed(scancode);
         return false;
     }
 
@@ -130,6 +134,8 @@ bool keyboard_read_event(keyboard_event_t *event) {
         key = KBD_KEY_CTRL;
     } else if (code == 0x38) {
         key = KBD_KEY_ALT;
+    } else if (code == 0x3E) {
+        key = KBD_KEY_F4;                  /* F4: Alt+F4 closes a window (see keyboard_read) */
     } else if (code == 0x01) {
         key = KBD_KEY_ESCAPE;
     } else if (pressed) {
@@ -147,8 +153,16 @@ bool keyboard_read_event(keyboard_event_t *event) {
 }
 
 int keyboard_read(void) {
+    static bool ctrl_held, alt_held;
     keyboard_event_t event;
-    if (!keyboard_read_event(&event) || !event.pressed) return -1;
+    if (!keyboard_read_event(&event)) return -1;
+    if (event.key == KBD_KEY_CTRL) ctrl_held = event.pressed;
+    if (event.key == KBD_KEY_ALT) alt_held = event.pressed;
+    if (!event.pressed) return -1;
+    if (event.key == KBD_KEY_F4 && alt_held) return SHELL_KEY_ALT_F4;
+    if (event.key == '\t' && alt_held) return SHELL_KEY_ALT_TAB;
+    if ((event.key == 'l' || event.key == 'L') && alt_held) return SHELL_KEY_ALT_L;
+    if ((event.key == 't' || event.key == 'T') && ctrl_held && alt_held) return KBD_SWITCH_KEY;
     if (event.key == '\n') return '\n';
     if (event.key == KBD_KEY_ENTER) return '\n';
     if (event.key == KBD_KEY_ESCAPE) return 0x1b;
@@ -157,5 +171,10 @@ int keyboard_read(void) {
     if (event.key == '\t') return '\t';
     if (event.key == KBD_KEY_UP) return SHELL_KEY_UP;
     if (event.key == KBD_KEY_DOWN) return SHELL_KEY_DOWN;
+    if (event.key == KBD_KEY_LEFT) return SHELL_KEY_LEFT;
+    if (event.key == KBD_KEY_RIGHT) return SHELL_KEY_RIGHT;
+    if (event.key == KBD_KEY_HOME) return SHELL_KEY_HOME;
+    if (event.key == KBD_KEY_END) return SHELL_KEY_END;
+    if (event.key == KBD_KEY_DELETE) return SHELL_KEY_DELETE;
     return -1;
 }

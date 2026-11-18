@@ -21,6 +21,7 @@
 #include "heap.h"
 #include "input.h"
 #include "keyboard.h"
+#include "klog.h"
 #include "version.h"
 
 #define LINE_MAX 128
@@ -98,16 +99,141 @@ static void capture_sink(const char *data, size_t len) {
     }
 }
 
+/* The sink that was in place before the capture. Restored afterwards, so a
+ * capture inside another capturer (the desktop terminal) leaves that one working. */
+static console_sink_fn g_prev_sink;
+
 static void start_output_capture(void) {
     g_out_len = 0;
     g_out_buf[0] = '\0';
+    g_prev_sink = console_get_sink();
     console_set_sink(capture_sink);
 }
 
 static const char *stop_output_capture(void) {
-    console_set_sink(NULL);
+    console_set_sink(g_prev_sink);
     g_out_buf[g_out_len] = '\0';
     return g_out_buf;
+}
+
+/* ------------------------------------------------------------------ */
+/* Shell variables and the exit status of the last command             */
+/* ------------------------------------------------------------------ */
+
+/* Why: helixsh could not run a script, because a script needs somewhere to
+ * keep NAME=VALUE between lines and a status for `if` to test. These two
+ * pieces give both. The table is deliberately tiny and static: the kernel has
+ * no dynamic environment block, and 32 variables is plenty for a shell that
+ * runs from a framebuffer. */
+#define SHELL_VAR_MAX   32
+#define SHELL_VAR_NAME  32
+#define SHELL_VAR_VALUE 192
+
+typedef struct {
+    bool used;
+    char name[SHELL_VAR_NAME];
+    char value[SHELL_VAR_VALUE];
+} shell_var_t;
+
+static shell_var_t g_vars[SHELL_VAR_MAX];
+
+/* Status of the last command, and whether a command set it itself (see
+ * execute(): command_fn returns void, so a status-setting builtin pins it). */
+static int g_last_status;
+static bool g_status_pinned;
+
+void shell_set_status(int status) {
+    g_last_status = status;
+    g_status_pinned = true;
+}
+
+int shell_status(void) {
+    return g_last_status;
+}
+
+/* Store NAME=VALUE. Returns false when the table is full. */
+bool shell_var_set(const char *name, const char *value) {
+    if (name == NULL || name[0] == '\0') return false;
+    shell_var_t *slot = NULL;
+    for (int i = 0; i < SHELL_VAR_MAX; i++) {
+        if (g_vars[i].used && str_eq(g_vars[i].name, name)) { slot = &g_vars[i]; break; }
+        if (!g_vars[i].used && slot == NULL) slot = &g_vars[i];
+    }
+    if (slot == NULL) return false;
+
+    size_t i = 0;
+    for (; name[i] != '\0' && i + 1 < SHELL_VAR_NAME; i++) slot->name[i] = name[i];
+    slot->name[i] = '\0';
+    i = 0;
+    for (; value[i] != '\0' && i + 1 < SHELL_VAR_VALUE; i++) slot->value[i] = value[i];
+    slot->value[i] = '\0';
+    slot->used = true;
+    return true;
+}
+
+const char *shell_var_get(const char *name) {
+    if (name == NULL) return NULL;
+    for (int i = 0; i < SHELL_VAR_MAX; i++) {
+        if (g_vars[i].used && str_eq(g_vars[i].name, name)) return g_vars[i].value;
+    }
+    return NULL;
+}
+
+void shell_var_unset(const char *name) {
+    for (int i = 0; i < SHELL_VAR_MAX; i++) {
+        if (g_vars[i].used && str_eq(g_vars[i].name, name)) {
+            g_vars[i].used = false;
+            g_vars[i].name[0] = '\0';
+            g_vars[i].value[0] = '\0';
+        }
+    }
+}
+
+void shell_vars_print(void) {
+    for (int i = 0; i < SHELL_VAR_MAX; i++) {
+        if (!g_vars[i].used) continue;
+        console_write(g_vars[i].name);
+        console_putc('=');
+        console_write(g_vars[i].value);
+        console_putc('\n');
+    }
+}
+
+static bool is_name_char(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+           (c >= '0' && c <= '9') || c == '_';
+}
+
+/* Expand $NAME and ${NAME} in `in` into `out` (never overflowing `outsz`,
+ * which includes the NUL). An unset name expands to nothing, the way an
+ * unset shell variable does. Returns the length written. */
+size_t shell_expand(const char *in, char *out, size_t outsz) {
+    if (outsz == 0) return 0;
+    size_t o = 0;
+    for (size_t i = 0; in[i] != '\0' && o + 1 < outsz;) {
+        if (in[i] != '$') {
+            out[o++] = in[i++];
+            continue;
+        }
+        i++;  /* past '$' */
+        bool braced = (in[i] == '{');
+        if (braced) i++;
+        char name[SHELL_VAR_NAME];
+        size_t n = 0;
+        while (is_name_char(in[i]) && n + 1 < sizeof(name)) name[n++] = in[i++];
+        name[n] = '\0';
+        if (braced && in[i] == '}') i++;
+        if (n == 0) {
+            out[o++] = '$';  /* lone '$' is literal */
+            continue;
+        }
+        const char *value = shell_var_get(name);
+        if (value != NULL) {
+            for (size_t k = 0; value[k] != '\0' && o + 1 < outsz; k++) out[o++] = value[k];
+        }
+    }
+    out[o] = '\0';
+    return o;
 }
 
 /* Write data to a file on ext4. The path is resolved like every other path
@@ -225,6 +351,8 @@ void shell_history_print(void) {
     }
 }
 
+static bool g_leave_shell;   /* set when the switch key is pressed while reading a line */
+
 static size_t read_line(char *line, size_t max) {
     size_t len = 0;
     g_history_pos = g_history_count;
@@ -233,6 +361,10 @@ static size_t read_line(char *line, size_t max) {
         if (c < 0) {
             __asm__ volatile("pause");
             continue;
+        }
+        if (c == KBD_SWITCH_KEY) {
+            g_leave_shell = true;
+            return (size_t)-1;
         }
 
         if (c == SHELL_KEY_UP) {
@@ -387,8 +519,9 @@ bool shell_is_builtin(const char *name) {
 /* Command execution                                                  */
 /* ------------------------------------------------------------------ */
 
-/* Execute a single parsed command. Returns 0 on success. */
+/* Execute a single parsed command. Returns its exit status. */
 static int execute_cmd(parsed_cmd_t *cmd) {
+    klog_event(KLOG_SHELL, "command: %s argc=%d", cmd->argv[0], cmd->argc);
     if (cmd->argc == 0) return 0;
 
     for (size_t i = 0; i < helix_command_count; i++) {
@@ -466,9 +599,20 @@ static int execute_cmd(parsed_cmd_t *cmd) {
 }
 
 /* Split a line into segments separated by | or ||, parse each segment,
- * and execute the chain. */
-static void execute(char *line) {
-    char *p = line;
+ * expand $NAME / ${NAME}, and execute the chain. Returns the exit status of
+ * the last command that ran, which is what `if` in a script tests. */
+static int execute(char *line) {
+    klog_event(KLOG_SHELL, "line: %s", line);
+
+    /* Parse from a private buffer: expansion can be longer than `line`, and
+     * parse_one_cmd() writes NULs into the buffer it walks. On the stack, not
+     * static: a script line runs execute() again while the caller is inside
+     * one. */
+    char work[512];
+    shell_expand(line, work, sizeof(work));
+    g_status_pinned = false;
+
+    char *p = work;
     parsed_cmd_t cmds[MAX_SEGMENTS];
     bool is_or[MAX_SEGMENTS];
     int ncmds = 0;
@@ -481,41 +625,37 @@ static void execute(char *line) {
         if (*p == '\0') break;
     }
 
-    if (ncmds == 0) return;
-
-    /* Execute the chain. */
+    int status = 0;
     for (int i = 0; i < ncmds; i++) {
-        bool last = (i == ncmds - 1);
-
-        if (i > 0 && cmds[i - 1].argv[0]) {
-            /* If previous command captured nothing (not piped), check if we
-             * should pipe the previous command's output forward. */
-        }
+        /* `a || b` runs b only when a failed. */
+        if (i > 0 && is_or[i - 1] && status == 0) continue;
 
         if (i < ncmds - 1) {
-            /* More commands follow: this is a pipe. Capture output. */
+            /* More commands follow: this is a pipe. Capture its output and
+             * hand it to the next segment as stdin. execute_cmd() runs the
+             * segment by name, so a pipe starts the command the user typed
+             * rather than whatever sits at that index in the table. */
             start_output_capture();
-            helix_commands[i].fn(cmds[i].argc, cmds[i].argv);
+            execute_cmd(&cmds[i]);
             const char *captured = stop_output_capture();
             if (g_out_len > 0) {
                 shell_stdin_set(captured, g_out_len);
             }
-            /* For || : skip next command if previous succeeded. */
-            if (is_or[i]) {
-                continue;  /* will skip next in loop */
-            }
         } else {
-            /* Last command: no capture. */
-            int ret = execute_cmd(&cmds[i]);
-            /* For || on last command: handled above in loop logic. */
-            (void)ret;
-            (void)last;
+            status = execute_cmd(&cmds[i]);
         }
     }
 
-    /* Simplified: actually just execute the first command for now,
-     * with output redirection support. */
     shell_stdin_clear();
+
+    /* A status-setting builtin (test, true, false, exec, sh) pinned its own
+     * result; command_fn returns void, so there is no other way to hear it. */
+    if (!g_status_pinned) g_last_status = status;
+    return g_last_status;
+}
+
+int shell_exec_line(char *line) {
+    return execute(line);
 }
 
 void shell_run(void) {
@@ -532,4 +672,32 @@ void shell_run(void) {
         history_add(line);
         execute(line);
     }
+}
+
+/* The kernel shell inside the graphical session: the same loop as shell_run, but it
+ * returns when the switch key is pressed, so the caller can go back to the desktop. */
+void shell_run_until_switch(void) {
+    static char line[LINE_MAX];
+    for (;;) {
+        console_set_fg(CONSOLE_BRIGHT_GREEN);
+        console_write(PROMPT);
+        console_reset_color();
+
+        size_t len = read_line(line, sizeof(line));
+        if (g_leave_shell) {
+            g_leave_shell = false;
+            return;
+        }
+        if (len == (size_t)-1) {
+            continue;
+        }
+        history_add(line);
+        execute(line);
+    }
+}
+
+/* Run one command line as the kernel shell would (pipes, redirection, the command
+ * table). The line is modified in place. Used by the desktop terminal window. */
+void shell_run_line(char *line) {
+    execute(line);
 }

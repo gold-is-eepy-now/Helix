@@ -6,6 +6,7 @@
  * IRQs are dispatched by number and acknowledged.
  */
 #include "idt.h"
+#include "klog.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -146,6 +147,11 @@ void isr_handler(registers_t *regs) {
             regs->rip = g_fault_recovery_rip;
             return;
         }
+        klog_event(KLOG_EXC, "exception %llu rip=%p cs=%p err=%p cr2=%p",
+                   (unsigned long long)regs->vector, (uintptr_t)regs->rip,
+                   (uintptr_t)regs->cs, (uintptr_t)regs->error_code,
+                   (uintptr_t)(regs->vector == 14 ? read_cr2() : 0));
+        klog_dump();   /* the recent history, so a crash shows what led to it */
         console_set_fg(CONSOLE_BRIGHT_RED);
         kprintf("\n*** CPU EXCEPTION %llu: %s ***\n",
                 (unsigned long long)regs->vector, exception_name(regs->vector));

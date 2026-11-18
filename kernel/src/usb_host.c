@@ -31,6 +31,7 @@
 #include "io.h"
 #include "kstring.h"
 #include "pci.h"
+#include "panic.h"
 #include "pmm.h"
 #include "vmm.h"
 #include "time.h"
@@ -81,6 +82,7 @@
 #define TD_BITSTUFF (1u << 17)
 #define TD_ERRORS   (TD_STALLED | TD_BUFERR | TD_BABBLE | TD_CRCTO | TD_BITSTUFF)
 #define TD_IOC      (1u << 24)
+#define TD_SPD      (1u << 29)       /* short packet detect: stop the queue on a short IN */
 #define TD_LS       (1u << 26)       /* low-speed device */
 #define TD_CERR3    (3u << 27)       /* retry up to three times */
 
@@ -110,6 +112,11 @@
 #define DESC_HUB 0x29
 #define CLASS_HUB 9
 #define CLASS_HID 3
+#define CLASS_MSC 8                   /* mass storage */
+#define MSC_SUBCLASS_SCSI 6
+#define MSC_PROTOCOL_BOT  0x50
+#define BULK_TDS 256u                 /* one page of TDs for a bulk transfer */
+#define BULK_BUF 4096u
 #define HID_SUBCLASS_BOOT 1
 #define HID_PROTOCOL_KEYBOARD 1
 #define HID_PROTOCOL_MOUSE 2
@@ -178,6 +185,12 @@ typedef struct {
     uint8_t max_packet0;
     bool is_hub;
     uint8_t ep_count;
+    /* USB mass storage (Bulk-Only Transport) interface, if the device has one. */
+    bool msc;
+    uint8_t msc_interface;
+    uint8_t msc_in, msc_out;  /* bulk endpoint numbers, 0 = not found yet */
+    uint8_t msc_packet;       /* bulk wMaxPacketSize, clamped to 8..64 */
+    bool msc_in_toggle, msc_out_toggle;
     uint16_t vid;             /* idVendor from the device descriptor */
     uint16_t pid;             /* idProduct */
     uint8_t dev_class;        /* bDeviceClass */
@@ -198,6 +211,12 @@ struct uhci_hc {
     uint32_t tds_phys;
     uint8_t *ctl_buf;         /* setup packet at +0, data stage at +64 */
     uint32_t ctl_buf_phys;
+    uhci_qh_t *qh_bulk;       /* bulk transfers: linked after qh_ctl */
+    uint32_t qh_bulk_phys;
+    uhci_td_t *bulk_tds;      /* BULK_TDS descriptors */
+    uint32_t bulk_tds_phys;
+    uint8_t *bulk_buf;        /* BULK_BUF bytes of data */
+    uint32_t bulk_buf_phys;
     uint8_t next_address;     /* next USB address to hand out (1..127) */
 };
 
@@ -345,6 +364,11 @@ static bool uhci_start(uhci_hc_t *hc, const pci_function_t *f) {
     hc->tds_phys = qh_phys + 256u;
     hc->ctl_buf = buf;
     hc->ctl_buf_phys = buf_phys;
+    hc->qh_bulk = (uhci_qh_t *)(void *)(qh_page + 32);
+    hc->qh_bulk_phys = qh_phys + 32u;
+    hc->bulk_tds = dma_page(&hc->bulk_tds_phys);
+    hc->bulk_buf = dma_page(&hc->bulk_buf_phys);
+    if (hc->bulk_tds == NULL || hc->bulk_buf == NULL) return false;
 
     /* Reset. Stop first, then a global reset, then a host-controller reset. */
     hc_w16(hc, UHCI_USBCMD, 0);
@@ -367,7 +391,9 @@ static bool uhci_start(uhci_hc_t *hc, const pci_function_t *f) {
     hc_w8(hc, UHCI_SOFMOD, 0x40);                        /* standard 1 ms frame */
 
     /* Schedule: every frame -> qh_int -> qh_ctl -> end. Nothing is queued yet. */
-    hc->qh_ctl->horizontal = LINK_T;
+    hc->qh_bulk->horizontal = LINK_T;
+    hc->qh_bulk->element = LINK_T;
+    hc->qh_ctl->horizontal = hc->qh_bulk_phys | LINK_QH;
     hc->qh_ctl->element = LINK_T;
     hc->qh_int->horizontal = hc->qh_ctl_phys | LINK_QH;
     hc->qh_int->element = LINK_T;
@@ -562,6 +588,130 @@ void usb_host_poll(void) {
     g_polling = false;
 }
 
+
+/* ------------------------------------------------------------- bulk transfers */
+
+/* One bulk transfer on the device's mass-storage endpoint (in or out): up to BULK_BUF
+ * bytes, one TD per packet, all on the controller's bulk queue head. Returns 0 on
+ * success (*done is the byte count, short for a short IN packet), -2 if the endpoint
+ * stalled, -1 for any other error or a timeout. The toggle is advanced here for every
+ * packet that completed, so a caller that sees an error should run reset recovery. */
+int usb_host_bulk(unsigned index, bool in, void *buf, uint32_t len, uint32_t *done) {
+    if (done != NULL) *done = 0;
+    if (index >= g_dev_count) return -1;
+    usb_device_t *d = &g_dev[index];
+    uhci_hc_t *hc = d->hc;
+    uint8_t ep = in ? d->msc_in : d->msc_out;
+    uint32_t packet = d->msc_packet;
+    if (!d->msc || ep == 0 || packet == 0 || len > BULK_BUF) return -1;
+    uint32_t count = len == 0 ? 1u : (len + packet - 1u) / packet;
+    if (count > BULK_TDS) return -1;
+
+    bool *toggle = in ? &d->msc_in_toggle : &d->msc_out_toggle;
+    if (!in && len != 0) memcpy(hc->bulk_buf, buf, len);
+    uhci_td_t *tds = hc->bulk_tds;
+    uint32_t expect[BULK_TDS];
+    bool t = *toggle;
+    uint32_t off = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t n = len - off < packet ? len - off : packet;
+        expect[i] = n;
+        tds[i].link = (i + 1u < count) ? hc->bulk_tds_phys + (i + 1u) * 16u : LINK_T;
+        tds[i].buffer = hc->bulk_buf_phys + off;
+        tds[i].token = (n == 0 ? (0x7FFu << 21) : ((n - 1u) << 21)) | ((t ? 1u : 0u) << 19) |
+                       ((uint32_t)ep << 15) | ((uint32_t)d->address << 8) | (in ? PID_IN : PID_OUT);
+        tds[i].status = TD_ACTIVE | TD_CERR3 | (in ? TD_SPD : 0u);
+        t = !t;
+        off += n;
+    }
+    tds[count - 1u].status |= TD_IOC;
+    __sync_synchronize();
+    hc->qh_bulk->element = hc->bulk_tds_phys;
+
+    /* Wait until every TD is retired, one fails, or a short IN packet ends the transfer.
+     * A device that keeps NAKing leaves its TD active, so the deadline is what ends that. */
+    int result = -1;
+    uint32_t got = 0, completed = 0;
+    uint64_t deadline = time_uptime_ms() + 3000u;
+    for (;;) {
+        bool finished = false;
+        got = 0;
+        completed = 0;
+        for (uint32_t i = 0; i < count; i++) {
+            uint32_t st = tds[i].status;
+            if (st & TD_ACTIVE) break;
+            if (st & TD_ERRORS) {
+                result = (st & TD_STALLED) ? -2 : -1;
+                finished = true;
+                break;
+            }
+            uint32_t actual = st & 0x7FFu;
+            actual = (actual == 0x7FFu) ? 0u : actual + 1u;
+            got += actual;
+            completed++;
+            if (actual < expect[i]) { result = 0; finished = true; break; }  /* short packet */
+            if (i + 1u == count) { result = 0; finished = true; }
+        }
+        if (finished) break;
+        if (time_uptime_ms() >= deadline) { result = -1; break; }
+        __asm__ volatile("pause" ::: "memory");
+    }
+    hc->qh_bulk->element = LINK_T;                       /* take the chain off the schedule */
+    if (result == 0) {
+        if (in && got != 0) memcpy(buf, hc->bulk_buf, got);
+        if (completed & 1u) *toggle = !*toggle;          /* one toggle flip per finished packet */
+        if (done != NULL) *done = got;
+    }
+    return result;
+}
+
+uint32_t usb_host_bulk_max(unsigned index) {
+    if (index >= g_dev_count || g_dev[index].msc_packet == 0) return 0;
+    uint32_t most = (uint32_t)g_dev[index].msc_packet * BULK_TDS;
+    return most < BULK_BUF ? most : BULK_BUF;
+}
+
+bool usb_host_msc_info(unsigned index, usb_msc_info_t *out) {
+    if (index >= g_dev_count || !g_dev[index].msc) return false;
+    const usb_device_t *d = &g_dev[index];
+    if (d->msc_in == 0 || d->msc_out == 0) return false;
+    out->vid = d->vid;
+    out->pid = d->pid;
+    out->interface = d->msc_interface;
+    out->ep_in = d->msc_in;
+    out->ep_out = d->msc_out;
+    out->packet = d->msc_packet;
+    out->controller_io = d->hc != NULL ? d->hc->io : 0;
+    return true;
+}
+
+unsigned usb_host_device_count(void) { return g_dev_count; }
+
+/* CLEAR_FEATURE(ENDPOINT_HALT) on a bulk endpoint. Both ends restart at DATA0. */
+bool usb_host_clear_halt(unsigned index, bool in) {
+    if (index >= g_dev_count) return false;
+    usb_device_t *d = &g_dev[index];
+    uint8_t ep = in ? d->msc_in : d->msc_out;
+    uint8_t s[8];
+    make_setup(s, 0x02, REQ_CLEAR_FEATURE, 0, (uint16_t)(ep | (in ? 0x80u : 0u)), 0);
+    bool ok = control(d, s, NULL, 0);
+    if (in) d->msc_in_toggle = false; else d->msc_out_toggle = false;
+    return ok;
+}
+
+/* Bulk-Only Mass Storage Reset (class request 0xFF), then clear both halts. */
+bool usb_host_msc_reset(unsigned index) {
+    if (index >= g_dev_count) return false;
+    usb_device_t *d = &g_dev[index];
+    uint8_t s[8];
+    make_setup(s, 0x21, 0xFF, 0, d->msc_interface, 0);
+    bool ok = control(d, s, NULL, 0);
+    delay_ms(10);
+    ok = usb_host_clear_halt(index, true) && ok;
+    ok = usb_host_clear_halt(index, false) && ok;
+    return ok;
+}
+
 /* ------------------------------------------------------------- enumeration */
 
 /* Diagnostic printing: hex digits and "root.hub.hub" port paths. */
@@ -600,6 +750,7 @@ static void configure(usb_device_t *d, const uint8_t *cfg, unsigned total, bool 
     bool any_hub = device_is_hub;
     uint8_t interface = 0;
     uint8_t iface_kind = KIND_NONE;
+    bool iface_msc = false;
 
     unsigned pos = 0;
     while (pos + 2u <= total) {
@@ -611,9 +762,23 @@ static void configure(usb_device_t *d, const uint8_t *cfg, unsigned total, bool 
             interface = cfg[pos + 2];
             if (cls == CLASS_HUB) any_hub = true;
             iface_kind = KIND_NONE;
+            iface_msc = false;
+            if (cls == CLASS_MSC && sub == MSC_SUBCLASS_SCSI && proto == MSC_PROTOCOL_BOT && !d->msc) {
+                iface_msc = true;
+                d->msc = true;
+                d->msc_interface = interface;
+            }
             if (cls == CLASS_HID && sub == HID_SUBCLASS_BOOT) {
                 if (proto == HID_PROTOCOL_KEYBOARD) iface_kind = KIND_KEYBOARD;
                 else if (proto == HID_PROTOCOL_MOUSE) iface_kind = KIND_MOUSE;
+            }
+        } else if (type == DESC_ENDPOINT && len >= 7u && iface_msc) {
+            uint8_t addr = cfg[pos + 2], attr = cfg[pos + 3];
+            unsigned packet = cfg[pos + 4] | (cfg[pos + 5] << 8);
+            if ((attr & 3u) == 2u) {                     /* bulk */
+                d->msc_packet = (uint8_t)(packet < 8u ? 8u : packet > 64u ? 64u : packet);
+                if ((addr & 0x80u) != 0) d->msc_in = addr & 0x0Fu;
+                else d->msc_out = addr & 0x0Fu;
             }
         } else if (type == DESC_ENDPOINT && len >= 7u && iface_kind != KIND_NONE) {
             uint8_t addr = cfg[pos + 2], attr = cfg[pos + 3];
@@ -833,6 +998,47 @@ static void root_port(uhci_hc_t *hc, unsigned n) {
 
 /* ------------------------------------------------------------- status */
 
+void usb_host_summary(usb_summary_t *out) {
+    out->controllers = g_hc_count;
+    out->devices = g_dev_count;
+    out->keyboards = out->mice = 0;
+    out->keyboard_reports = out->keyboard_errors = 0;
+    out->mouse_reports = out->mouse_errors = 0;
+    for (unsigned i = 0; i < g_dev_count; i++) {
+        const usb_device_t *d = &g_dev[i];
+        for (unsigned k = 0; k < d->ep_count; k++) {
+            const usb_ep_t *e = &d->eps[k];
+            if (e->kind == KIND_KEYBOARD) {
+                out->keyboards++;
+                out->keyboard_reports += e->reports;
+                out->keyboard_errors += e->errors;
+            } else if (e->kind == KIND_MOUSE) {
+                out->mice++;
+                out->mouse_reports += e->reports;
+                out->mouse_errors += e->errors;
+            }
+        }
+    }
+}
+
+bool usb_host_device_info(unsigned i, usb_device_info_t *out) {
+    if (i >= g_dev_count) return false;
+    const usb_device_t *d = &g_dev[i];
+    memset(out, 0, sizeof *out);
+    out->vid = d->vid;
+    out->pid = d->pid;
+    out->dev_class = d->dev_class;
+    out->is_hub = d->is_hub;
+    out->controller_io = d->hc != NULL ? d->hc->io : 0;
+    out->path_len = d->path.len > USB_INFO_PATH_MAX ? USB_INFO_PATH_MAX : d->path.len;
+    for (unsigned k = 0; k < out->path_len; k++) out->path[k] = d->path.ports[k];
+    for (unsigned k = 0; k < d->ep_count; k++) {
+        if (d->eps[k].kind == KIND_KEYBOARD) out->keyboard = true;
+        if (d->eps[k].kind == KIND_MOUSE) out->mouse = true;
+    }
+    return true;
+}
+
 void usb_host_print_status(void) {
     console_write("usb: ");
     console_write_dec(g_hc_count);
@@ -910,4 +1116,28 @@ bool usb_host_init(uint64_t hhdm_offset) {
         for (unsigned n = 0; n < 2; n++) root_port(hc, n);
     }
     return g_hc_count != 0;
+}
+
+/* Boot diagnostic: every USB controller in PCI config space, whether or not we drive it.
+ * Read-only. The vendor and device IDs are what the iMac's real controllers need, since the
+ * hardware leads in the spec were not confirmed. prog_if picks the interface: 00 UHCI,
+ * 10 OHCI, 20 EHCI, 30 xHCI. */
+#define USB_PCI_MAX 16u
+
+void usb_report_pci_controllers(void) {
+    static const uint8_t progs[4] = {0x00u, 0x10u, 0x20u, 0x30u};
+    static const char *names[4] = {"UHCI", "OHCI", "EHCI", "xHCI"};
+    unsigned total = 0;
+    for (unsigned k = 0; k < 4u; k++) {
+        for (size_t i = 0; i < USB_PCI_MAX; i++) {
+            pci_function_t f;
+            if (!pci_find_class(0x0Cu, 0x03u, progs[k], i, &f)) break;
+            uint32_t bar0 = pci_config_read32(f.bus, f.device, f.function, 0x10u);
+            kprintf("[usb] pci %02x:%02x.%u %s  %04x:%04x  bar0 0x%08x\n", f.bus, f.device,
+                    f.function, names[k], (unsigned)f.vendor_id, (unsigned)f.device_id,
+                    (unsigned)bar0);
+            total++;
+        }
+    }
+    if (total == 0) kprintf("[usb] no USB controllers in PCI config space\n");
 }

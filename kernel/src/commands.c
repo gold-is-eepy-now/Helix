@@ -6,7 +6,10 @@
  * milestones. The command table is deliberately trivial to extend.
  */
 
+#include "desktop.h"
+#include "klog.h"
 #include "commands.h"
+#include "accounts.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -33,7 +36,25 @@
 #include "filesystem.h"
 #include "display_surface.h"
 #include "input_device.h"
+#include "net.h"
+#include "net_dhcp.h"
+#include "net_dns.h"
+#include "net_http.h"
+#include "virtio_gpu.h"
+#include "acpi.h"
+#include "pci.h"
+#include "intel_lpss_gspi.h"
+#include "apple_topcase_spi.h"
+#include "xhci.h"
+#include "ahci.h"
+#include "block_device.h"
+#include "fat32.h"
+#include "usb_storage.h"
+#include "spi.h"
+#include "net_tcp.h"
+#include "net_icmp.h"
 #include "net_interface.h"
+#include "e1000.h"
 #include "ext4.h"
 #include "shell.h"
 #include "usb_host.h"
@@ -122,6 +143,13 @@ static void cmd_clear(int argc, char **argv) {
     (void)argc;
     (void)argv;
     console_clear();
+}
+
+/* A joke, after the Backrooms film: the answer to "architect". */
+static void cmd_architect(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    console_write("I am a fucking architect\n");
 }
 
 static void cmd_color(int argc, char **argv) {
@@ -634,6 +662,11 @@ static void cmd_uptime(int argc, char **argv) {
     console_write(" ms)\n");
 }
 
+/* One calc in CALC_MEME_ODDS, chosen at random, sums 9 + 10 as 21 and says so.
+ * The random source is the CPU timestamp counter's low bits: it changes every
+ * cycle, so the moment the command runs is effectively random. */
+#define CALC_MEME_ODDS 4u
+
 static void cmd_calc(int argc, char **argv) {
     if (argc != 4) {
         console_write("usage: calc <number> <+|-|*|/|%> <number>\n");
@@ -648,8 +681,15 @@ static void cmd_calc(int argc, char **argv) {
     }
     char op = argv[2][0];
     uint64_t result;
+    bool meme = false;
     switch (op) {
-        case '+': result = a + b; break;
+        case '+':
+            result = a + b;
+            if (a == 9 && b == 10 && (time_tsc() >> 4) % CALC_MEME_ODDS == 0) {
+                result = 21;
+                meme = true;
+            }
+            break;
         case '-':
             if (b > a) {
                 console_write("calc: negative results are not supported\n");
@@ -686,6 +726,11 @@ static void cmd_calc(int argc, char **argv) {
     print_u64(result);
     console_reset_color();
     console_putc('\n');
+    if (meme) {
+        console_set_fg(CONSOLE_RED);
+        console_write("you stupid\n");
+        console_reset_color();
+    }
 }
 
 static void cmd_usermode(int argc, char **argv) {
@@ -736,6 +781,648 @@ static void cmd_init(int argc, char **argv) {
 }
 
 /* exec <path> [args...]: run a program from the root and wait for it. */
+/* desktop: the Windows 98-style graphical desktop. Returns to the text shell when
+ * the user chooses Shut Down (or presses Esc). */
+/* log            print the recent kernel events, oldest first
+ * log clear      forget the events recorded so far
+ * log serial on|off   echo every event to the serial console as it happens */
+/* nslookup NAME: resolve a host name with the DNS server (10.0.2.3 under QEMU). */
+static void cmd_nslookup(int argc, char **argv) {
+    if (argc < 2) {
+        kprintf("usage: nslookup <name>\n");
+        return;
+    }
+    if (!net_ready()) {
+        kprintf("nslookup: no network card (QEMU: -netdev user,id=n0 -device e1000,netdev=n0)\n");
+        return;
+    }
+    uint8_t ip[4];
+    int r = net_dns_resolve(argv[1], ip, 3000);
+    if (r == NET_DNS_OK) {
+        kprintf("%s is %u.%u.%u.%u\n", argv[1], ip[0], ip[1], ip[2], ip[3]);
+    } else if (r == NET_DNS_NOTFOUND) {
+        kprintf("nslookup: %s: not found\n", argv[1]);
+    } else if (r == NET_DNS_SERVFAIL) {
+        kprintf("nslookup: %s: the DNS server failed (rcode %d)\n", argv[1], net_dns_last_rcode());
+    } else {
+        const uint8_t *s = net_dns_server();
+        kprintf("nslookup: no answer from %u.%u.%u.%u\n", s[0], s[1], s[2], s[3]);
+    }
+}
+
+/* dhcp: ask for a lease. On success the interface uses the lease's address and routes. */
+static void cmd_dhcp(int argc, char **argv) {
+    (void)argc; (void)argv;
+    if (!net_ready()) {
+        kprintf("dhcp: no network card (QEMU: -netdev user,id=n0 -device e1000,netdev=n0)\n");
+        return;
+    }
+    dhcp_lease_t l;
+    if (!net_dhcp_configure(6000, &l)) {
+        kprintf("dhcp: no lease (no DHCP server answered)\n");
+        return;
+    }
+    kprintf("dhcp: lease %u.%u.%u.%u mask %u.%u.%u.%u router %u.%u.%u.%u dns %u.%u.%u.%u server %u.%u.%u.%u, %u s\n",
+            l.ip[0], l.ip[1], l.ip[2], l.ip[3], l.mask[0], l.mask[1], l.mask[2], l.mask[3],
+            l.router[0], l.router[1], l.router[2], l.router[3], l.dns[0], l.dns[1], l.dns[2], l.dns[3],
+            l.server[0], l.server[1], l.server[2], l.server[3], l.lease_seconds);
+}
+
+/* gpu: list the display outputs the virtio-gpu device reports. */
+static void cmd_gpu(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    uint32_t n = virtio_gpu_scanout_count();
+    if (n == 0) {
+        kprintf("gpu: no virtio-gpu device ready (QEMU: -device virtio-gpu-pci)\n");
+        return;
+    }
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t w = 0, h = 0;
+        bool on = false;
+        if (!virtio_gpu_scanout(i, &w, &h, &on)) continue;
+        if (on) kprintf("gpu: scanout %u: %ux%u\n", i, w, h);
+        else kprintf("gpu: scanout %u: off\n", i);
+    }
+}
+
+/* pci: every PCI function the firmware left us, with its IDs, class and BAR0. Used to find
+ * a device's real vendor and device IDs (for example the Air's GSPI controller) before a driver
+ * matches on them. Empty slots (vendor 0xFFFF) are skipped; functions 1-7 are only probed on
+ * multi-function devices. */
+static void cmd_pci(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    unsigned shown = 0;
+    for (unsigned bus = 0; bus < 256; bus++) {
+        for (unsigned dev = 0; dev < 32; dev++) {
+            uint32_t first = pci_config_read32((uint8_t)bus, (uint8_t)dev, 0, 0);
+            if ((first & 0xFFFFu) == 0xFFFFu) continue;
+            uint32_t hdr = pci_config_read32((uint8_t)bus, (uint8_t)dev, 0, 0x0C);
+            unsigned nfn = (hdr & 0x00800000u) ? 8u : 1u;
+            for (unsigned fn = 0; fn < nfn; fn++) {
+                uint32_t id = pci_config_read32((uint8_t)bus, (uint8_t)dev, (uint8_t)fn, 0);
+                if ((id & 0xFFFFu) == 0xFFFFu) continue;
+                uint32_t cls = pci_config_read32((uint8_t)bus, (uint8_t)dev, (uint8_t)fn, 0x08);
+                uint32_t bar0 = pci_config_read32((uint8_t)bus, (uint8_t)dev, (uint8_t)fn, 0x10);
+                kprintf("pci %02x:%02x.%u  %04x:%04x  class %02x/%02x  prog_if %02x  bar0 0x%08x\n",
+                        bus, dev, fn, id & 0xFFFFu, id >> 16, (cls >> 24) & 0xFFu,
+                        (cls >> 16) & 0xFFu, (cls >> 8) & 0xFFu, bar0);
+                shown++;
+            }
+        }
+    }
+    if (shown == 0) kprintf("pci: no devices found (is the PCI config port available?)\n");
+}
+
+/* topcase: a read-only probe of the Apple top-case keyboard on the GSPI bus. It clocks one
+ * 256-byte frame out and reports the bytes and whether the CRC matches. Writes nothing. */
+static void cmd_topcase(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    topcase_probe_t p;
+    int st = topcase_probe(&p);
+    if (st != 0) {
+        kprintf("topcase: probe did not run: %s\n", spi_status_name((spi_status_t)st));
+        return;
+    }
+    kprintf("topcase: read 256 bytes: %u zero, %u 0xFF\n", (unsigned)p.zeros, (unsigned)p.ones);
+    kprintf("topcase: head");
+    for (unsigned i = 0; i < 16u; i++) kprintf(" %02x", (unsigned)p.head[i]);
+    kprintf("\n");
+    kprintf("topcase: crc stored 0x%04x, computed 0x%04x, %s\n", (unsigned)p.crc_stored,
+            (unsigned)p.crc_computed, p.crc_stored == p.crc_computed ? "MATCH" : "no match");
+}
+
+/* xhci: the xHCI controller found by discovery (read-only). */
+/* tcplisten PORT: wait for one TCP connection, read a line, answer "helix: <line>" and
+ * close. Tests the passive open: run it, then connect to the port from the host. */
+static void cmd_tcplisten(int argc, char **argv) {
+    if (argc < 2) {
+        kprintf("usage: tcplisten <port>\n");
+        return;
+    }
+    if (!net_ready()) {
+        kprintf("tcplisten: no network card (QEMU: -netdev user,id=n0 -device e1000,netdev=n0)\n");
+        return;
+    }
+    uint32_t port = 0;
+    for (const char *p = argv[1]; *p != '\0'; p++) {
+        if (*p < '0' || *p > '9') { port = 0; break; }
+        port = port * 10 + (uint32_t)(*p - '0');
+        if (port > 65535u) break;
+    }
+    if (port == 0 || port > 65535u) {
+        kprintf("tcplisten: bad port %s\n", argv[1]);
+        return;
+    }
+    int listener = net_tcp_listen((uint16_t)port);
+    if (listener < 0) {
+        kprintf("tcplisten: could not listen on port %u\n", port);
+        return;
+    }
+    kprintf("tcplisten: listening on port %u\n", port);
+    int conn = net_tcp_accept(listener, 30000);
+    if (conn < 0) {
+        kprintf("tcplisten: no connection on port %u within 30 seconds\n", port);
+        net_tcp_unlisten(listener);
+        return;
+    }
+    kprintf("tcplisten: accepted a connection on port %u\n", port);
+
+    uint8_t line[256];
+    int n = net_tcp_recv(conn, line, sizeof line, 5000);
+    while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r')) n--;
+    if (n <= 0) {
+        kprintf("tcplisten: the peer sent no data\n");
+        net_tcp_close(conn);
+        net_tcp_unlisten(listener);
+        return;
+    }
+    static const char prefix[] = "helix: ";
+    uint8_t reply[sizeof prefix - 1 + sizeof line + 1];
+    uint32_t rn = 0;
+    for (uint32_t i = 0; i < sizeof prefix - 1; i++) reply[rn++] = (uint8_t)prefix[i];
+    for (int i = 0; i < n; i++) reply[rn++] = line[i];
+    reply[rn++] = '\n';
+    if (net_tcp_send(conn, reply, rn, 3000) < 0) {
+        kprintf("tcplisten: could not send the reply\n");
+    } else {
+        kprintf("tcplisten: replied with %u bytes\n", rn);
+    }
+    net_tcp_close(conn);
+    net_tcp_unlisten(listener);
+}
+
+/* tcpsink PORT: accept one connection and read until the peer closes. Prints the byte
+ * count and byte sum, so a host can check that every byte arrived, and how many loss
+ * recoveries ran during this transfer. */
+static void cmd_tcpsink(int argc, char **argv) {
+    if (argc < 2) {
+        kprintf("usage: tcpsink <port>\n");
+        return;
+    }
+    if (!net_ready()) {
+        kprintf("tcpsink: no network card (QEMU: -netdev user,id=n0 -device e1000,netdev=n0)\n");
+        return;
+    }
+    uint32_t port = 0;
+    for (const char *p = argv[1]; *p != '\0'; p++) {
+        if (*p < '0' || *p > '9') { port = 0; break; }
+        port = port * 10 + (uint32_t)(*p - '0');
+        if (port > 65535u) break;
+    }
+    if (port == 0 || port > 65535u) {
+        kprintf("tcpsink: bad port %s\n", argv[1]);
+        return;
+    }
+    uint32_t fast_before = 0, timeouts_before = 0;
+    uint32_t dup_before = 0;
+    net_tcp_stats(&fast_before, &timeouts_before, &dup_before);
+    int listener = net_tcp_listen((uint16_t)port);
+    if (listener < 0) {
+        kprintf("tcpsink: could not listen on port %u\n", port);
+        return;
+    }
+    kprintf("tcpsink: listening on port %u\n", port);
+    int conn = net_tcp_accept(listener, 30000);
+    if (conn < 0) {
+        kprintf("tcpsink: no connection on port %u within 30 seconds\n", port);
+        net_tcp_unlisten(listener);
+        return;
+    }
+    uint8_t buf[512];
+    uint32_t total = 0;
+    uint32_t sum = 0;
+    for (;;) {
+        int n = net_tcp_recv(conn, buf, sizeof buf, 10000);
+        if (n <= 0) break;            /* 0: the peer closed after its last byte; -1: stalled */
+        for (int i = 0; i < n; i++) sum += buf[i];
+        total += (uint32_t)n;
+    }
+    net_tcp_close(conn);
+    net_tcp_unlisten(listener);
+    uint32_t fast_after = 0, timeouts_after = 0;
+    uint32_t dup_after = 0;
+    net_tcp_stats(&fast_after, &timeouts_after, &dup_after);
+    kprintf("tcpsink: received %u bytes, sum %u\n", total, sum);
+    kprintf("tcpsink: fast_retransmits=%u timeouts=%u dup_acks=%u\n",
+            fast_after - fast_before, timeouts_after - timeouts_before, dup_after - dup_before);
+}
+
+/* netdrop N: test hook. Do not send every Nth outgoing TCP data segment (0 turns it off).
+ * QEMU does not lose packets, so this creates the loss that recovery repairs. */
+static void cmd_netdrop(int argc, char **argv) {
+    if (argc < 2) {
+        kprintf("usage: netdrop <n>   (0 turns the test drop off)\n");
+        return;
+    }
+    /* netdrop applies to outgoing data only: the tcpsend test sends, so this is its loss. */
+    uint32_t n = 0;
+    for (const char *p = argv[1]; *p != '\0'; p++) {
+        if (*p < '0' || *p > '9' || n > 100000u) { kprintf("netdrop: bad count %s\n", argv[1]); return; }
+        n = n * 10 + (uint32_t)(*p - '0');
+    }
+    net_tcp_set_drop_every(n);
+    if (n == 0) kprintf("netdrop: off\n");
+    else kprintf("netdrop: not sending every %uth outgoing data segment\n", n);
+}
+
+/* tcpsend IP PORT COUNT: connect, send COUNT bytes of a fixed pattern, close. Prints the
+ * byte count, the byte sum and this transfer's loss-recovery counters. With netdrop on,
+ * this is Helix as the sender under loss, which is what fast retransmit repairs. */
+static uint8_t g_send_pattern[65536];
+
+static void cmd_tcpsend(int argc, char **argv) {
+    if (argc < 4) {
+        kprintf("usage: tcpsend <a.b.c.d> <port> <count>\n");
+        return;
+    }
+    if (!net_ready()) {
+        kprintf("tcpsend: no network card (QEMU: -netdev user,id=n0 -device e1000,netdev=n0)\n");
+        return;
+    }
+    uint8_t ip[4];
+    if (!net_parse_ip(argv[1], ip)) {
+        kprintf("tcpsend: %s is not an IPv4 address\n", argv[1]);
+        return;
+    }
+    uint32_t port = 0;
+    for (const char *p = argv[2]; *p != '\0'; p++) {
+        if (*p < '0' || *p > '9') { port = 0; break; }
+        port = port * 10 + (uint32_t)(*p - '0');
+        if (port > 65535u) break;
+    }
+    if (port == 0 || port > 65535u) {
+        kprintf("tcpsend: bad port %s\n", argv[2]);
+        return;
+    }
+    uint32_t count = 0;
+    for (const char *p = argv[3]; *p != '\0'; p++) {
+        if (*p < '0' || *p > '9' || count > 65536u) { count = 0; break; }
+        count = count * 10 + (uint32_t)(*p - '0');
+    }
+    if (count == 0 || count > 65536u) {
+        kprintf("tcpsend: count must be 1 to 65536\n");
+        return;
+    }
+    uint32_t sum = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        g_send_pattern[i] = (uint8_t)((i * 7u + 3u) & 0xFFu);
+        sum += g_send_pattern[i];
+    }
+
+    uint32_t fast_before = 0, timeouts_before = 0;
+    uint32_t dup_before = 0;
+    net_tcp_stats(&fast_before, &timeouts_before, &dup_before);
+    int conn = net_tcp_connect(ip, (uint16_t)port, 5000);
+    if (conn < 0) {
+        kprintf("tcpsend: connect to %s:%u failed\n", argv[1], port);
+        return;
+    }
+    int sent = net_tcp_send(conn, g_send_pattern, count, 30000);
+    net_tcp_close(conn);
+    uint32_t fast_after = 0, timeouts_after = 0;
+    uint32_t dup_after = 0;
+    net_tcp_stats(&fast_after, &timeouts_after, &dup_after);
+    if (sent < 0) kprintf("tcpsend: send failed\n");
+    else kprintf("tcpsend: sent %u bytes, sum %u\n", count, sum);
+    kprintf("tcpsend: fast_retransmits=%u timeouts=%u dup_acks=%u\n",
+            fast_after - fast_before, timeouts_after - timeouts_before, dup_after - dup_before);
+}
+
+static bool fat_ls_cb(void *ctx, const fat32_entry_t *e) {
+    (void)ctx;
+    kprintf("%c %u %s\n", e->is_dir ? 'd' : 'f', e->size, e->name);
+    return false;
+}
+
+/* fat <device> info | ls [path] | cat <path> | sum <path>
+ * Read-only access to a FAT32 volume that starts at sector 0 of a block device (for
+ * example `fat sata1 ls /`). Each call mounts and unmounts the volume. See docs/21-fat32.md. */
+static void cmd_fat(int argc, char **argv) {
+    if (argc < 3) {
+        kprintf("usage: fat <device> info | ls [path] | cat <path> | sum <path>\n");
+        return;
+    }
+    block_device_t *dev = block_device_find(argv[1]);
+    if (dev == NULL) {
+        kprintf("fat: no block device named %s (the disk command lists them)\n", argv[1]);
+        return;
+    }
+    fat32_fs_t *fs = fat32_mount(dev, 0);
+    if (fs == NULL) {
+        kprintf("fat: %s is not a FAT32 volume (%s)\n", argv[1], fat32_mount_error());
+        return;
+    }
+    const char *sub = argv[2];
+    if (strcmp(sub, "info") == 0) {
+        uint32_t bps = 0, spc = 0, clusters = 0, free_clusters = 0;
+        fat32_info(fs, &bps, &spc, &clusters, &free_clusters);
+        kprintf("fat32: label %s, %u bytes per sector, %u sectors per cluster, %u clusters, %u free\n",
+                fat32_label(fs), bps, spc, clusters, free_clusters);
+    } else if (strcmp(sub, "ls") == 0) {
+        const char *path = argc > 3 ? argv[3] : "/";
+        if (!fat32_list(fs, path, fat_ls_cb, NULL)) {
+            kprintf("fat: %s is not a directory, or was not found\n", path);
+        }
+    } else if (strcmp(sub, "cat") == 0 && argc > 3) {
+        fat32_entry_t e;
+        if (!fat32_stat(fs, argv[3], &e) || e.is_dir) {
+            kprintf("fat: %s is not a file, or was not found\n", argv[3]);
+        } else {
+            uint8_t chunk[128];
+            uint32_t shown = 0;
+            while (shown < 4096) {
+                int64_t n = fat32_read(fs, argv[3], shown, chunk, sizeof chunk);
+                if (n <= 0) break;
+                for (int64_t i = 0; i < n; i++) {
+                    uint8_t ch = chunk[i];
+                    kprintf("%c", (ch == '\n' || (ch >= 32 && ch < 127)) ? (char)ch : '.');
+                }
+                shown += (uint32_t)n;
+            }
+            if (e.size > shown) kprintf("\nfat: (output stops after %u of %u bytes)\n", shown, e.size);
+        }
+    } else if (strcmp(sub, "sum") == 0 && argc > 3) {
+        fat32_entry_t e;
+        if (!fat32_stat(fs, argv[3], &e) || e.is_dir) {
+            kprintf("fat: %s is not a file, or was not found\n", argv[3]);
+        } else {
+            uint8_t chunk[512];
+            uint64_t total = 0;
+            uint32_t sum = 0;
+            bool ok = true;
+            for (;;) {
+                int64_t n = fat32_read(fs, argv[3], total, chunk, sizeof chunk);
+                if (n < 0) { ok = false; break; }
+                if (n == 0) break;
+                for (int64_t i = 0; i < n; i++) sum += chunk[i];
+                total += (uint64_t)n;
+            }
+            if (ok) kprintf("fat: %s %u bytes, sum %u\n", argv[3], (uint32_t)total, sum);
+            else kprintf("fat: read error in %s after %u bytes\n", argv[3], (uint32_t)total);
+        }
+    } else {
+        kprintf("usage: fat <device> info | ls [path] | cat <path> | sum <path>\n");
+    }
+    fat32_unmount(fs);
+}
+
+static void disk_report(block_device_t *dev, const char *what, const char *what2, uint64_t blocks,
+                        uint64_t block_size) {
+    kprintf("%s: %s%s, %llu blocks of %u bytes (%llu MiB)\n", dev->name, what, what2, (unsigned long long)blocks,
+            (unsigned)block_size, (unsigned long long)(blocks * block_size / (1024u * 1024u)));
+    uint8_t sector[4096];
+    if (block_size <= sizeof sector && block_device_read(dev, 0, sector, 1) == 1 && block_size >= 512) {
+        /* The boot signature is the byte 0x55 at offset 510 then 0xAA at 511,
+         * so print in file order to show it as 55aa. */
+        kprintf("%s: sector 0 signature %02x%02x\n", dev->name, sector[510], sector[511]);
+    } else {
+        kprintf("%s: could not read sector 0\n", dev->name);
+    }
+}
+
+static void cmd_disk(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    int n = ahci_disk_count();
+    int u = usb_storage_disk_count();
+    if (n == 0 && u == 0) {
+        kprintf("disk: no SATA or USB disk found\n");
+        return;
+    }
+    for (int i = 0; i < n; i++) {
+        const ahci_disk_t *d = ahci_disk(i);
+        disk_report(d->dev, d->model, "", d->sectors, 512);
+    }
+    for (int i = 0; i < u; i++) {
+        const usb_disk_t *d = usb_storage_disk(i);
+        kprintf("%s: USB %s %s\n", d->dev->name, d->vendor, d->product);
+        disk_report(d->dev, "", "", d->block_count, d->block_size);
+    }
+}
+
+static void cmd_xhci(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    xhci_info_t x;
+    xhci_get_info(&x);
+    if (!x.found) {
+        kprintf("xhci: no xHCI controller found on this machine\n");
+        return;
+    }
+    kprintf("xhci: at %02x:%02x.%u, BAR0 0x%llx, version 0x%04x\n", x.bus, x.device, x.function,
+            (unsigned long long)x.bar_phys, (unsigned)x.hci_version);
+    kprintf("xhci: slots %u, interrupters %u, ports %u, ports connected %u, powered %u\n",
+            (unsigned)x.max_slots, (unsigned)x.max_intrs, (unsigned)x.max_ports,
+            (unsigned)x.ports_connected, (unsigned)x.ports_powered);
+}
+
+/* spi: report the Intel LPSS GSPI controller's state. Read only: no transfers. */
+static void cmd_spi(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    intel_lpss_gspi_info_t s;
+    intel_lpss_gspi_info(&s);
+    if (!s.found) {
+        kprintf("spi: Intel LPSS GSPI 8086:9CE6 not found on this machine\n");
+        return;
+    }
+    kprintf("spi: Intel LPSS GSPI 8086:9CE6 at %02x:%02x.%u, BAR0 0x%llx\n",
+            s.bus, s.device, s.function, (unsigned long long)s.bar_phys);
+    kprintf("spi: ready %s, SCR %u, SSCR0 readback 0x%08x, SSSR 0x%08x\n",
+            s.ready ? "yes" : "no", (unsigned)s.scr, s.sscr0_readback, s.sssr);
+}
+
+/* acpi: list the firmware's ACPI tables, with the length and checksum status of each. */
+static void cmd_acpi(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    unsigned n = acpi_table_count();
+    if (n == 0) {
+        kprintf("acpi: no firmware tables (the bootloader gave no RSDP, or it failed its checksum)\n");
+        return;
+    }
+    kprintf("acpi: ACPI revision %u, %u table(s)\n", (unsigned)acpi_revision() + 1u, n);
+    for (unsigned i = 0; i < n; i++) {
+        acpi_table_t t;
+        if (!acpi_table_at(i, &t)) continue;
+        kprintf("acpi: %s  length %u  at 0x%llx  checksum %s%s\n", t.sig, (unsigned)t.length,
+                (unsigned long long)t.phys, t.checksum_ok ? "ok" : "BAD",
+                t.from_fadt ? "  (via FADT)" : "");
+    }
+}
+
+/* fetch http://host[:port]/path: an HTTP GET that prints the status, the body length and
+ * the content type. The Browser window uses the same client. */
+static void cmd_fetch(int argc, char **argv) {
+    static uint8_t buf[64u * 1024u];
+    if (argc < 2) {
+        kprintf("usage: fetch <http://host[:port]/path>\n");
+        return;
+    }
+    if (!net_ready()) {
+        kprintf("fetch: no network card (QEMU: -netdev user,id=n0 -device e1000,netdev=n0)\n");
+        return;
+    }
+    net_http_result_t r;
+    if (!net_http_get(argv[1], buf, sizeof buf, &r)) {
+        kprintf("fetch: %s\n", r.error);
+        return;
+    }
+    kprintf("fetch: HTTP %d, %u byte(s), type %s\n", r.status, r.body_len,
+            r.content_type[0] != '\0' ? r.content_type : "(none)");
+    if (r.location[0] != '\0') kprintf("fetch: redirect to %s\n", r.location);
+}
+
+/* tcpget a.b.c.d PORT PATH: connect over TCP, send a GET, print the first line of the
+ * reply. A check of the TCP layer; the browser comes later. */
+static void cmd_tcpget(int argc, char **argv) {
+    if (argc < 4) {
+        kprintf("usage: tcpget <a.b.c.d> <port> <path>\n");
+        return;
+    }
+    if (!net_ready()) {
+        kprintf("tcpget: no network card (QEMU: -netdev user,id=n0 -device e1000,netdev=n0)\n");
+        return;
+    }
+    uint8_t ip[4];
+    if (!net_parse_ip(argv[1], ip)) {
+        kprintf("tcpget: %s is not an IPv4 address\n", argv[1]);
+        return;
+    }
+    uint32_t port = 0;
+    for (const char *p = argv[2]; *p != '\0'; p++) {
+        if (*p < '0' || *p > '9') { port = 0; break; }
+        port = port * 10 + (uint32_t)(*p - '0');
+        if (port > 65535u) break;
+    }
+    if (port == 0 || port > 65535u) {
+        kprintf("tcpget: bad port %s\n", argv[2]);
+        return;
+    }
+    int conn = net_tcp_connect(ip, (uint16_t)port, 3000);
+    if (conn < 0) {
+        kprintf("tcpget: connect to %s:%u failed\n", argv[1], port);
+        return;
+    }
+    uint8_t req[320];
+    uint32_t n = 0;
+    static const char head[] = "GET ";
+    static const char tail[] = " HTTP/1.0\r\nHost: helix\r\nConnection: close\r\n\r\n";
+    for (const char *s = head; *s != '\0'; s++) req[n++] = (uint8_t)*s;
+    for (const char *s = argv[3]; *s != '\0' && n < 200; s++) req[n++] = (uint8_t)*s;
+    for (const char *s = tail; *s != '\0'; s++) req[n++] = (uint8_t)*s;
+    if (net_tcp_send(conn, req, n, 3000) < 0) {
+        kprintf("tcpget: send failed\n");
+        net_tcp_close(conn);
+        return;
+    }
+    static char resp[512];
+    uint32_t got = 0, total = 0;
+    for (;;) {
+        uint8_t chunk[256];
+        int r = net_tcp_recv(conn, chunk, sizeof chunk, 3000);
+        if (r <= 0) {
+            if (r < 0) kprintf("tcpget: receive timed out\n");
+            break;
+        }
+        total += (uint32_t)r;
+        for (int i = 0; i < r && got < sizeof resp - 1; i++) resp[got++] = (char)chunk[i];
+    }
+    resp[got] = '\0';
+    net_tcp_close(conn);
+    uint32_t cut = 0;
+    while (cut < got && resp[cut] != '\r' && resp[cut] != '\n') cut++;
+    resp[cut] = '\0';
+    kprintf("tcpget: %u byte(s); first line: %s\n", total, resp);
+}
+
+/* ping a.b.c.d: four echo requests, one second each. The round-trip time is in
+ * microseconds, measured with the TSC (calibrated at boot). */
+static void cmd_ping(int argc, char **argv) {
+    if (argc < 2) {
+        kprintf("usage: ping <a.b.c.d>\n");
+        return;
+    }
+    if (!net_ready()) {
+        kprintf("ping: no network card (QEMU: -netdev user,id=n0 -device e1000,netdev=n0)\n");
+        return;
+    }
+    uint8_t ip[4];
+    if (!net_parse_ip(argv[1], ip)) {
+        /* Not a dotted quad: treat it as a host name and ask the DNS server. */
+        if (net_dns_resolve(argv[1], ip, 3000) != NET_DNS_OK) {
+            kprintf("ping: cannot resolve %s\n", argv[1]);
+            return;
+        }
+        kprintf("ping: %s is %u.%u.%u.%u\n", argv[1], ip[0], ip[1], ip[2], ip[3]);
+    }
+    kprintf("PING %u.%u.%u.%u: 32 data bytes\n", ip[0], ip[1], ip[2], ip[3]);
+    int received = 0;
+    for (uint16_t seq = 1; seq <= 4; seq++) {
+        uint32_t rtt_us = 0;
+        if (net_ping(ip, seq, 1000, &rtt_us)) {
+            received++;
+            kprintf("reply from %u.%u.%u.%u: seq=%u time=%u us\n", ip[0], ip[1], ip[2], ip[3], seq, rtt_us);
+        } else {
+            kprintf("request timed out: seq=%u\n", seq);
+        }
+    }
+    kprintf("4 sent, %d received\n", received);
+}
+
+static void cmd_net(int argc, char **argv) {
+    if (!e1000_present()) {
+        kprintf("no network card (QEMU: -netdev user,id=n0 -device e1000,netdev=n0)\n");
+        return;
+    }
+    if (argc >= 2 && str_eq(argv[1], "test")) {
+        kprintf(e1000_selftest() ? "net test: ARP reply from gateway 10.0.2.2\n"
+                                 : "net test: FAILED, no ARP reply from 10.0.2.2\n");
+        return;
+    }
+    uint8_t mac[6];
+    e1000_mac(mac);
+    kprintf("e1000  MAC %02x:%02x:%02x:%02x:%02x:%02x  link %s\n", mac[0], mac[1], mac[2], mac[3],
+            mac[4], mac[5], e1000_link_up() ? "up" : "down");
+    kprintf("frames  rx %u  tx %u\n", e1000_rx_count(), e1000_tx_count());
+}
+
+static void cmd_log(int argc, char **argv) {
+    if (argc >= 2 && str_eq(argv[1], "clear")) {
+        klog_clear();
+        kprintf("log cleared\n");
+        return;
+    }
+    if (argc >= 3 && str_eq(argv[1], "serial")) {
+        if (str_eq(argv[2], "on")) {
+            klog_set_serial(KLOG_ALL);
+        } else if (str_eq(argv[2], "off")) {
+            klog_set_serial(KLOG_PROC | KLOG_SHELL | KLOG_DESKTOP | KLOG_EXC);
+        } else {
+            kprintf("usage: log serial on|off\n");
+            return;
+        }
+        kprintf("log serial %s\n", str_eq(argv[2], "on") ? "on" : "off");
+        return;
+    }
+    if (argc >= 2) {
+        kprintf("usage: log [clear | serial on|off]\n");
+        return;
+    }
+    klog_dump();
+}
+
+static void cmd_desktop(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    if (!desktop_run()) {
+        kprintf("desktop: could not start (needs a framebuffer of at least 640x480)\n");
+    }
+}
+
 static void cmd_exec(int argc, char **argv) {
     if (argc < 2) {
         console_write("usage: exec <path> [args...]\n");
@@ -746,8 +1433,10 @@ static void cmd_exec(int argc, char **argv) {
         console_write("exec: could not run ");
         console_write(argv[1]);
         console_putc('\n');
+        shell_set_status(127);
         return;
     }
+    shell_set_status((int)status);
     console_write("exec: ");
     console_write(argv[1]);
     console_write(" exited with status ");
@@ -1767,7 +2456,8 @@ static void cmd_uname(int argc, char **argv) {
 
 static void cmd_whoami(int argc, char **argv) {
     (void)argc; (void)argv;
-    console_write("root\n");
+    console_write(accounts_session());
+    console_write("\n");
 }
 
 static void cmd_chmod(int argc, char **argv) {
@@ -1823,27 +2513,82 @@ static void cmd_chown(int argc, char **argv) {
 }
 
 static void cmd_mkusr(int argc, char **argv) {
-    if (argc < 2) {
-        console_write("mkusr: missing username\n");
-        console_write("usage: mkusr <username> [password]\n");
+    if (argc < 3) {
+        console_write("mkusr: missing username or password\n");
+        console_write("usage: mkusr <username> <password>\n");
         return;
     }
-    /* User management requires /etc/passwd and /etc/shadow support.
-     * For now, just report the request. */
-    console_write("mkusr: user '");
+    if (!ext4_get_current()) {
+        console_write("mkusr: no ext4 filesystem mounted\n");
+        return;
+    }
+    if (!accounts_name_valid(argv[1])) {
+        console_write("mkusr: names use letters, digits, '-' and '_', and start with a letter\n");
+        return;
+    }
+    uint32_t uid = 0;
+    if (!accounts_create(argv[1], argv[2], &uid)) {
+        console_write("mkusr: could not create '");
+        console_write(argv[1]);
+        console_write("' (name taken, table full, or password too long)\n");
+        return;
+    }
+    console_write("mkusr: created '");
     console_write(argv[1]);
-    console_write("' creation requested (not yet implemented)\n");
+    console_write("' (uid ");
+    console_write_dec(uid);
+    console_write(")\n");
+}
+
+static void cmd_users(int argc, char **argv) {
+    (void)argc; (void)argv;
+    console_write("root (uid 0, console)\n");
+    for (uint32_t i = 0; i < accounts_count(); i++) {
+        console_write(accounts_name(i));
+        console_write("\n");
+    }
 }
 
 static void cmd_su(int argc, char **argv) {
     if (argc < 2) {
         console_write("su: missing username\n");
-        console_write("usage: su [username]\n");
+        console_write("usage: su <username> [password]   (root needs no password)\n");
         return;
     }
-    console_write("su: switching to user '");
-    console_write(argv[1]);
-    console_write("' (not yet implemented)\n");
+    if (strcmp(argv[1], "root") == 0) {
+        accounts_set_session("root", 0);
+        return;
+    }
+    if (argc < 3) {
+        console_write("su: password required\n");
+        return;
+    }
+    uint32_t uid = 0;
+    if (!accounts_verify(argv[1], argv[2], &uid)) {
+        console_write("su: authentication failed\n");
+        return;
+    }
+    accounts_set_session(argv[1], uid);
+}
+
+static void cmd_passwd(int argc, char **argv) {
+    if (argc < 2) {
+        console_write("passwd: missing new password\n");
+        console_write("usage: passwd <new-password>\n");
+        return;
+    }
+    const char *who = accounts_session();
+    if (strcmp(who, "root") == 0) {
+        console_write("passwd: root is the console and has no password entry\n");
+        return;
+    }
+    if (!accounts_set_password(who, argv[1])) {
+        console_write("passwd: could not save the new password\n");
+        return;
+    }
+    console_write("passwd: password changed for '");
+    console_write(who);
+    console_write("'\n");
 }
 
 static void cmd_dosu(int argc, char **argv) {
@@ -2013,12 +2758,14 @@ static void cmd_umount(int argc, char **argv) {
 
 static void cmd_true(int argc, char **argv) {
     (void)argc; (void)argv;
+    shell_set_status(0);  /* `if true then` needs to hear it: fn returns void */
     console_write("true: returning success (exit code 0)\n");
     return;
 }
 
 static void cmd_false(int argc, char **argv) {
     (void)argc; (void)argv;
+    shell_set_status(1);
     console_write("false: returning failure (exit code 1)\n");
     return;
 }
@@ -2047,6 +2794,7 @@ const command_t helix_commands[] = {
     {"echo",    "print the arguments back",             cmd_echo},
     {"history", "list the commands typed so far",       cmd_history},
     {"calc",    "integer calculator: calc 2 + 3",       cmd_calc},
+    {"architect", "a joke (the Backrooms)",             cmd_architect},
     {"clear",   "clear the screen",                     cmd_clear},
     {"color",   "turn ANSI colour on/off: color on|off", cmd_color},
     {"version", "show the OS version",                  cmd_version},
@@ -2056,6 +2804,26 @@ const command_t helix_commands[] = {
     {"usershell", "run the userland shell in ring 3 (type exit to return)", cmd_usershell},
     {"init",    "run /bin/init (PID 1) in ring 3; it starts /bin/sh", cmd_init},
     {"exec",    "run a program from the root: exec <path> [args...]", cmd_exec},
+    {"desktop", "start the graphical desktop (Start, My Computer, Esc to leave)", cmd_desktop},
+    {"log",     "show the kernel event log (log clear | log serial on|off)", cmd_log},
+    {"net",     "network card: MAC, link, frame counters (net test: ARP self-test)", cmd_net},
+    {"ping",    "ping an address or host name: ping <a.b.c.d | name> (four echo requests)", cmd_ping},
+    {"nslookup", "resolve a host name with the DNS server: nslookup <name>", cmd_nslookup},
+    {"tcpget", "fetch a path over TCP: tcpget <a.b.c.d> <port> <path>", cmd_tcpget},
+    {"fetch", "HTTP GET of an http:// address: fetch <http://host[:port]/path>", cmd_fetch},
+    {"gpu", "list the display outputs of the virtio-gpu device", cmd_gpu},
+    {"acpi", "list the firmware's ACPI tables", cmd_acpi},
+    {"spi", "Intel LPSS GSPI controller state (MacBook Air SPI)", cmd_spi},
+    {"xhci", "xHCI (USB 3) controller discovery, read-only", cmd_xhci},
+    {"disk", "list SATA disks on the AHCI controller and read sector 0", cmd_disk},
+    {"fat", "read a FAT32 volume on a block device: info, ls, cat, sum", cmd_fat},
+    {"tcplisten", "accept one TCP connection on a port, answer one line, close", cmd_tcplisten},
+    {"tcpsink", "accept one TCP connection and count the bytes it sends", cmd_tcpsink},
+    {"tcpsend", "connect to a host, send COUNT bytes of a fixed pattern, close", cmd_tcpsend},
+    {"netdrop", "test hook: skip sending every Nth outgoing TCP data segment (0 = off)", cmd_netdrop},
+    {"topcase", "read-only probe of the Apple top-case keyboard over SPI", cmd_topcase},
+    {"pci", "list every PCI function: vendor:device, class, BAR0", cmd_pci},
+    {"dhcp",    "get a network address from a DHCP server (replaces the static address)", cmd_dhcp},
     {"halt",    "halt the machine",                     cmd_halt},
     {"reboot",  "restart the machine",                  cmd_reboot},
     {"fsinfo",  "show filesystem information",          cmd_fsinfo},
@@ -2076,6 +2844,8 @@ const command_t helix_commands[] = {
     {"chown",   "change file owner",                    cmd_chown},
     {"mkusr",   "create a user account",                cmd_mkusr},
     {"su",      "switch user identity",                 cmd_su},
+    {"users",   "list user accounts",                   cmd_users},
+    {"passwd",  "change the current user's password",   cmd_passwd},
     {"dosu",    "switch user and execute command",       cmd_dosu},
     {"find",    "search for files in a directory tree", cmd_find},
     {"exit",    "halt the machine",                     cmd_exit},
@@ -2088,6 +2858,11 @@ const command_t helix_commands[] = {
     {"umount",  "unmount a filesystem",                 cmd_umount},
     {"true",    "do nothing, successfully",              cmd_true},
     {"false",   "do nothing, unsuccessfully",           cmd_false},
+
+    {"sh",      "run a helixsh script file: sh <file.sh> (if/else/fi, # comments, $VAR)", cmd_sh},
+    {"export",  "set a shell variable: export NAME=VALUE (no arguments: list them)", cmd_export},
+    {"unset",   "remove a shell variable: unset NAME",   cmd_unset},
+    {"test",    "test a condition: test -f FILE | test A = B | test A -eq B (also [ ... ])", cmd_test},
 };
 
 const size_t helix_command_count = sizeof(helix_commands) / sizeof(helix_commands[0]);

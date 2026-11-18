@@ -192,3 +192,110 @@ bool ufile_load_file(const char *path, uint8_t **out, uint64_t *out_len) {
     *out_len = st.size;
     return true;
 }
+
+/* Split an absolute path into the directory that holds it and its last name.
+ * "/a/b" gives dir "/a" and name "b"; "/b" gives dir "/" and name "b". */
+static bool split_leaf(const char *path, char *dir, size_t dir_cap, const char **name) {
+    size_t plen = strlen(path);
+    if (plen == 0 || plen >= dir_cap || path[0] != '/') return false;
+    memcpy(dir, path, plen + 1);
+    char *slash = strrchr(dir, '/');
+    if (slash == NULL || slash[1] == '\0') return false;   /* root or trailing slash */
+    *name = strrchr(path, '/') + 1;
+    if (slash == dir) dir[1] = '\0';
+    else *slash = '\0';
+    return true;
+}
+
+/* Resolve the directory above `path` and return its inode with the name. */
+static bool dir_of(ext4_fs_t *fs, const char *path, uint64_t *dir_ino, const char **name) {
+    char dir[256];
+    if (!split_leaf(path, dir, sizeof(dir), name)) return false;
+    ext4_stat_t dst;
+    if (!resolve(fs, dir, &dst, NULL, NULL, 0)) return false;
+    if (!EXT4_S_ISDIR(dst.mode)) return false;
+    *dir_ino = dst.ino;
+    return true;
+}
+
+int64_t ufile_stat(const char *path, ufile_stat_t *out) {
+    ext4_fs_t *fs = ext4_get_current();
+    if (fs == NULL || path == NULL || out == NULL) return -1;
+    ext4_stat_t st;
+    if (!resolve(fs, path, &st, NULL, NULL, 0)) return -1;
+    out->ino = st.ino;
+    out->size = st.size;
+    out->mode = st.mode;
+    out->links = st.links;
+    out->mtime = st.mtime;
+    return 0;
+}
+
+typedef struct {
+    char *buf;
+    uint64_t cap;
+    uint64_t len;
+} listdir_ctx_t;
+
+static bool listdir_cb(void *ctx_ptr, const ext4_stat_t *st, const char *name, uint32_t name_len) {
+    listdir_ctx_t *ctx = ctx_ptr;
+    /* Bytes for one line: type, tab, up to 20 digits, tab, name, newline. */
+    uint64_t need = 1 + 1 + 20 + 1 + name_len + 1;
+    if (ctx->len + need > ctx->cap) return true;   /* out of room: stop the scan */
+    char *out = ctx->buf + ctx->len;
+    *out++ = EXT4_S_ISDIR(st->mode) ? 'd' : '-';
+    *out++ = '\t';
+    char digits[24];
+    int n = 0;
+    uint64_t v = st->size;
+    do { digits[n++] = (char)('0' + (v % 10)); v /= 10; } while (v != 0);
+    while (n > 0) *out++ = digits[--n];
+    *out++ = '\t';
+    for (uint32_t i = 0; i < name_len; i++) *out++ = name[i];
+    *out++ = '\n';
+    ctx->len = (uint64_t)(out - ctx->buf);
+    return false;
+}
+
+int64_t ufile_listdir(const char *path, char *buf, uint64_t cap) {
+    ext4_fs_t *fs = ext4_get_current();
+    if (fs == NULL || path == NULL || buf == NULL) return -1;
+    ext4_stat_t st;
+    if (!resolve(fs, path, &st, NULL, NULL, 0)) return -1;
+    if (!EXT4_S_ISDIR(st.mode)) return -1;
+    listdir_ctx_t ctx = { buf, cap, 0 };
+    ext4_readdir(fs, st.ino, listdir_cb, &ctx);
+    return (int64_t)ctx.len;
+}
+
+int64_t ufile_mkdir(const char *path) {
+    ext4_fs_t *fs = ext4_get_current();
+    if (fs == NULL || path == NULL) return -1;
+    uint64_t dir_ino;
+    const char *name;
+    if (!dir_of(fs, path, &dir_ino, &name)) return -1;
+    uint64_t made;
+    return ext4_mkdir(fs, dir_ino, name, 0755, &made) ? 0 : -1;
+}
+
+/* Remove a file (as_dir false) or an empty directory (as_dir true). */
+static int64_t remove_entry(const char *path, bool as_dir) {
+    ext4_fs_t *fs = ext4_get_current();
+    if (fs == NULL || path == NULL) return -1;
+    uint64_t dir_ino;
+    const char *name;
+    if (!dir_of(fs, path, &dir_ino, &name)) return -1;
+    return ext4_unlink(fs, dir_ino, name, as_dir) ? 0 : -1;
+}
+
+int64_t ufile_unlink(const char *path) { return remove_entry(path, false); }
+int64_t ufile_rmdir(const char *path) { return remove_entry(path, true); }
+
+int64_t ufile_truncate(const char *path, uint64_t size) {
+    ext4_fs_t *fs = ext4_get_current();
+    if (fs == NULL || path == NULL) return -1;
+    ext4_stat_t st;
+    if (!resolve(fs, path, &st, NULL, NULL, 0)) return -1;
+    if (!EXT4_S_ISREG(st.mode)) return -1;
+    return ext4_truncate(fs, st.ino, size) ? 0 : -1;
+}

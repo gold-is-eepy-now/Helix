@@ -22,6 +22,10 @@ void pmm_init(struct limine_memmap_response *memmap, uint64_t hhdm_offset);
 /* Allocate one frame; returns its physical address, or 0 if out of memory. */
 uintptr_t pmm_alloc_frame(void);
 
+/* Offset of the higher-half direct map: physical address P is at P + offset.
+ * Device DMA uses physical addresses; the kernel reaches the same bytes this way. */
+uint64_t pmm_hhdm_offset(void);
+
 /* Allocate `count` physically contiguous frames; returns the base physical
  * address, or 0 if no run that long is free. */
 uintptr_t pmm_alloc_frames(size_t count);

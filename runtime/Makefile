@@ -1,4 +1,11 @@
-CC := gcc
+# The ring-3 apps are ELF64 programs for Helix. The host compiler (clang on macOS,
+# gcc on Linux) cannot link them, so default to the x86_64 ELF cross compiler, the
+# same one the kernel uses. An explicit CC= on the command line still wins.
+# A host compiler name (from the make default, or CC exported by the shell) means
+# "not chosen", so it is replaced with the cross compiler.
+ifneq (,$(filter cc gcc clang,$(CC)))
+CC := x86_64-elf-gcc
+endif
 CFLAGS := -ffreestanding -nostdlib -fno-pic -fno-pie -fno-stack-protector \
           -fno-stack-check -fno-common -fno-builtin -std=gnu11 -O2 -g
 LDFLAGS := -no-pie
@@ -10,8 +17,9 @@ OPTIONAL_DRIVERS_LIB := $(OPTIONAL_DRIVERS_DIR)/build/optional_drivers.a
 OPTIONAL_DRIVERS_SRCS := $(OPTIONAL_DRIVERS_DIR)/ethernet.c \
                          $(OPTIONAL_DRIVERS_DIR)/wifi.c \
                          $(OPTIONAL_DRIVERS_DIR)/graphics.c \
-                         $(OPTIONAL_DRIVERS_DIR)/sound.c \
-                         $(OPTIONAL_DRIVERS_DIR)/kvm/kvm_driver.c
+                         $(OPTIONAL_DRIVERS_DIR)/sound.c
+# kvm/kvm_driver.c is not listed: it needs Linux headers (sys/ioctl.h) and is
+# skipped for Helix, as the `kvm` target below explains.
 OPTIONAL_DRIVERS_OBJS := $(OPTIONAL_DRIVERS_SRCS:.c=.o)
 
 # KVM driver
@@ -29,7 +37,8 @@ VIRTIO_OBJS := $(VIRTIO_SRCS:.c=.o)
 # Native Helix userspace library
 LIBHELIX_DIR := ../userspace
 LIBHELIX_LIB := $(LIBHELIX_DIR)/libhelix.a
-LIBHELIX_SRCS := $(LIBHELIX_DIR)/libhelix.c
+# The libc subset (userspace/libc) is part of the library, as in kernel/Makefile.
+LIBHELIX_SRCS := $(LIBHELIX_DIR)/libhelix.c $(wildcard $(LIBHELIX_DIR)/libc/*.c)
 LIBHELIX_OBJS := $(LIBHELIX_SRCS:.c=.o)
 
 all: $(TARGET) $(LIBHELIX_LIB)
@@ -63,10 +72,14 @@ $(OPTIONAL_DRIVERS_LIB): $(OPTIONAL_DRIVERS_OBJS)
 # Build individual driver objects
 $(OPTIONAL_DRIVERS_DIR)/%.o: $(OPTIONAL_DRIVERS_DIR)/%.c $(OPTIONAL_DRIVERS_DIR)/transport/*.h
 	@mkdir -p $(OPTIONAL_DRIVERS_DIR)/build
-	$(CC) $(CFLAGS) -I$(OPTIONAL_DRIVERS_DIR)/transport -c $< -o $@
+	$(CC) $(CFLAGS) -I$(OPTIONAL_DRIVERS_DIR)/transport -I$(LIBHELIX_DIR)/include -c $< -o $@
 
 # KVM driver build targets
-kvm: $(KVM_LIB)
+# The KVM driver is a Linux-host wrapper: it calls glibc ioctl() on /dev/kvm, which
+# only exists on a Linux host. It cannot be built into a Helix program, so this target
+# explains that instead of failing the whole `linux-drivers` run.
+kvm:
+	@echo "[runtime] skipped: the KVM driver is a Linux-host wrapper (glibc ioctl on /dev/kvm) and is not built for Helix."
 
 $(KVM_DIR)/build:
 	mkdir -p $(KVM_DIR)/build
@@ -93,7 +106,7 @@ $(LIBHELIX_LIB): $(LIBHELIX_OBJS) | $(LIBHELIX_DIR)/build
 	@echo "[runtime] Native Helix library built: $@"
 
 $(LIBHELIX_OBJS): $(LIBHELIX_DIR)/%.o: $(LIBHELIX_DIR)/%.c
-	$(CC) $(CFLAGS) -I$(LIBHELIX_DIR) -c $< -o $@
+	$(CC) $(CFLAGS) -I$(LIBHELIX_DIR) -I$(LIBHELIX_DIR)/include -c $< -o $@
 
 # Userspace apps
 USERSpace_APPS_DIR := ../userspace/apps
@@ -102,8 +115,8 @@ USERSpace_APP_BINS := $(addprefix $(USERSpace_APPS_DIR)/,$(USERSpace_APPS))
 
 userspace-apps: $(USERSpace_APP_BINS)
 
-$(USERSpace_APPS_DIR)/%: $(USERSpace_APPS_DIR)/%.c
-	$(CC) $(CFLAGS) -I. -Ioptional_drivers/transport -I$(LIBHELIX_DIR) $< $(LIBHELIX_LIB) -o $@
+$(USERSpace_APPS_DIR)/%: $(USERSpace_APPS_DIR)/%.c $(LIBHELIX_LIB)
+	$(CC) $(CFLAGS) -I. -Ioptional_drivers/transport -I$(LIBHELIX_DIR)/include -I$(LIBHELIX_DIR) -static -no-pie -nostdlib $< $(LIBHELIX_LIB) -o $@
 
 clean:
 	rm -f *.o $(TARGET) runtime_test

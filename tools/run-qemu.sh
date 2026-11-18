@@ -67,4 +67,5 @@ qemu-system-x86_64 \
     -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \
     -drive if=pflash,format=raw,unit=1,file="$VARS" \
     -drive file="$IMAGE",format=raw,if=ide,index=0,media=disk \
-    -serial stdio $DISPLAY_ARGS $VNC_ARGS
+    -serial stdio $DISPLAY_ARGS $VNC_ARGS \
+    -netdev user,id=n0 -device e1000,netdev=n0

@@ -15,10 +15,10 @@ shell.
 | Hubs on a root port, devices behind them (nested hubs supported by the code; QEMU-tested one level only) | ✅ QEMU-tested |
 | EHCI handoff: EHCI reset so its ports belong to the companions | ✅ QEMU-tested |
 | HID boot keyboard: interrupt endpoint, report decoding, key events | ✅ QEMU-tested (plus host unit tests) |
-| HID boot mouse: report decoding | ✅ host unit tests; enumerated in QEMU; no consumer yet |
+| HID boot mouse: report decoding | ✅ host unit tests; enumerated in QEMU; drives the desktop pointer (`usb_hid_get_mouse_event`) |
 | Apple iMac 11,2 hardware | ⛔ **not tested** (no hardware here) |
 | Hot-plug, hub status-change interrupts | ⛔ not implemented; devices are found at boot only |
-| USB storage | ⛔ not implemented on this stack |
+| USB mass storage (Bulk-Only, read-only) | ✅ QEMU-tested (root port and behind a hub); see docs/22-usb-storage.md |
 
 The tests that back the ✅ rows are described at the end of this document.
 
@@ -232,9 +232,20 @@ Run by `make test`:
 - **Full-speed only.** Because EHCI is reset, high-speed devices run at full
   speed, and there is no transaction translator support.
 - **Nested hubs** are written but only one hub level is tested in QEMU.
-- **Mouse consumer.** Motion and buttons are decoded but no cursor or scroll
-  handler uses them. Deciding what the pointer should do is a design choice for
-  the owner.
+- **Mouse scrolling.** Motion and buttons drive the desktop pointer; the wheel
+  byte is not used.
+- **Sign-in status line.** The sign-in screen shows controllers, devices and
+  HID report/error counts, refreshed twice a second. Use it to check the iMac
+  without a keyboard.
 - **Function keys** (F1–F12) and keypad keys are not mapped.
 - **Storage** is not on this stack. The earlier xHCI/EHCI storage code from the
   other tree has not been merged into this one.
+
+## Boot diagnostic: controllers in PCI config space
+
+At boot, `[usb] pci` lines list every USB controller in PCI config space (class 0C/03,
+prog_if 00 UHCI, 10 OHCI, 20 EHCI, 30 xHCI) with its vendor and device IDs and BAR0. The
+listing is read-only and does not depend on which controllers Helix drives.
+UHCI controllers keep their registers in an I/O BAR (BAR4), not BAR0, so their BAR0 column
+shows 0. That is expected, not a fault. Use it to
+confirm the iMac 11,2's real controller IDs before changing anything.
