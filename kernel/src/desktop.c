@@ -381,6 +381,22 @@ static void fill_box(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t r,
     }
 }
 
+/* One vertical scrollbar, painted by the window that owns it: the arithmetic comes from
+ * scrollbar.h, the colours from the current theme, and the caller says which box the bar
+ * fills (arrow buttons are `arrow_h` tall each). */
+static void scrollbar_paint(const scroll_state_t *s, uint32_t bx, uint32_t by, uint32_t w,
+                            uint32_t h, uint32_t arrow_h) {
+    if (h == 0) return;
+    scrollbar_geom_t g;
+    scrollbar_geometry(s, bx, by, w, h, arrow_h, &g);
+    fb_fill_rect(bx, by, w, h, rgb_hex(g_th->track));
+    bevel(bx, by, w, h, false);
+    fb_draw_text(bx + 3u, by + 3u, "^", c_ink, 0, false);
+    fb_draw_text(bx + 3u, by + h - g.arrow_h + 3u, "v", c_ink, 0, false);
+    if (g.thumb_h == 0) return;
+    fill_box(bx + 2u, g.thumb_y, w - 4u, g.thumb_h, 3, g_th->thumb_top, g_th->thumb_bot, true);
+}
+
 /* Text with a one-pixel shadow, so it stays readable over the wallpaper. */
 static void draw_text_shadow(uint32_t x, uint32_t y, const char *s, uint32_t fg, uint32_t shadow) {
     fb_draw_text(x + 1u, y + 1u, s, shadow, 0, false);
@@ -828,6 +844,8 @@ static void build_content(app_t app) {
 
 #define TERM_LINES 64
 #define TERM_COLS  56               /* characters per line; the window is sized for this */
+#define TERM_BAR_W 14u              /* scrollbar width, down the right of the text area */
+#define TERM_ARROW 14u              /* height of each scrollbar arrow button */
 #define TERM_PROMPT "helix> "
 #define TERM_PROMPT_LEN 7
 
@@ -836,12 +854,15 @@ static int g_term_n;                /* lines in use; the last one is being writt
 static char g_term_in[TERM_COLS + 1];   /* the line being typed */
 static int g_term_in_len;
 static bool g_term_started;
+static scroll_state_t g_term_scroll;  /* which buffer lines the pane shows (scrollbar.h) */
+static bool g_term_follow = true;     /* sit on the newest line until the user scrolls away */
 
 static void term_newline(void) {
     if (g_term_n == TERM_LINES) {   /* full: scroll everything up one line */
         for (int i = 1; i < TERM_LINES; i++) {
             for (int k = 0; k <= TERM_COLS; k++) g_term_lines[i - 1][k] = g_term_lines[i][k];
         }
+        if (g_term_scroll.top > 0) g_term_scroll.top--;   /* the lines moved up under the view */
     } else {
         g_term_n++;
     }
@@ -950,12 +971,57 @@ static void term_submit(void) {
     console_set_sink(previous);
 }
 
-/* The text area: the newest lines, bottom-aligned, with the line being typed last. */
+/* Text rows the pane shows: a 4 px margin top and bottom, 12 px per row. */
+static int term_rows(uint32_t ch) {
+    return (int)((ch - 8u) / 12u);
+}
+
+/* Following the output holds only while the view sits on the last paneful. */
+static void term_track_bottom(void) {
+    uint32_t max_top = g_term_scroll.total > g_term_scroll.visible
+                           ? g_term_scroll.total - g_term_scroll.visible : 0u;
+    g_term_follow = g_term_scroll.top >= max_top;
+}
+
+/* Bring the scroll state up to date with the buffer and a pane of `rows` rows. At the end
+ * the view rides the newest line; away from it the view stays where the user put it, and a
+ * clamp that lands it back on the end resumes following. */
+static void term_scroll_sync(uint32_t rows) {
+    g_term_scroll.visible = rows > 0 ? rows : 1u;
+    scroll_set_total(&g_term_scroll, (uint32_t)g_term_n + 1u);
+    if (g_term_follow) {
+        g_term_scroll.top = g_term_scroll.total > g_term_scroll.visible
+                                ? g_term_scroll.total - g_term_scroll.visible : 0u;
+    } else {
+        scroll_clamp(&g_term_scroll);
+        term_track_bottom();
+    }
+}
+
+/* Move the view by `delta` lines (negative goes up). False when it cannot move. */
+static bool term_scroll_rows(int32_t delta, uint32_t rows) {
+    term_scroll_sync(rows);
+    if (!scroll_rows(&g_term_scroll, delta)) return false;
+    term_track_bottom();
+    return true;
+}
+
+/* Typing follows the output: true when the view was scrolled away from the end and has
+ * just jumped back to it, so one row is no longer enough to repaint. */
+static bool term_follow_jump(void) {
+    if (g_term_follow) return false;
+    g_term_follow = true;
+    return true;
+}
+
+/* The text area: the lines the pane shows from the scroll position, with the line being
+ * typed last while the view is at the end, and the scrollbar down the right edge. */
 static void term_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
     fb_fill_rect(cx, cy, cw, ch, c_black);
-    int rows = (int)((ch - 8u) / 12u);
+    int rows = term_rows(ch);
     int total = g_term_n + 1;           /* the buffer lines, then the input line */
-    int first = total > rows ? total - rows : 0;
+    term_scroll_sync(rows > 0 ? (uint32_t)rows : 1u);
+    int first = (int)g_term_scroll.top;
     for (int r = 0; r < rows && first + r < total; r++) {
         int idx = first + r;
         uint32_t y = cy + 4u + (uint32_t)r * 12u;
@@ -971,6 +1037,33 @@ static void term_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
             fb_draw_text(cx + 4, y, row, c_white, 0, false);
         }
     }
+    /* The bar is painted last so it covers any line that runs past the pane's width. */
+    scrollbar_paint(&g_term_scroll, cx + cw - TERM_BAR_W - 2u, cy + 4u, TERM_BAR_W,
+                    (uint32_t)rows * 12u, TERM_ARROW);
+}
+
+/* The scrollbar's box: the right edge of the text area, as tall as the rows it scrolls. */
+static void term_bar_box(const window_t *w, uint32_t *bx, uint32_t *by, uint32_t *bh) {
+    uint32_t rows = (uint32_t)term_rows(w->h - 32u);
+    *bx = w->x + w->w - 8u - TERM_BAR_W;   /* x + 6 (frame) + cw - 2 */
+    *by = w->y + 30u;                      /* y + 26 (caption) + 4 (margin) */
+    *bh = rows * 12u;
+}
+
+/* A click on the terminal's scrollbar: the shared API says whether it was an arrow, the
+ * track or the thumb, and moves the view if so. */
+static bool term_bar_click(const window_t *w, int x, int y) {
+    uint32_t bx, by, bh;
+    term_bar_box(w, &bx, &by, &bh);
+    if (x < (int)bx || x >= (int)(bx + TERM_BAR_W) || y < (int)by || y >= (int)(by + bh)) {
+        return false;
+    }
+    term_scroll_sync(bh / 12u);
+    scrollbar_geom_t g;
+    scrollbar_geometry(&g_term_scroll, bx, by, TERM_BAR_W, bh, TERM_ARROW, &g);
+    scrollbar_click(&g_term_scroll, &g, (uint32_t)x, (uint32_t)y);
+    term_track_bottom();
+    return true;                         /* the click belonged to the bar either way */
 }
 
 /* Text Editor layout inside its window: the text area is above a strip that
@@ -1282,15 +1375,7 @@ static bool browser_page_click(const window_t *w, int x, int y) {
 static void browser_scrollbar(uint32_t bx, uint32_t by, uint32_t rows) {
     uint32_t bar_h = BR_VISIBLE * 12u;
     scroll_set_total(&g_br.scroll, rows);
-    scrollbar_geom_t g;
-    scrollbar_geometry(&g_br.scroll, bx, by, BR_BAR_W, bar_h, BR_ARROW, &g);
-    fb_fill_rect(bx, by, BR_BAR_W, bar_h, rgb_hex(g_th->track));
-    bevel(bx, by, BR_BAR_W, bar_h, false);
-    fb_draw_text(bx + 3u, by + 3u, "^", c_ink, 0, false);
-    fb_draw_text(bx + 3u, by + bar_h - BR_ARROW + 3u, "v", c_ink, 0, false);
-    if (g.thumb_h == 0) return;
-    fill_box(bx + 2u, g.thumb_y, BR_BAR_W - 4u, g.thumb_h, 3, g_th->thumb_top, g_th->thumb_bot,
-             true);
+    scrollbar_paint(&g_br.scroll, bx, by, BR_BAR_W, bar_h, BR_ARROW);
 }
 
 static void browser_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
@@ -2144,6 +2229,32 @@ static bool rect_hits(int x, int y, int w, int h, const window_t *o) {
            y < (int)(o->y + o->h) && y + h > (int)o->y;
 }
 
+/* Redraw only the focused window of `app`. When a menu, a drag or a window above it
+ * would cover the update, ask for a full repaint instead (g_repaint). */
+static void app_redraw(app_t app) {
+    int i = g_focus;
+    if (i < 0 || !g_win[i].used || g_win[i].app != app || g_menu_open || g_drag >= 0 ||
+        g_win[i].y + g_win[i].h > fb_height() - TASK_H) {
+        g_repaint = true;
+        return;
+    }
+    window_t *w = &g_win[i];
+    for (int k = i + 1; k < MAX_WIN; k++) {
+        if (g_win[k].used && rect_hits((int)w->x, (int)w->y, (int)w->w, (int)w->h, &g_win[k])) {
+            g_repaint = true;
+            return;
+        }
+    }
+    cursor_restore();
+    draw_window(w, true);
+    cursor_show();
+    g_repaint = false;
+}
+
+static void term_redraw(void) {
+    app_redraw(APP_TERMINAL);
+}
+
 /* Typing in the terminal redraws only the cells that changed on the input row,
  * the way the shell echoes a character, instead of repainting the whole desktop.
  * It falls back to a full redraw when the row could be covered by another window,
@@ -2155,7 +2266,7 @@ static void term_redraw_input(int old_len) {
     }
     window_t *w = &g_win[g_focus];
     uint32_t cx = w->x + 6, cy = w->y + 26, cw = w->w - 12, ch = w->h - 32;
-    int rows = (int)((ch - 8u) / 12u);
+    int rows = term_rows(ch);
     int total = g_term_n + 1;                      /* the buffer lines, then the input line */
     int shown = total > rows ? rows : total;
     int row_y = (int)(cy + 4u) + (shown - 1) * 12;
@@ -2248,6 +2359,8 @@ static void open_app(app_t app) {
             g_term_started = true;
             g_term_n = 1;
             g_term_lines[0][0] = '\0';
+            g_term_follow = true;
+            scroll_init(&g_term_scroll, 1u);
             term_welcome();
         }
         klog_note(KLOG_DESKTOP, "[desktop] opened %s\n", g_app_names[app]);
@@ -2670,6 +2783,12 @@ static int handle_click(int x, int y, uint32_t sh) {
                 g_repaint = false;
                 return full ? PTR_REDRAW : PTR_NONE;
             }
+            if (w->app == APP_TERMINAL && !refocus && !menu_was_open && term_bar_click(w, x, y)) {
+                term_redraw();                  /* repaints the window, or asks for a full one */
+                bool full = g_repaint;
+                g_repaint = false;
+                return full ? PTR_REDRAW : PTR_NONE;
+            }
             if (w->app == APP_NETWORK && !refocus && !menu_was_open) {
                 network_click(w, x, y);
                 return PTR_REDRAW;
@@ -2845,25 +2964,9 @@ static void editor_redraw(void) {
     g_repaint = false;
 }
 
-/* Redraw only the browser window, as editor_redraw does for the editor. */
+/* Redraw only the browser window, as app_redraw does for any window. */
 static void browser_redraw(void) {
-    int i = g_focus;
-    if (i < 0 || !g_win[i].used || g_win[i].app != APP_BROWSER || g_menu_open || g_drag >= 0 ||
-        g_win[i].y + g_win[i].h > fb_height() - TASK_H) {
-        g_repaint = true;
-        return;
-    }
-    window_t *w = &g_win[i];
-    for (int k = i + 1; k < MAX_WIN; k++) {
-        if (g_win[k].used && rect_hits((int)w->x, (int)w->y, (int)w->w, (int)w->h, &g_win[k])) {
-            g_repaint = true;
-            return;
-        }
-    }
-    cursor_restore();
-    draw_window(w, true);
-    cursor_show();
-    g_repaint = false;
+    app_redraw(APP_BROWSER);
 }
 
 static void browser_scroll(int delta) {
@@ -3179,20 +3282,38 @@ static bool handle_key(int c) {
         if (c == '\t') {
             focus_next();
         } else if (c == '\n') {
+            g_term_follow = true;               /* the command's output arrives at the end */
             term_submit();
+        } else if (c == SHELL_KEY_UP || c == SHELL_KEY_DOWN) {
+            /* Walk the scrollback. There is no command history in this shell yet. */
+            window_t *w = &g_win[g_focus];
+            uint32_t rows = (uint32_t)term_rows(w->h - 32u);
+            if (term_scroll_rows(c == SHELL_KEY_UP ? -1 : 1, rows)) {
+                term_redraw();                  /* repainted in place, or asked for a full one */
+            } else {
+                g_repaint = false;              /* already at the end: nothing moved */
+            }
         } else if (c == 0x08 || c == 0x7f) {
             int old = g_term_in_len;
             term_backspace();
             if (old != g_term_in_len) {
-                term_redraw_input(old);
-                g_repaint = false;
+                if (term_follow_jump()) {
+                    g_repaint = true;           /* the view jumped to the end: repaint it all */
+                } else {
+                    term_redraw_input(old);
+                    g_repaint = false;
+                }
             }
         } else if (c >= 0x20 && c < 0x7f) {
             int old = g_term_in_len;
             term_key((char)c);
             if (old != g_term_in_len) {
-                term_redraw_input(old);
-                g_repaint = false;
+                if (term_follow_jump()) {
+                    g_repaint = true;           /* the view jumped to the end: repaint it all */
+                } else {
+                    term_redraw_input(old);
+                    g_repaint = false;
+                }
             }
         }
         return false;
@@ -3293,6 +3414,8 @@ bool desktop_run(void) {
     g_term_n = 0;
     g_term_in_len = 0;
     g_term_in[0] = '\0';
+    g_term_follow = true;
+    scroll_init(&g_term_scroll, 1u);
     g_focus = -1;
     g_icon_sel = 0;
     g_menu_sel = 0;
