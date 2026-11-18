@@ -62,6 +62,8 @@ int compat_spi_register_driver(struct spi_driver *drv);
 /* Make a device and offer it to registered drivers whose ACPI table lists acpi_hid.
  * Returns the probe result, or -ENODEV when no driver matches. */
 int compat_spi_add_device(struct spi_device *spi, const char *acpi_hid);
+/* Helix addition: bind the AML device with this _HID to a slave and probe it. -ENOENT if none. */
+int compat_spi_scan_acpi(const char *acpi_hid);
 /* Complete queued messages. Returns how many ran. */
 int compat_spi_pump(void);
 

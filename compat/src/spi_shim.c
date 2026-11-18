@@ -1,12 +1,16 @@
 /* spi_shim.c — Linux-style SPI drivers over Helix. See compat/include/linux/spi/spi.h.
  *
- * Helix has an SPI controller layer (kernel/src/spi.c, Intel LPSS GSPI) but nothing binds it
- * to an ACPI-described device yet. So a message queued with spi_async() is completed by
+ * Helix has an SPI controller layer (kernel/src/spi.c, Intel LPSS GSPI), but no transfer path
+ * reaches an ACPI-described slave yet. So a message queued with spi_async() is completed by
  * compat_spi_pump() with -ENODEV: the transfer did not happen. A driver that needs a real
- * transfer will see that error and must refuse, which applespi does. */
+ * transfer will see that error and must refuse, which applespi does.
+ *
+ * compat_spi_scan_acpi() finds an ACPI slave by its _HID in the AML namespace and binds the
+ * node to the device, so the driver's ACPI method calls reach the right object. */
 #include <linux/spi/spi.h>
 #include <linux/workqueue.h>
 #include <linux/errno.h>
+#include <linux/acpi.h>
 #include <linux/compat_common.h>
 #include "kstring.h"
 
@@ -51,6 +55,16 @@ int compat_spi_register_driver(struct spi_driver *drv) {
 
 int compat_spi_driver_count(void) { return g_driver_count; }
 int compat_spi_probe_calls(void) { return g_probe_calls; }
+
+/* Returns -ENOENT when no device with the id is in the namespace, otherwise the probe's result. */
+int compat_spi_scan_acpi(const char *acpi_hid) {
+    static struct spi_device slave;
+    acpi_handle node = compat_acpi_find_hid(acpi_hid);
+    if (node == NULL) return -ENOENT;
+    memset(&slave, 0, sizeof slave);
+    slave.dev.acpi_node = node;
+    return compat_spi_add_device(&slave, acpi_hid);
+}
 
 int compat_spi_add_device(struct spi_device *spi, const char *acpi_hid) {
     if (spi == NULL || acpi_hid == NULL) return -EINVAL;

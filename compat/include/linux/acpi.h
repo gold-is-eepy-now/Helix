@@ -1,6 +1,6 @@
-/* linux/acpi.h — the ACPI calls a driver makes. Helix has ACPI table parsing (acpi.c) but no
- * AML interpreter, so it cannot evaluate methods or take GPEs. Every call here fails with
- * AE_NOT_SUPPORTED. That is the honest answer; it is what keeps applespi from probing. */
+/* linux/acpi.h — the ACPI calls a driver makes. Method evaluation and handle lookup go to the
+ * AML interpreter (acpi_shim.c). GPE handlers and device properties (_DSD) are not implemented
+ * and answer AE_NOT_SUPPORTED. */
 #ifndef HELIX_COMPAT_LINUX_ACPI_H
 #define HELIX_COMPAT_LINUX_ACPI_H
 #include <linux/device.h>
@@ -42,5 +42,9 @@ acpi_status acpi_finish_gpe(acpi_handle gpe_device, u32 gpe);
 int acpi_dev_get_property(const struct acpi_device *adev, const char *name, int type, const union acpi_object **obj);
 
 #define ACPI_COMPANION(dev) ((dev)->acpi_companion)
-#define ACPI_HANDLE(dev) ((acpi_handle)0)
+/* The node the device was bound to by compat_acpi_find_hid(), or NULL if it was not bound. */
+#define ACPI_HANDLE(dev) ((acpi_handle)(dev)->acpi_node)
+
+/* Helix addition: the first Device in the AML namespace whose _HID is `hid`, or NULL. */
+acpi_handle compat_acpi_find_hid(const char *hid);
 #endif

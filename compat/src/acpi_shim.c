@@ -1,9 +1,10 @@
 /* acpi_shim.c — the ACPI calls applespi makes, answered by Helix's AML interpreter
  * (kernel/src/aml.c). An acpi_handle is an aml_node_t pointer; a NULL handle means the root.
  *
- * Implemented: finding a node by name, evaluating an object or method for an integer, and
- * calling a method with one integer argument. Not implemented: GPE handlers (no interrupt
- * dispatch from ACPI yet) and device properties (_DSD). Those still answer "not supported". */
+ * Implemented: finding a node by name, evaluating an object or method for an integer, calling
+ * a method with one integer argument, and finding a device by _HID (compat_acpi_find_hid).
+ * Not implemented: GPE handlers (no interrupt dispatch from ACPI yet) and device properties
+ * (_DSD). Those still answer "not supported". */
 #include <linux/acpi.h>
 #include <linux/errno.h>
 #include "aml.h"
@@ -26,7 +27,9 @@ acpi_status acpi_evaluate_integer(acpi_handle handle, acpi_string pathname, stru
                                   unsigned long long *data) {
     (void)args;
     aml_value_t v;
-    aml_status_t st = aml_eval_at(scope_of(handle), pathname, NULL, 0, &v);
+    /* ACPICA: a NULL pathname means "the object the handle names". The path parser cannot take
+     * NULL, so the empty path is used: it resolves to the scope itself. */
+    aml_status_t st = aml_eval_at(scope_of(handle), pathname ? pathname : "", NULL, 0, &v);
     if (st != AML_OK) return from_aml(st);
     uint64_t x = 0;
     st = (v.type == AML_T_INT) ? AML_OK : AML_ERR_TYPE;
@@ -44,6 +47,38 @@ acpi_status acpi_get_handle(acpi_handle parent, acpi_string pathname, acpi_handl
     return AE_OK;
 }
 
+/* Walks the namespace once to collect Device paths, then reads each one's _HID. The walk
+ * only records paths; _HID is evaluated afterwards, so the tree is not read while visited. */
+#define HID_SCAN_MAX 64
+#define HID_PATH_MAX 96
+struct hid_scan {
+    char paths[HID_SCAN_MAX][HID_PATH_MAX];
+    unsigned count;
+};
+
+static void collect_device(void *ctx, const char *path, const char *kind, unsigned argc) {
+    struct hid_scan *s = (struct hid_scan *)ctx;
+    (void)argc;
+    if (strcmp(kind, "Device") != 0 || s->count >= HID_SCAN_MAX) return;
+    size_t n = strlen(path);
+    if (n >= HID_PATH_MAX) return;
+    memcpy(s->paths[s->count], path, n + 1);
+    s->count++;
+}
+
+acpi_handle compat_acpi_find_hid(const char *hid) {
+    if (hid == NULL || !aml_loaded()) return NULL;
+    static struct hid_scan scan;
+    scan.count = 0;
+    aml_walk(collect_device, &scan);
+    for (unsigned i = 0; i < scan.count; i++) {
+        char got[9];
+        if (aml_get_hid(scan.paths[i], got) && strcmp(got, hid) == 0)
+            return (acpi_handle)aml_lookup(NULL, scan.paths[i]);
+    }
+    return NULL;
+}
+
 acpi_status acpi_execute_simple_method(acpi_handle handle, acpi_string method, u64 arg) {
     aml_value_t a;
     a.type = AML_T_INT;
@@ -54,14 +89,21 @@ acpi_status acpi_execute_simple_method(acpi_handle handle, acpi_string method, u
     a.count = 0;
     a.ref = NULL;
     aml_value_t out;
-    aml_status_t st = aml_eval_at(scope_of(handle), method, &a, 1, &out);
+    aml_status_t st = aml_eval_at(scope_of(handle), method ? method : "", &a, 1, &out);
     if (st == AML_OK) aml_value_free(&out);
     return from_aml(st);
 }
 
+/* The names ACPICA uses for the codes this shim returns. Anything else is shown as a number,
+ * so a failure is never reported with the wrong reason. */
 const char *acpi_format_exception(acpi_status status) {
-    (void)status;
-    return "AE_NOT_SUPPORTED (Helix has no AML interpreter)";
+    switch (status) {
+    case AE_OK: return "AE_OK";
+    case AE_ERROR: return "AE_ERROR";
+    case AE_NOT_FOUND: return "AE_NOT_FOUND";
+    case AE_NOT_SUPPORTED: return "AE_NOT_SUPPORTED";
+    default: return "AE_UNKNOWN";
+    }
 }
 
 acpi_status acpi_install_gpe_handler(acpi_handle gpe_device, u32 gpe, u32 type,

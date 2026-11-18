@@ -111,9 +111,8 @@ static void test_touchpad(void) {
 }
 
 static void test_applespi_refuses(void) {
-    /* The driver is registered by its module_init at boot; a device with its ACPI id must reach
-     * applespi_probe. It looks up SIEN from the device's ACPI handle; ACPI_HANDLE() is NULL here (no
-     * device-to-DSDT binding yet), so SIEN is not found under the root and the probe refuses with -ENODEV. */
+    /* A device with no ACPI node (not bound to the namespace) must reach applespi_probe. Its SIEN
+     * lookup then starts at the root and is not found, so the probe refuses with -ENODEV. */
     check(compat_spi_driver_count() >= 1, "applespi driver registered at boot");
     struct spi_device spi = { 0 };
     int before = compat_spi_probe_calls();
@@ -122,11 +121,23 @@ static void test_applespi_refuses(void) {
     check(rc == -ENODEV, "applespi refuses without ACPI: probe returns -ENODEV");
 }
 
+/* The test build loads a synthetic SSDT (tests/gen-applespi-ssdt.py) with a device APP000D
+ * named \_SB.APPT. Binding it must reach the probe, and the probe must get past its ACPI method
+ * calls and stop at the GPE step, which Helix does not implement yet. */
+static void test_applespi_binds(void) {
+    int before = compat_spi_probe_calls();
+    int rc = compat_spi_scan_acpi("APP000D");
+    check(rc != -ENOENT, "the AML namespace has an APP000D device to bind");
+    check(compat_spi_probe_calls() == before + 1, "the bound APP000D device reaches applespi_probe");
+    check(rc == -ENODEV, "applespi stops at its GPE step (not implemented): probe returns -ENODEV");
+}
+
 int compat_input_selftest(void) {
     g_failures = 0;
     test_keyboard();
     test_touchpad();
     test_applespi_refuses();
+    test_applespi_binds();
     if (g_failures == 0) {
         kprintf("inputtest: PASS (0 failure(s))\n");
     } else {

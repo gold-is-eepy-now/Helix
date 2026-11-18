@@ -174,10 +174,15 @@ module registers at boot. Its probe path runs; it refuses to start on this machi
 - applespi cannot run on the 2010-2017 MacBook it targets. It needs ACPI methods
   (`UIST`, `SIEN`, `SIST`, `_GPE`) and properties from the DSDT. Helix has table
   parsing (docs/16-acpi.md) and an AML interpreter (docs/24-aml.md), which answers
-  `acpi_get_handle` and `acpi_evaluate_integer`. The driver still refuses at probe for two
-  reasons. First, `ACPI_HANDLE()` is NULL, so the device is not bound to its DSDT node
-  and `SIEN` is looked up at the root, where it is not found. Second, there is no GPE
-  dispatch. That is the honest state.
+  `acpi_get_handle` and `acpi_evaluate_integer`. Stage 1 (done) binds the device: the
+  compat layer finds the AML Device whose `_HID` is `APP000D` (`compat_acpi_find_hid`),
+  stores its node in `struct device` (so `ACPI_HANDLE()` returns it), and the probe then
+  runs `UIST`, finds `SIEN` and `SIST`, and reads `_GPE`. It refuses at
+  `install_gpe_handler`, because GPE dispatch is not implemented. That is the honest
+  state. Keyboard input does not work yet.
+- The `_DSD` properties applespi reads (`spiCSDelay`, `resetA2RUsec`, `resetRecUsec`) are
+  not implemented. The probe warns that they are missing and continues, which is allowed
+  by the driver.
 - No SPI transfer has run against hardware or against an emulated controller. Only
   the refusal path has run, and only under QEMU TCG.
 - Input events do not reach Helix's `input_device_t` objects; they land in
@@ -187,8 +192,14 @@ module registers at boot. Its probe path runs; it refuses to start on this machi
 - Tracepoints do nothing. `%*ph` in applespi's warnings is not parsed by Helix's
   formatter, so those lines print the raw spec.
 
-**Next steps for this area:** bind the SPI device to its DSDT node, then GPE dispatch (the blockers for applespi), then an SPI transfer path for an ACPI-described device, then
-the touchpad calibration.
+**Next steps for this area:** GPE dispatch (the blocker for applespi now), then an SPI
+transfer path for an ACPI-described device, then the touchpad calibration.
+
+**Test data (test builds only).** The suite loads a synthetic SSDT with QEMU's `-acpitable`:
+`tests/gen-applespi-ssdt.py` writes a device `\_SB.APPT` with `_HID "APP000D"`, `_GPE` 16,
+and the methods `UIST`, `SIST` and `SIEN`. It does not ship in the release image. A real
+Apple DSDT is not available under QEMU, so this table only proves the bind and the method
+calls, not the Apple firmware.
 
 **Test:** `inputtest` in the shell suite (`tests/shell-test.py`). Its output on QEMU
 (TCG, no /dev/kvm) is:
@@ -197,4 +208,6 @@ the touchpad calibration.
     inputtest: ok   KEY_A with shift held types 'A'
     inputtest: ok   touchpad finger moving 160 units moves the pointer 10 px
     inputtest: ok   applespi refuses without ACPI: probe returns -ENODEV
+    inputtest: ok   the AML namespace has an APP000D device to bind
+    inputtest: ok   applespi stops at its GPE step (not implemented): probe returns -ENODEV
     inputtest: PASS (0 failure(s))

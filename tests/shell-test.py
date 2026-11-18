@@ -229,6 +229,12 @@ def main():
     if fat_big is not None:
         shutil.copyfile(fat_img, nvme_img)    # same volume, on an NVMe namespace
 
+    # A synthetic SSDT with an APP000D device, so the applespi bind path runs. Test only: the
+    # release image never has it. See tests/gen-applespi-ssdt.py.
+    acpi_img = os.path.join(os.path.dirname(os.path.abspath(IMAGE)), "applespi-test.aml")
+    subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "gen-applespi-ssdt.py"),
+                    acpi_img], check=True)
+
     cmd = [
         "qemu-system-x86_64",
         "-M", "q35", "-m", QEMU_MEM,
@@ -253,6 +259,7 @@ def main():
         "-device", "e1000,netdev=n0",
         # Graphics card: a virtio-gpu device, found by its PCI IDs. See docs/12-graphics.md.
         "-device", "virtio-gpu-pci",
+        "-acpitable", f"file={acpi_img}",
         "-display", "none",
         "-no-reboot",
     ]
@@ -627,6 +634,13 @@ def main():
         ser.send("inputtest\n")
         check("inputtest: Linux input shim and applespi probe path pass", "inputtest: PASS (0 failure(s))", timeout=60)
         check_true("inputtest reported no failed check", "inputtest: FAILED" not in ser.text())
+        # With the test SSDT the probe binds its device, runs UIST/SIST/SIEN, and stops at the GPE
+        # step (install_gpe_handler is not implemented). That message is the stage-1 boundary.
+        # The serial log up to here, kept so a failed check can be read in build output.
+        with open(os.path.join(OUTDIR, "serial-inputtest.txt"), "w", encoding="latin-1") as f:
+            f.write(ser.text())
+        check("applespi binds the test SSDT device and stops at its GPE step",
+              "Failed to install GPE handler for GPE 16", timeout=60)
         # FAT32: the second disk holds a volume made on the host. The boot disk is not FAT.
         ser.send("fat sata0 info\n")
         check("fat refuses the boot disk, which is not FAT32", "fat: sata0 is not a FAT32 volume", timeout=60)

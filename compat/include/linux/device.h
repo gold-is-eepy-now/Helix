@@ -21,7 +21,8 @@ struct device_driver {
 struct device {
     const char *name;
     void *driver_data;
-    struct acpi_device *acpi_companion;   /* NULL: Helix has no ACPI namespace to attach */
+    struct acpi_device *acpi_companion;   /* Linux-style companion; not used by Helix yet */
+    void *acpi_node;                      /* the AML namespace node (aml_node_t *), or NULL */
 };
 
 struct dev_pm_ops {

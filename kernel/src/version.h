@@ -3,7 +3,7 @@
 #define HELIX_VERSION_H
 
 #define HELIX_NAME    "Helix OS"
-#define HELIX_VERSION "0.5.70-dev.20261118"
+#define HELIX_VERSION "0.5.71-dev.20261118"
 #define HELIX_CODENAME "Padlock"
 #define HELIX_BUILD_DATE "2026-11-18"
 #define HELIX_SHELL   "helixsh"
