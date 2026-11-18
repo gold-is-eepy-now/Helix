@@ -232,9 +232,12 @@ Also, in the same change:
   with QEMU screenshots, not by the suite). No HTTPS yet.
 - **Implemented (scrollbar API, host unit-tested):** `kernel/src/scrollbar.c` gives every
   window one vertical scrollbar to share — rows in (`scroll_state_t`), geometry, stepping,
-  paging and click handling out. The Browser's scrollbar now runs through it
-  (`scrollbar_geometry`/`scrollbar_click`); the theme colours stay in `desktop.c`. Tested on
-  the host by `tests/scrollbar-unit.c` (22 checks) in `make test`. The thumb cannot be dragged
+  paging and click handling out. The Browser's and the Terminal's scrollbars now run through
+  it (`scrollbar_geometry`/`scrollbar_click`); the theme colours stay in `desktop.c`. The
+  Terminal follows the output until you scroll away (Up/Down or a click on its bar); the next
+  Enter or typed character jumps back to the end. Tested on
+  the host by `tests/scrollbar-unit.c` (22 checks) in `make test`, and the Terminal bar was
+  driven under QEMU (scrollback, arrow keys, clicks). The thumb cannot be dragged
   yet, and the Text Editor and the explorer list still scroll without a bar.
 - **Implemented (browser links and pictures, host unit-tested):** the Browser numbers every
   `<a href>` as `[N]` and follows it with Alt+L plus digits, or with a click on the row

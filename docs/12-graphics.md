@@ -52,3 +52,24 @@ changed rectangle after each draw. Without virtio-gpu the GOP framebuffer is use
 - **Not done:** blur and translucency (no backbuffer), a configurable wallpaper, User and Documents places, window resizing, glossy application icons, and per-application styling beyond the window chrome.
 - **Checked:** QEMU screendumps of each theme, the Start menu, the desktop menu, minimise, maximise and Show Desktop. The shell suite (133), USB suite (19/19) and HID unit tests pass.
 - **Window controls, 0.5.59 (QEMU-tested only):** double-clicking a title bar within 500 ms toggles maximise. The bottom-right grip resizes a window (minimum 200x120) with an outline, like the move. Alt+Tab focuses the next shown window; Alt+F4 closes the focused one. The keyboard driver (`keyboard.c`) turns these into `SHELL_KEY_ALT_TAB` and `SHELL_KEY_ALT_F4`. USB keyboards do not send these yet. Alt+Tab has no switcher overlay yet.
+
+## Terminal scrollbar (0.5.72, QEMU-tested only)
+
+- The Terminal window runs its scrollback through the shared scrollbar API
+  (`kernel/src/scrollbar.c`): `scroll_state_t g_term_scroll`, one bar painted by
+  `scrollbar_paint` down the right edge of the text area, clicks read by
+  `term_bar_click` with `scrollbar_geometry`/`scrollbar_click`, and Up/Down on the
+  keyboard step one row (`scroll_rows`).
+- The Terminal starts following the output. Scrolling up (or clicking) leaves the follow,
+  so new output does not yank the view down; the next Enter and every typed character jump
+  back to the end. Arrow keys do not scroll while the view is at the end — they are not
+  command history in this shell yet.
+- The terminal window is 480x330 by default: 24 rows of 12 px, a 38-line buffer, so the
+  thumb covers 164 of the 260 px of track.
+- Checked under QEMU (`/tmp/opencode/term-scrollbar-check.py`): `log` fills the pane,
+  Up x10 moves the thumb 69 px up and the text with it, a click on the track pages down
+  and clamps back to the bottom. Screenshots were taken with `-vga virtio`; the shell
+  suite's own `screendump` (`-vga std` plus `-device virtio-gpu-pci`) shows only the
+  kernel's dark boot page, so it was not usable for this check.
+- Not done: dragging the thumb, PageUp/PageDown (the keyboard driver has no such codes),
+  mouse-wheel scrolling, the Text Editor and the explorer list.
