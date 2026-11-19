@@ -31,6 +31,8 @@ $SUDO apt-get install -y \
     e2fsprogs \
     xorriso
 
+brew install x86_64-elf-gcc
+
 # Verify: every command the build, tools and tests invoke must now exist.
 missing=""
 for t in gcc make curl git python3 qemu-system-x86_64 qemu-img \
