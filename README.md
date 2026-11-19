@@ -145,6 +145,14 @@ sudo apt-get install build-essential qemu-system-x86 ovmf \
                      gdisk mtools curl
 ```
 
+or run the repo's script, which installs those plus what the tools and tests
+shell out to (`python3`, `dosfstools`, `e2fsprogs`, `xorriso`, `qemu-utils`,
+`git`) and verifies every command afterwards:
+
+```sh
+./install-dependencies-apt.sh
+```
+
 On macOS:
 
 ```sh
