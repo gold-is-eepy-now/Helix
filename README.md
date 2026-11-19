@@ -331,6 +331,27 @@ boots.
 
 ---
 
+## Feature development flow
+
+```
+"*featureName*-test" -> merge with "MelDev" (I will experiment with this to kneed out the smaller issues) -> "Dev" (semi-stable, STATIC version of "MelDev") -> "main" (once we hit a good milestone)
+```
+
+---
+
+## Roles of the current maintainers
+
+Gold's jobs: 
+
+* Create feature tests based on latest "MelDev" (you can keep on with the desktop tests, but I got it mostly down in "MelDev", then merged with "Dev".)
+* Maintain milestones (I.e. PRs/merges from Dev to main)
+
+Mel's jobs:
+
+* Maintain MelDev, regularly put semi-stable builds into "Dev". 
+
+---
+
 ## License
 
 TBD by the project owner. Third-party components retain their own licenses:
