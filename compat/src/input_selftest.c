@@ -8,6 +8,7 @@
 #include <linux/compat_common.h>
 #include "keyboard.h"
 #include "usb_hid.h"
+#include "spi.h"   /* Helix's kernel SPI layer: the fake controller */
 
 int compat_spi_driver_count(void);
 int compat_spi_probe_calls(void);
@@ -133,12 +134,109 @@ static void test_applespi_binds(void) {
     check(rc == 0, "applespi's ACPI steps succeed (GPE installed and enabled, keyboard registered)");
 }
 
+/* ---- SPI bridge: spi_async -> compat_spi_pump -> kernel SPI layer ---- */
+
+/* A fake controller that echoes the complement of tx, so the test can see the bytes moved.
+ * A first byte of 0xEE makes it time out, to check error propagation. */
+static uint8_t g_fake_cs;
+static uint8_t g_fake_mode;
+static spi_status_t fake_set_mode(spi_controller_t *c, uint8_t cs, uint8_t mode,
+                                  uint32_t speed_hz, uint8_t bits) {
+    (void)c; (void)speed_hz;
+    if (bits != 8u) return SPI_ERR_BAD_ARG;
+    g_fake_cs = cs;
+    g_fake_mode = mode;
+    return SPI_OK;
+}
+static spi_status_t fake_transfer(spi_controller_t *c, uint8_t cs, const uint8_t *tx,
+                                  uint8_t *rx, uint32_t len) {
+    (void)c; (void)cs;
+    if (tx != NULL && len > 0 && tx[0] == 0xEEu) return SPI_ERR_TIMEOUT;
+    for (uint32_t i = 0; i < len && rx != NULL; i++) {
+        rx[i] = tx != NULL ? (uint8_t)(tx[i] ^ 0xFFu) : 0xFFu;
+    }
+    return SPI_OK;
+}
+static spi_controller_t g_fake = {
+    .name = "selftest-spi", .ready = true,
+    .set_mode = fake_set_mode, .transfer = fake_transfer, .priv = NULL,
+};
+
+/* Queue one transfer and run the pump. Returns the pump's count of completed messages. */
+static int run_one(struct spi_message *m, struct spi_transfer *t) {
+    spi_message_init(m);
+    spi_message_add_tail(t, m);
+    if (spi_async(NULL, m) != 0) return -1;
+    return compat_spi_pump();
+}
+
+/* With no controller in the kernel table (QEMU without an LPSS block), the message must fail
+ * with -ENODEV and say nothing was sent. Runs before the applespi tests. */
+static void test_spi_no_controller(void) {
+    if (spi_controller_count() != 0u) {
+        kprintf("inputtest: SPI no-controller check skipped (a controller is already registered)\n");
+        return;
+    }
+    struct spi_message m;
+    struct spi_transfer t = { 0 };
+    uint8_t buf[2] = { 1, 2 };
+    t.tx_buf = buf;
+    t.len = 2;
+    t.cs_change = 1;
+    run_one(&m, &t);
+    check(m.status == -ENODEV && m.actual_length == 0,
+          "SPI message with no controller completes with -ENODEV, 0 bytes");
+}
+
+/* Registers the fake only when the table is empty, so the LPSS controller is never shadowed. */
+static void test_spi_fake_controller(void) {
+    if (spi_controller_count() == 0u) {
+        check(spi_register_controller(&g_fake), "fake SPI controller registered");
+    }
+    if (spi_controller_count() != 1u || spi_controller_at(0) != &g_fake) {
+        kprintf("inputtest: SPI fake-controller checks skipped (a real controller is registered)\n");
+        return;
+    }
+
+    /* A 4-byte message: the reply is the complement of tx, and cs 0 / mode 0 reach the controller. */
+    uint8_t tx[4] = { 0x10, 0x20, 0x30, 0x40 };
+    uint8_t rx[4] = { 0, 0, 0, 0 };
+    struct spi_message m;
+    struct spi_transfer t = { 0 };
+    t.tx_buf = tx; t.rx_buf = rx; t.len = 4; t.cs_change = 1;
+    run_one(&m, &t);
+    check(m.status == 0 && m.actual_length == 4 && rx[0] == 0xEF && rx[3] == 0xBF,
+          "fake controller: 4-byte message completes with status 0 and the reply");
+    check(g_fake_cs == 0u && g_fake_mode == 0u, "chip select 0 and mode 0 reach the controller");
+
+    /* A controller timeout must reach the message as -EIO with no bytes counted. */
+    tx[0] = 0xEE;
+    run_one(&m, &t);
+    check(m.status == -EIO && m.actual_length == 0, "controller timeout completes the message with -EIO");
+
+    /* Holding chip select across two transfers is refused before anything is sent. */
+    uint8_t a[1] = { 1 }, b[1] = { 2 };
+    struct spi_transfer t1 = { 0 }, t2 = { 0 };
+    t1.tx_buf = a; t1.len = 1; t1.cs_change = 0;
+    t2.tx_buf = b; t2.len = 1; t2.cs_change = 1;
+    struct spi_message m2;
+    spi_message_init(&m2);
+    spi_message_add_tail(&t1, &m2);
+    spi_message_add_tail(&t2, &m2);
+    spi_async(NULL, &m2);
+    compat_spi_pump();
+    check(m2.status == -EOPNOTSUPP && m2.actual_length == 0,
+          "holding chip select across transfers is refused with -EOPNOTSUPP");
+}
+
 int compat_input_selftest(void) {
     g_failures = 0;
     test_keyboard();
     test_touchpad();
+    test_spi_no_controller();
     test_applespi_refuses();
     test_applespi_binds();
+    test_spi_fake_controller();
     if (g_failures == 0) {
         kprintf("inputtest: PASS (0 failure(s))\n");
     } else {

@@ -1,9 +1,15 @@
 /* spi_shim.c — Linux-style SPI drivers over Helix. See compat/include/linux/spi/spi.h.
  *
- * Helix has an SPI controller layer (kernel/src/spi.c, Intel LPSS GSPI), but no transfer path
- * reaches an ACPI-described slave yet. So a message queued with spi_async() is completed by
- * compat_spi_pump() with -ENODEV: the transfer did not happen. A driver that needs a real
- * transfer will see that error and must refuse, which applespi does.
+ * A message queued with spi_async() is run by compat_spi_pump() through Helix's kernel SPI
+ * layer (kernel/src/spi.c). The bridge is deliberately narrow:
+ *   - Exactly one SPI controller must be registered (today: the Intel LPSS GSPI block, when it
+ *     exists). The ACPI parent link from APP000D to its controller is not parsed yet, so with
+ *     zero or several controllers the message completes with -ENODEV rather than guessing.
+ *   - Chip select 0, mode 0, 8 bits, the controller's fixed clock. Values from the device's
+ *     _CRS and _DSD are not read yet.
+ *   - The LPSS driver frames each transfer separately, so chip select is released between
+ *     transfers. A transfer that asks to hold chip select (cs_change == 0) before a later one
+ *     is refused with -EOPNOTSUPP instead of being run with the wrong framing.
  *
  * compat_spi_scan_acpi() finds an ACPI slave by its _HID in the AML namespace and binds the
  * node to the device, so the driver's ACPI method calls reach the right object. */
@@ -13,6 +19,7 @@
 #include <linux/acpi.h>
 #include <linux/compat_common.h>
 #include "kstring.h"
+#include "spi.h"   /* Helix's kernel SPI layer */
 
 #define QUEUE_SIZE 8
 #define MAX_DRIVERS 4
@@ -22,6 +29,60 @@ static unsigned g_head, g_tail;
 static struct spi_driver *g_drivers[MAX_DRIVERS];
 static int g_driver_count;
 static int g_probe_calls;
+
+/* The kernel device used for every slave message. Filled in per message, so the controller
+ * is looked up when it is needed, not cached from an earlier boot step. */
+static spi_device_t g_kdev;
+
+/* The one controller a slave can use, or NULL when there is not exactly one. */
+static spi_device_t *kernel_device_for_slave(void) {
+    if (spi_controller_count() != 1u) return NULL;
+    g_kdev.ctrl = spi_controller_at(0);
+    g_kdev.chip_select = 0;
+    g_kdev.mode = 0;
+    g_kdev.bits = 8;
+    g_kdev.speed_hz = 0;   /* the LPSS driver ignores the rate; see lpss_set_mode */
+    return &g_kdev;
+}
+
+static int status_to_errno(spi_status_t s) {
+    switch (s) {
+    case SPI_OK:            return 0;
+    case SPI_ERR_NOT_READY: return -ENODEV;   /* controller absent or did not initialise */
+    case SPI_ERR_BAD_ARG:   return -EINVAL;
+    case SPI_ERR_TIMEOUT:   return -EIO;
+    case SPI_ERR_OVERRUN:   return -EIO;
+    }
+    return -EIO;
+}
+
+/* Runs one message to completion, setting status and actual_length. */
+static void run_message(struct spi_message *m) {
+    m->status = 0;
+    m->actual_length = 0;
+
+    spi_device_t *dev = kernel_device_for_slave();
+    if (dev == NULL) {
+        m->status = -ENODEV;   /* no controller, or more than one: nothing can move bytes */
+        return;
+    }
+    m->status = status_to_errno(spi_configure(dev));
+    if (m->status != 0) return;
+
+    for (struct spi_transfer *t = m->first; t != NULL; t = t->next) {
+        if (!t->cs_change && t->next != NULL) {
+            m->status = -EOPNOTSUPP;
+            return;
+        }
+        spi_status_t s = spi_transfer(dev, (const uint8_t *)t->tx_buf, (uint8_t *)t->rx_buf,
+                                      (uint32_t)t->len);
+        if (s != SPI_OK) {
+            m->status = status_to_errno(s);
+            return;
+        }
+        m->actual_length += t->len;
+    }
+}
 
 int spi_async(struct spi_device *spi, struct spi_message *message) {
     (void)spi;
@@ -37,8 +98,7 @@ int compat_spi_pump(void) {
     while (g_tail != g_head) {
         struct spi_message *m = g_queue[g_tail];
         g_tail = (g_tail + 1u) % QUEUE_SIZE;
-        m->status = -ENODEV;
-        m->actual_length = 0;
+        run_message(m);
         /* Completion runs with no lock held: it may queue another message. */
         if (m->complete) m->complete(m->context);
         ran++;

@@ -642,6 +642,11 @@ def main():
         # cannot send keys yet; this checks only the probe's ACPI steps.
         check("applespi installs its GPE and registers its keyboard (no SPI transfer yet)",
               "[compat] input: registered 'Apple SPI Keyboard'", timeout=60)
+        # SPI bridge: with no LPSS controller in QEMU, a message must fail with -ENODEV, not vanish.
+        check("SPI message with no controller fails with -ENODEV (explicit, not silent)",
+              "SPI message with no controller completes with -ENODEV, 0 bytes", timeout=60)
+        check("SPI fake controller: a message moves bytes and reports status 0",
+              "fake controller: 4-byte message completes with status 0", timeout=60)
         # FAT32: the second disk holds a volume made on the host. The boot disk is not FAT.
         ser.send("fat sata0 info\n")
         check("fat refuses the boot disk, which is not FAT32", "fat: sata0 is not a FAT32 volume", timeout=60)

@@ -53,6 +53,13 @@ Linux kernel sources (GPL-2.0), read during this work:
   so they are not configured. Programmed I/O does not need them.
 - **Chip-select framing.** The SFRM behaviour is the controller's and is unverified.
   The `chip_select` argument is accepted but not yet acted on.
+
+**Compat bridge (QEMU-tested only).** `compat/src/spi_shim.c` runs a message's transfers
+through `spi_configure` and `spi_transfer`, with chip select 0, mode 0 and 8 bits. It uses
+the controller only when exactly one is registered; otherwise the message fails with
+`-ENODEV`. A transfer that holds chip select before a later transfer is refused with
+`-EOPNOTSUPP`. The ACPI link from the Apple device to its controller is not parsed.
+Test: the `inputtest` checks listed in docs/08-linux-compat.md section 7.
 - **Device protocol.** The Apple top-case device does not necessarily use standard SPI
   commands. Nothing is sent to it.
 

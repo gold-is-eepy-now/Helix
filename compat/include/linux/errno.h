@@ -14,6 +14,7 @@
 #define ENOSPC  28
 #define EBUSY   16
 #define ENOSYS  38
+#define EOPNOTSUPP 95
 #define ETIMEDOUT 110
 
 #endif /* HELIX_COMPAT_LINUX_ERRNO_H */

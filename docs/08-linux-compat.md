@@ -156,8 +156,13 @@ module registers at boot. Its probe path runs; it refuses to start on this machi
   not calibrated.
 - `compat/src/spi_shim.c`: SPI drivers register; `compat_spi_add_device()` offers a
   device to the driver whose ACPI id matches. `spi_async()` queues messages, and
-  `compat_spi_pump()` completes them with `-ENODEV`, because no ACPI-described SPI
-  device is bound to Helix's controller layer yet.
+  `compat_spi_pump()` runs each one through Helix's kernel SPI layer (`spi_transfer`,
+  docs/17-spi.md). The bridge uses exactly one registered controller. With zero or
+  several it completes the message with `-ENODEV`, because the ACPI link from the device
+  to its controller is not parsed yet. Chip select 0 and mode 0 are fixed. A transfer that
+  asks to hold chip select across a later transfer is refused with `-EOPNOTSUPP`.
+  Controller errors map to `-ENODEV` (not ready), `-EINVAL` (bad argument) and `-EIO`
+  (timeout or overrun).
 - `compat/src/acpi_shim.c`: every ACPI call returns `AE_NOT_SUPPORTED`.
 - `compat/src/misc_shim.c`: time from the TSC clock, busy-wait delays, CRC-16,
   `snprintf` and a minimal `sscanf`, leds (recorded, not visible), debugfs (accepted
@@ -165,7 +170,11 @@ module registers at boot. Its probe path runs; it refuses to start on this machi
 - `compat/src/applespi_trace.h`: no-op stand-ins for the upstream tracepoints.
 - `compat/src/input_selftest.c`: the `inputtest` shell command. It runs keyboard and
   touchpad reports through the shim, checks the Helix queues, and checks that the
-  applespi probe is reached and returns `-ENODEV`.
+  applespi probe is reached and returns `-ENODEV`. It also checks the SPI bridge: with no
+  controller a message fails with `-ENODEV`; then a fake controller (registered only when
+  the table is empty) checks completion, the reply bytes, chip select and mode, the
+  `-EIO` timeout path and the `-EOPNOTSUPP` refusal. The fake stays registered for that
+  boot, so `inputtest` is meant to run once per boot.
 - Warning flags for `compat_applespi.o` only (`kernel/Makefile`): upstream's
   designated initialisers and unused callback arguments are silenced for that file.
 
@@ -179,13 +188,15 @@ module registers at boot. Its probe path runs; it refuses to start on this machi
   stores its node in `struct device` (so `ACPI_HANDLE()` returns it), and the probe then
   runs `UIST`, finds `SIEN` and `SIST`, and reads `_GPE`. Stage 2 (done) installs and
   enables that GPE through the SCI handler (docs/16-acpi.md). The probe then registers the
-  keyboard and returns success. No SPI transfer has run, so no key events arrive; that
-  success means the ACPI steps passed, not that the keyboard works.
+  keyboard and returns success. The SPI bridge now exists (below), but on QEMU there is no
+  controller that can talk to APP000D, so no key events arrive. That success means the
+  ACPI steps passed, not that the keyboard works.
 - The `_DSD` properties applespi reads (`spiCSDelay`, `resetA2RUsec`, `resetRecUsec`) are
   not implemented. The probe warns that they are missing and continues, which is allowed
   by the driver.
-- No SPI transfer has run against hardware or against an emulated controller. Only
-  the refusal path has run, and only under QEMU TCG.
+- No SPI transfer has run against the Apple device or against any real controller. The
+  bridge has run only against the QEMU absent path (`-ENODEV`) and a fake controller in
+  the kernel self-test, under QEMU TCG.
 - Input events do not reach Helix's `input_device_t` objects; they land in
   `usb_hid`'s queues, which the shell and desktop already read.
 - Only the keys in the `linux/input.h` enum map to Helix codes. Other keys are dropped.
@@ -193,8 +204,10 @@ module registers at boot. Its probe path runs; it refuses to start on this machi
 - Tracepoints do nothing. `%*ph` in applespi's warnings is not parsed by Helix's
   formatter, so those lines print the raw spec.
 
-**Next steps for this area:** an SPI transfer path for an ACPI-described device (applespi's
-init and key reports need it), then the touchpad calibration.
+**Next steps for this area:** bind APP000D to its SPI controller through the ACPI parent
+link and read its chip select and speed from `_CRS` (the SpiSerialBus resource); parse the
+`_DSD` properties; then a real transfer on the MacBook Air, which QEMU cannot provide.
+The touchpad calibration follows.
 
 **Test data (test builds only).** The suite loads a synthetic SSDT with QEMU's `-acpitable`:
 `tests/gen-applespi-ssdt.py` writes a device `\_SB.APPT` with `_HID "APP000D"`, `_GPE` 16,
