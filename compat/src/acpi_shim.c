@@ -6,6 +6,7 @@
  * Not implemented: GPE handlers (no interrupt dispatch from ACPI yet) and device properties
  * (_DSD). Those still answer "not supported". */
 #include <linux/acpi.h>
+#include "acpi_gpe.h"
 #include <linux/errno.h>
 #include "aml.h"
 
@@ -102,34 +103,50 @@ const char *acpi_format_exception(acpi_status status) {
     case AE_ERROR: return "AE_ERROR";
     case AE_NOT_FOUND: return "AE_NOT_FOUND";
     case AE_NOT_SUPPORTED: return "AE_NOT_SUPPORTED";
+    case AE_ALREADY_EXISTS: return "AE_ALREADY_EXISTS";
+    case AE_BAD_PARAMETER: return "AE_BAD_PARAMETER";
     default: return "AE_UNKNOWN";
     }
 }
 
+/* Maps the kernel's GPE result codes to the status codes applespi expects. */
+static acpi_status gpe_status(uint32_t r) {
+    switch (r) {
+    case GPE_OK: return AE_OK;
+    case GPE_ERR_EXISTS: return AE_ALREADY_EXISTS;
+    case GPE_ERR_NO_HANDLER: return AE_NOT_FOUND;
+    case GPE_ERR_RANGE: return AE_BAD_PARAMETER;
+    default: return AE_NOT_SUPPORTED;   /* not ready: no usable FADT blocks, or not in ACPI mode */
+    }
+}
+
+/* ACPICA passes NULL for the system's own GPE block, which is the only one Helix has (GPE0).
+ * A named GPE block device is refused. */
 acpi_status acpi_install_gpe_handler(acpi_handle gpe_device, u32 gpe, u32 type,
                                      u32 (*handler)(acpi_handle, u32, void *), void *context) {
-    (void)gpe_device; (void)gpe; (void)type; (void)handler; (void)context;
-    return AE_NOT_SUPPORTED;
+    if (gpe_device != NULL) return AE_NOT_SUPPORTED;
+    return gpe_status(acpi_gpe_install(gpe, type == ACPI_GPE_LEVEL_TRIGGERED,
+                                       (acpi_gpe_handler_t)handler, NULL, context));
 }
 
 acpi_status acpi_remove_gpe_handler(acpi_handle gpe_device, u32 gpe, u32 (*handler)(acpi_handle, u32, void *)) {
-    (void)gpe_device; (void)gpe; (void)handler;
-    return AE_NOT_SUPPORTED;
+    if (gpe_device != NULL) return AE_NOT_SUPPORTED;
+    return gpe_status(acpi_gpe_remove(gpe, (acpi_gpe_handler_t)handler));
 }
 
 acpi_status acpi_enable_gpe(acpi_handle gpe_device, u32 gpe) {
-    (void)gpe_device; (void)gpe;
-    return AE_NOT_SUPPORTED;
+    if (gpe_device != NULL) return AE_NOT_SUPPORTED;
+    return gpe_status(acpi_gpe_enable(gpe, true));
 }
 
 acpi_status acpi_disable_gpe(acpi_handle gpe_device, u32 gpe) {
-    (void)gpe_device; (void)gpe;
-    return AE_NOT_SUPPORTED;
+    if (gpe_device != NULL) return AE_NOT_SUPPORTED;
+    return gpe_status(acpi_gpe_enable(gpe, false));
 }
 
 acpi_status acpi_finish_gpe(acpi_handle gpe_device, u32 gpe) {
-    (void)gpe_device; (void)gpe;
-    return AE_NOT_SUPPORTED;
+    if (gpe_device != NULL) return AE_NOT_SUPPORTED;
+    return gpe_status(acpi_gpe_finish(gpe));
 }
 
 /* Non-zero means "not found", as in Linux. */

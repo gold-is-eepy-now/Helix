@@ -15,4 +15,8 @@ void pic_clear_mask(uint8_t irq);
 /* Acknowledge an IRQ so more can be delivered. */
 void pic_send_eoi(uint8_t irq);
 
+/* Mark a line level-triggered in the ELCR. The ACPI SCI must be level: an edge line would
+ * miss a second event while the first is still pending. */
+void pic_set_level_triggered(uint8_t irq);
+
 #endif /* HELIX_PIC_H */

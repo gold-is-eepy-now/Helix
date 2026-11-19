@@ -50,6 +50,7 @@
 #include "usb_host.h"
 #include "usb_storage.h"
 #include "acpi.h"
+#include "acpi_gpe.h"
 #include "aml.h"
 #include "intel_lpss_gspi.h"
 #include "xhci.h"
@@ -254,6 +255,12 @@ static void kernel_main_continue(void) {
     /* Build the AML namespace from the DSDT and SSDTs. See docs/24-aml.md. */
     if (acpi_table_count() > 0) {
         aml_load_firmware();
+    }
+
+    /* ACPI events: the SCI and the GPE0 block, plus the power button. Needs the FADT and the
+     * PIC. See docs/16-acpi.md. */
+    if (acpi_table_count() > 0) {
+        acpi_gpe_init();
     }
 
     /* The Intel LPSS GSPI controller (MacBook Air 7,2). Optional: absent on QEMU, and the

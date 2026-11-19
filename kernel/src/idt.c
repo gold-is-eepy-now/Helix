@@ -14,6 +14,7 @@
 #include "console.h"
 #include "io.h"
 #include "panic.h"
+#include "irq.h"
 #include "pic.h"
 #include "pit.h"
 #include "thread.h"
@@ -177,6 +178,9 @@ void isr_handler(registers_t *regs) {
             thread_tick();
             return;
         }
+        /* Run the driver that owns this line (the ACPI SCI, for one), then acknowledge. The
+         * order matters for level-triggered lines: the source is cleared before the EOI. */
+        irq_dispatch(irq);
         pic_send_eoi(irq);
         return;
     }

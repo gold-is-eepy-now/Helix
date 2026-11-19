@@ -52,6 +52,58 @@ static void add_table(const uint8_t *hdr, uint64_t phys, bool from_fadt) {
 
 /* The FADT names the DSDT, which holds the device tree (AML). Record it even though it is
  * not listed in the root table. A 64-bit X_DSDT at offset 140 wins over the 32-bit one. */
+static acpi_pm_t g_pm;
+static bool g_pm_ok;
+
+static uint16_t rd16(const uint8_t *p) {
+    return (uint16_t)(p[0] | (p[1] << 8));
+}
+
+/* A Generic Address Structure (ACPI 2.0 and later): byte 0 is the address space, 1 meaning
+ * system I/O; bytes 4-11 hold the address. Only an I/O port is accepted. */
+static bool gas_port(const uint8_t *g, uint16_t *port) {
+    uint64_t addr = rd64(g + 4);
+    if (g[0] != 1 || addr == 0 || addr > 0xFFFFu) return false;
+    *port = (uint16_t)addr;
+    return true;
+}
+
+/* The 64-bit field wins when the FADT is long enough to contain it. Otherwise (or when it
+ * is not an I/O port) the 32-bit legacy field is used. Zero means the block is absent. */
+static bool fadt_port(const uint8_t *fadt, uint32_t len, uint32_t gas_off, uint32_t gas_end,
+                      uint32_t legacy_off, uint16_t *port) {
+    if (len >= gas_end && gas_port(fadt + gas_off, port)) return true;
+    uint32_t v = rd32(fadt + legacy_off);
+    if (v == 0 || v > 0xFFFFu) return false;
+    *port = (uint16_t)v;
+    return true;
+}
+
+/* FADT field offsets from the ACPI specification: SCI_INT 46, PM1a_EVT_BLK 56, PM1a_CNT_BLK
+ * 64, GPE0_BLK 80, PM1_EVT_LEN 88, GPE0_BLK_LEN 92; the X_ generic addresses at 148, 172, 220. */
+static void record_pm(const uint8_t *fadt, uint32_t len) {
+    if (len < 96u) return;
+    acpi_pm_t pm = {0};
+    pm.sci_irq = rd16(fadt + 46);
+    pm.pm1_evt_len = fadt[88];
+    pm.gpe0_len = fadt[92];
+    if (!fadt_port(fadt, len, 148, 160, 56, &pm.pm1a_evt)) return;
+    if (!fadt_port(fadt, len, 172, 184, 64, &pm.pm1a_cnt)) return;
+    /* A machine with no general-purpose events has no GPE0 block. */
+    if (!fadt_port(fadt, len, 220, 232, 80, &pm.gpe0)) {
+        pm.gpe0 = 0;
+        pm.gpe0_len = 0;
+    }
+    g_pm = pm;
+    g_pm_ok = true;
+}
+
+bool acpi_get_pm(acpi_pm_t *out) {
+    if (!g_pm_ok || out == NULL) return false;
+    *out = g_pm;
+    return true;
+}
+
 static void add_dsdt_from_fadt(const uint8_t *fadt, uint32_t fadt_len) {
     uint64_t dsdt = rd32(fadt + 40);
     if (fadt_len >= 148u && rd64(fadt + 140) != 0) dsdt = rd64(fadt + 140);
@@ -100,6 +152,7 @@ bool acpi_init(uint64_t hhdm_offset, uint64_t rsdp) {
         add_table(hdr, phys, false);
         if (hdr[0] == 'F' && hdr[1] == 'A' && hdr[2] == 'C' && hdr[3] == 'P') {
             add_dsdt_from_fadt(hdr, len);
+            record_pm(hdr, len);
         }
     }
     g_ready = true;

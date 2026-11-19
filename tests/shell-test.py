@@ -629,18 +629,19 @@ def main():
         # the _HID evaluation both work on real firmware. See docs/24-aml.md.
         check("aml hid: PCI root is PNP0A08", "\\_SB.PCI0  _HID PNP0A08", timeout=60)
         # Linux input shim: keyboard and touchpad reports reach the Helix queues, and the
-        # applespi probe path runs and still refuses (its GPE/event delivery is not implemented).
+        # applespi probe path runs; without the test SSDT it refuses, with it the ACPI steps pass.
         # See docs/08-linux-compat.md.
         ser.send("inputtest\n")
         check("inputtest: Linux input shim and applespi probe path pass", "inputtest: PASS (0 failure(s))", timeout=60)
         check_true("inputtest reported no failed check", "inputtest: FAILED" not in ser.text())
-        # With the test SSDT the probe binds its device, runs UIST/SIST/SIEN, and stops at the GPE
-        # step (install_gpe_handler is not implemented). That message is the stage-1 boundary.
         # The serial log up to here, kept so a failed check can be read in build output.
         with open(os.path.join(OUTDIR, "serial-inputtest.txt"), "w", encoding="latin-1") as f:
             f.write(ser.text())
-        check("applespi binds the test SSDT device and stops at its GPE step",
-              "Failed to install GPE handler for GPE 16", timeout=60)
+        # With the test SSDT the probe binds its device, runs its ACPI methods, installs and
+        # enables GPE 16, and registers its keyboard. No SPI transfer has run, so the keyboard
+        # cannot send keys yet; this checks only the probe's ACPI steps.
+        check("applespi installs its GPE and registers its keyboard (no SPI transfer yet)",
+              "[compat] input: registered 'Apple SPI Keyboard'", timeout=60)
         # FAT32: the second disk holds a volume made on the host. The boot disk is not FAT.
         ser.send("fat sata0 info\n")
         check("fat refuses the boot disk, which is not FAT32", "fat: sata0 is not a FAT32 volume", timeout=60)
@@ -843,6 +844,14 @@ def main():
             mon.connect(MONITOR_SOCK)
             mon.sendall(f"screendump {PPM}\n".encode())
             time.sleep(1.5)
+
+        # --- ACPI power button: a real SCI through the PIC, raised by QEMU's monitor ---
+        # The boot log shows the SCI line and GPE0 block were set up; the power button press
+        # is logged by the SCI handler, so this proves the interrupt path end to end.
+        check("ACPI SCI and GPE0 set up at boot", "[acpi] SCI on IRQ", timeout=30)
+        if mon is not None:
+            mon.sendall(b"system_powerdown\n")
+        check("power button press reaches the SCI handler", "[acpi] power button pressed", timeout=30)
 
         # --- deliberate fault: the exception handler must report it ---
         ser.send("fault\n")

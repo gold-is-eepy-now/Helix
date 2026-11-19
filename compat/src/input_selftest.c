@@ -123,13 +123,14 @@ static void test_applespi_refuses(void) {
 
 /* The test build loads a synthetic SSDT (tests/gen-applespi-ssdt.py) with a device APP000D
  * named \_SB.APPT. Binding it must reach the probe, and the probe must get past its ACPI method
- * calls and stop at the GPE step, which Helix does not implement yet. */
+ * steps: the GPE is installed and enabled, and the keyboard is registered. No SPI transfer has
+ * run, so the keyboard cannot send keys yet. */
 static void test_applespi_binds(void) {
     int before = compat_spi_probe_calls();
     int rc = compat_spi_scan_acpi("APP000D");
     check(rc != -ENOENT, "the AML namespace has an APP000D device to bind");
     check(compat_spi_probe_calls() == before + 1, "the bound APP000D device reaches applespi_probe");
-    check(rc == -ENODEV, "applespi stops at its GPE step (not implemented): probe returns -ENODEV");
+    check(rc == 0, "applespi's ACPI steps succeed (GPE installed and enabled, keyboard registered)");
 }
 
 int compat_input_selftest(void) {

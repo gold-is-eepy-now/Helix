@@ -56,9 +56,9 @@ driver cannot ask the firmware about any of them.
   finds the AML Device with a given `_HID`, and the compat layer binds its node to the
   driver, so driver lookups start at that node. Binding by `_ADR` (PCI) or to a whole
   device tree is not implemented.
-- **GPE dispatch.** `_GPE` values are read, but GPE handlers cannot be installed
-  (`acpi_install_gpe_handler` answers `AE_NOT_SUPPORTED`) and no ACPI event reaches a
-  driver. Without it, applespi cannot receive input events.
+- **GPE1 and the control methods.** Only the GPE0 block is dispatched, to a driver's
+  registered handler (docs/16-acpi.md). `_Lxx` and `_Exx` methods are not run when a GPE
+  fires.
 - **Other region spaces.** EmbeddedControl, PCI config, SMBus and the rest return
   "unsupported". Only SystemMemory and SystemIO work.
 - **Access widths.** Field access width (`AccessAs`) is ignored; every access is

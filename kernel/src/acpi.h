@@ -37,4 +37,18 @@ uint64_t acpi_hhdm(void);
 /* Pointer to the first table with this four-character signature, or NULL. */
 const void *acpi_find(const char sig[4]);
 
+/* The fixed ACPI hardware registers from the FADT, as I/O ports. Only I/O-port blocks are
+ * recorded; a block in memory space is left out. See docs/16-acpi.md. */
+typedef struct {
+    uint16_t sci_irq;     /* FADT SCI_INT: the interrupt line the firmware raises for events */
+    uint16_t pm1a_evt;    /* PM1a event block: status at this port, enable at +pm1_evt_len/2 */
+    uint8_t pm1_evt_len;
+    uint16_t pm1a_cnt;    /* PM1a control block; bit 0 (SCI_EN) is set when ACPI mode is on */
+    uint16_t gpe0;        /* GPE0 block: status bytes here, enable bytes at +gpe0_len/2 */
+    uint8_t gpe0_len;     /* total block length in bytes (status plus enable) */
+} acpi_pm_t;
+
+/* False until the FADT has been read, or when it names no usable PM blocks. */
+bool acpi_get_pm(acpi_pm_t *out);
+
 #endif /* HELIX_ACPI_H */

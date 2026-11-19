@@ -177,9 +177,10 @@ module registers at boot. Its probe path runs; it refuses to start on this machi
   `acpi_get_handle` and `acpi_evaluate_integer`. Stage 1 (done) binds the device: the
   compat layer finds the AML Device whose `_HID` is `APP000D` (`compat_acpi_find_hid`),
   stores its node in `struct device` (so `ACPI_HANDLE()` returns it), and the probe then
-  runs `UIST`, finds `SIEN` and `SIST`, and reads `_GPE`. It refuses at
-  `install_gpe_handler`, because GPE dispatch is not implemented. That is the honest
-  state. Keyboard input does not work yet.
+  runs `UIST`, finds `SIEN` and `SIST`, and reads `_GPE`. Stage 2 (done) installs and
+  enables that GPE through the SCI handler (docs/16-acpi.md). The probe then registers the
+  keyboard and returns success. No SPI transfer has run, so no key events arrive; that
+  success means the ACPI steps passed, not that the keyboard works.
 - The `_DSD` properties applespi reads (`spiCSDelay`, `resetA2RUsec`, `resetRecUsec`) are
   not implemented. The probe warns that they are missing and continues, which is allowed
   by the driver.
@@ -192,8 +193,8 @@ module registers at boot. Its probe path runs; it refuses to start on this machi
 - Tracepoints do nothing. `%*ph` in applespi's warnings is not parsed by Helix's
   formatter, so those lines print the raw spec.
 
-**Next steps for this area:** GPE dispatch (the blocker for applespi now), then an SPI
-transfer path for an ACPI-described device, then the touchpad calibration.
+**Next steps for this area:** an SPI transfer path for an ACPI-described device (applespi's
+init and key reports need it), then the touchpad calibration.
 
 **Test data (test builds only).** The suite loads a synthetic SSDT with QEMU's `-acpitable`:
 `tests/gen-applespi-ssdt.py` writes a device `\_SB.APPT` with `_HID "APP000D"`, `_GPE` 16,
@@ -209,5 +210,5 @@ calls, not the Apple firmware.
     inputtest: ok   touchpad finger moving 160 units moves the pointer 10 px
     inputtest: ok   applespi refuses without ACPI: probe returns -ENODEV
     inputtest: ok   the AML namespace has an APP000D device to bind
-    inputtest: ok   applespi stops at its GPE step (not implemented): probe returns -ENODEV
+    inputtest: ok   applespi's ACPI steps succeed (GPE installed and enabled, keyboard registered)
     inputtest: PASS (0 failure(s))

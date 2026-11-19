@@ -43,6 +43,18 @@ void pic_clear_mask(uint8_t irq) {
     outb(port, (uint8_t)(inb(port) & ~(1u << bit)));
 }
 
+/* The edge/level control registers sit at 0x4D0 (IRQ 0-7) and 0x4D1 (IRQ 8-15). A set bit
+ * makes the line level-triggered. Chipsets that have them (all PIIX/ICH-style ones) keep
+ * them readable and writable. */
+#define ELCR1 0x4D0u
+#define ELCR2 0x4D1u
+
+void pic_set_level_triggered(uint8_t irq) {
+    uint16_t port = (irq < 8) ? ELCR1 : ELCR2;
+    uint8_t bit = (uint8_t)(irq & 7u);
+    outb(port, (uint8_t)(inb(port) | (1u << bit)));
+}
+
 void pic_send_eoi(uint8_t irq) {
     if (irq >= 8) {
         outb(PIC2_COMMAND, PIC_EOI);
