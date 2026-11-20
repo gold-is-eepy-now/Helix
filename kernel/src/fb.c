@@ -444,14 +444,17 @@ void fb_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color
 
 /* Draw one 8x8 glyph per character, left to right. With `opaque` false only the
  * set pixels are drawn, so text can sit on a coloured background. */
-/* A vertical gradient drawn once and copied to the screen on each frame, so
- * redrawing the desktop does not recompute every pixel. */
+/* A wallpaper drawn once and copied to the screen on each frame, so redrawing the desktop does
+ * not recompute every pixel. The cache is rebuilt only when the screen size or the wallpaper
+ * spec changes. */
 #define WALL_CAP (1280u * 800u)
 static uint32_t g_wall[WALL_CAP];
 static bool g_wall_ready;
 static const struct limine_framebuffer *g_wall_fb;
-static uint32_t g_wall_w, g_wall_h, g_wall_top, g_wall_bottom;
+static uint32_t g_wall_w, g_wall_h;
+static fb_wall_t g_wall_spec;
 
+/* Linear blend of two 0xRRGGBB-packed colours; t runs 0..n (n > 0), so t == n gives b. */
 static uint32_t wall_mix(uint32_t a, uint32_t b, uint32_t t, uint32_t n) {
     if (n == 0) n = 1;
     int out[3];
@@ -463,22 +466,54 @@ static uint32_t wall_mix(uint32_t a, uint32_t b, uint32_t t, uint32_t n) {
     return fb_rgb((uint8_t)out[0], (uint8_t)out[1], (uint8_t)out[2]);
 }
 
-bool fb_draw_wallpaper(uint32_t top_rgb, uint32_t bottom_rgb) {
-    if (!fb_ready() || g_fb->bpp != 32) return false;
+/* The colour at position t (0..255) along a gradient of 2 to 4 stops. The stops are spread
+ * evenly: with three stops, 0 is the first, 128 the middle and 255 the last. */
+static uint32_t wall_at(const fb_wall_t *w, uint32_t t) {
+    uint32_t n = w->count;
+    if (n < 2u) return fb_rgb((uint8_t)(w->stops[0] >> 16), (uint8_t)(w->stops[0] >> 8),
+                              (uint8_t)w->stops[0]);
+    uint32_t scaled = t * (n - 1u);              /* 0 .. 255 * (n - 1) */
+    uint32_t i = scaled / 255u;
+    if (i > n - 2u) i = n - 2u;                  /* t == 255 lands on the last segment's end */
+    uint32_t frac = scaled - i * 255u;           /* 0 .. 255 within segment i */
+    return wall_mix(w->stops[i], w->stops[i + 1u], frac, 255u);
+}
+
+/* Position of pixel (x, y) on the wallpaper, 0..255. Vertical runs top to bottom; diagonal runs
+ * from the top-left corner to the bottom-right. Integer arithmetic only (no floating point). */
+static uint32_t wall_pos(const fb_wall_t *w, uint32_t x, uint32_t y, uint32_t width, uint32_t height) {
+    if (w->dir == FB_WALL_DIAGONAL) {
+        uint32_t span = (width - 1u) + (height - 1u);
+        return span == 0u ? 0u : (x + y) * 255u / span;
+    }
+    return height <= 1u ? 0u : y * 255u / (height - 1u);
+}
+
+static bool wall_same(const fb_wall_t *a, const fb_wall_t *b) {
+    if (a->dir != b->dir || a->count != b->count) return false;
+    for (uint32_t i = 0; i < a->count; i++) {
+        if (a->stops[i] != b->stops[i]) return false;
+    }
+    return true;
+}
+
+bool fb_draw_wallpaper_spec(const fb_wall_t *spec) {
+    if (!fb_ready() || g_fb->bpp != 32 || spec == NULL) return false;
+    if (spec->count < 1u || spec->count > FB_WALL_MAX_STOPS) return false;
     uint32_t w = (uint32_t)g_fb->width, h = (uint32_t)g_fb->height;
     if ((size_t)w * h > WALL_CAP) return false;
     if (!g_wall_ready || g_wall_fb != g_fb || g_wall_w != w || g_wall_h != h ||
-        g_wall_top != top_rgb || g_wall_bottom != bottom_rgb) {
+        !wall_same(&g_wall_spec, spec)) {
         for (uint32_t y = 0; y < h; y++) {
-            uint32_t c = wall_mix(top_rgb, bottom_rgb, y, h - 1u);
-            for (uint32_t x = 0; x < w; x++) g_wall[(size_t)y * w + x] = c;
+            for (uint32_t x = 0; x < w; x++) {
+                g_wall[(size_t)y * w + x] = wall_at(spec, wall_pos(spec, x, y, w, h));
+            }
         }
         g_wall_ready = true;
         g_wall_fb = g_fb;
         g_wall_w = w;
         g_wall_h = h;
-        g_wall_top = top_rgb;
-        g_wall_bottom = bottom_rgb;
+        g_wall_spec = *spec;
     }
     for (uint32_t y = 0; y < h; y++) {
         uint32_t *row = (uint32_t *)((uint8_t *)g_fb->address + (size_t)y * g_fb->pitch);
@@ -491,6 +526,12 @@ bool fb_draw_wallpaper(uint32_t top_rgb, uint32_t bottom_rgb) {
         g_dy1 = h;
     }
     return true;
+}
+
+/* The original two-colour vertical gradient, kept for callers that pass just two colours. */
+bool fb_draw_wallpaper(uint32_t top_rgb, uint32_t bottom_rgb) {
+    fb_wall_t spec = { FB_WALL_VERTICAL, 2u, { top_rgb, bottom_rgb, 0u, 0u } };
+    return fb_draw_wallpaper_spec(&spec);
 }
 
 void fb_draw_text(uint32_t x, uint32_t y, const char *s, uint32_t fg, uint32_t bg, bool opaque) {

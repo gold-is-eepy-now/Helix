@@ -174,6 +174,38 @@ static const char *const g_theme_names[THEME_COUNT] = {
 static unsigned g_theme_idx;          /* Settings > Appearance; in memory, so Aero Blue at each boot */
 static const theme_t *g_th = &g_theme_aero_blue;
 
+/* Wallpapers Settings cycles through. Entry 0 follows the theme, so each theme keeps its own
+ * sky and nothing looks different until a wallpaper is picked. The others are fixed gradients:
+ * colours are 0xRRGGBB stops, vertical (top to bottom) or diagonal (top-left to bottom-right). */
+typedef struct {
+    const char *name;
+    bool follow_theme;
+    fb_wall_t wall;               /* unused when follow_theme */
+} wallpaper_t;
+#define WALL_COUNT 7u
+static const wallpaper_t g_wallpapers[WALL_COUNT] = {
+    { "Theme default", true,  { FB_WALL_VERTICAL, 2u, { 0u, 0u, 0u, 0u } } },
+    { "Sunset",        false, { FB_WALL_VERTICAL, 3u, { 0xFF9A3Cu, 0xD6457Au, 0x3A1F6Bu, 0u } } },
+    { "Aurora",        false, { FB_WALL_VERTICAL, 3u, { 0x0F3D3Eu, 0x1FA58Au, 0x2B2F77u, 0u } } },
+    { "Dusk",          false, { FB_WALL_DIAGONAL, 2u, { 0x5B2A86u, 0xE0527Au, 0u, 0u } } },
+    { "Ocean",         false, { FB_WALL_DIAGONAL, 3u, { 0x03305Eu, 0x0A7FB8u, 0x5FD3E0u, 0u } } },
+    { "Forest",        false, { FB_WALL_VERTICAL, 2u, { 0x1E5631u, 0x9FD356u, 0u, 0u } } },
+    { "Candy",         false, { FB_WALL_DIAGONAL, 3u, { 0xFF7AB6u, 0xFFC36Bu, 0x7AE7C7u, 0u } } },
+};
+static unsigned g_wall_idx;           /* Settings > Wallpaper; in memory, like the theme */
+
+/* The wallpaper to draw now. For the theme default it is the theme's own two colours. */
+static fb_wall_t current_wall(void) {
+    const wallpaper_t *wp = &g_wallpapers[g_wall_idx];
+    if (!wp->follow_theme) return wp->wall;
+    fb_wall_t s = { FB_WALL_VERTICAL, 2u, { g_th->desk_top, g_th->desk_bot, 0u, 0u } };
+    return s;
+}
+
+static void wallpaper_cycle(void) {
+    g_wall_idx = (g_wall_idx + 1u) % WALL_COUNT;
+}
+
 /* A 0xRRGGBB colour, packed for the framebuffer. */
 static uint32_t rgb_hex(uint32_t v) {
     return fb_rgb((uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v);
@@ -1437,6 +1469,20 @@ static void settings_theme_button(uint32_t bx, uint32_t by) {
     fb_draw_text(bx + 8u, by + 7u, label, c_ink, 0, false);
 }
 
+/* The Wallpaper button: the same raised button, naming the current wallpaper. */
+static void settings_wall_button(uint32_t bx, uint32_t by) {
+    fb_fill_rect(bx, by, SET_THEME_W, SET_THEME_H, c_face);
+    bevel(bx, by, SET_THEME_W, SET_THEME_H, true);
+    char label[40];
+    put_str(label, sizeof(label), "Wallpaper: ");
+    size_t n = 0;
+    while (label[n] != '\0') n++;
+    const char *name = g_wallpapers[g_wall_idx].name;
+    for (size_t i = 0; name[i] != '\0' && n + 1 < sizeof(label); i++) label[n++] = name[i];
+    label[n] = '\0';
+    fb_draw_text(bx + 8u, by + 7u, label, c_ink, 0, false);
+}
+
 static void settings_line(uint32_t x, uint32_t *y, uint32_t color, const char *s) {
     fb_draw_text(x, *y, s, color, 0, false);
     *y += 14u;
@@ -1453,7 +1499,8 @@ static void settings_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
 
     settings_line(x, &y, c_navy, "Appearance");
     settings_theme_button(x, y + 2u);
-    y += 30u;
+    settings_wall_button(x, y + 30u);
+    y += 60u;
 
     settings_line(x, &y, c_navy, "Account");
     const char *who = accounts_session();
@@ -1473,7 +1520,6 @@ static void settings_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
     at = cat_str(line, sizeof line, at, " x ");
     cat_dec(line, sizeof line, at, fb_height());
     settings_line(x, &y, c_ink, line);
-    settings_line(x, &y, c_ink, "Wallpaper: sky blue (the only choice).");
     y += 8u;
 
     settings_line(x, &y, c_navy, "System");
@@ -1482,7 +1528,7 @@ static void settings_draw(uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch) {
     settings_line(x, &y, c_ink, line);
     settings_line(x, &y, c_ink, "Clock: UTC.");
     y += 8u;
-    settings_line(x, &y, c_gray, "The theme: press t, or use the button.");
+    settings_line(x, &y, c_gray, "Theme: press t or Enter, or use the button. Wallpaper: w.");
 }
 
 static void draw_window(const window_t *w, bool focused) {
@@ -1981,8 +2027,11 @@ static void redraw(void) {
     uint32_t sw = fb_width(), sh = fb_height();
     g_cur_shown = false;                        /* the frame below wipes the old arrow */
     g_outline_shown = false;
-    if (!fb_draw_wallpaper(g_th->desk_top, g_th->desk_bot)) {          /* sky-blue wallpaper */
-        fill_box(0, 0, sw, sh, 0, g_th->desk_top, g_th->desk_bot, false);
+    fb_wall_t wall = current_wall();
+    if (!fb_draw_wallpaper_spec(&wall)) {
+        /* Fallback when the screen cannot use the cache: a plain top-to-bottom fill between the
+         * first and last stops. Diagonal wallpapers lose their slant here, which is acceptable. */
+        fill_box(0, 0, sw, sh, 0, wall.stops[0], wall.stops[wall.count - 1u], false);
     }
     for (int i = 0; i < ICON_COUNT; i++) {
         draw_icon(i, 16, 16u + (uint32_t)i * 72u, i == g_icon_sel && !g_menu_open);
@@ -2186,12 +2235,16 @@ static void network_click(const window_t *w, int x, int y) {
     }
 }
 
-/* A click on the Settings page: the Appearance button flips the theme. */
+/* A click on the Settings page: the Appearance button flips the theme, the Wallpaper button
+ * cycles the wallpaper. */
 static void settings_click(const window_t *w, int x, int y) {
     uint32_t cx = w->x + 6u, cy = w->y + 26u;
     if (inside(x, y, cx + 10u, cy + 24u, SET_THEME_W, SET_THEME_H)) {
         g_theme_idx = (g_theme_idx + 1u) % THEME_COUNT;
         theme_apply();
+    }
+    if (inside(x, y, cx + 10u, cy + 52u, SET_THEME_W, SET_THEME_H)) {
+        wallpaper_cycle();                 /* the caller repaints the whole screen after a Settings click */
     }
 }
 
@@ -3014,6 +3067,11 @@ static bool handle_key(int c) {
         (c == 't' || c == 'T' || c == '\n')) {
         g_theme_idx = (g_theme_idx + 1u) % THEME_COUNT;   /* the keyboard way to the Appearance button */
         theme_apply();
+        return false;
+    }
+    if (g_focus >= 0 && g_win[g_focus].used && g_win[g_focus].app == APP_SETTINGS &&
+        (c == 'w' || c == 'W')) {
+        wallpaper_cycle();                 /* the keyboard way to the Wallpaper button */
         return false;
     }
 
