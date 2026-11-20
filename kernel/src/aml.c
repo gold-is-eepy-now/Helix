@@ -95,6 +95,15 @@ void aml_value_free(aml_value_t *value) {
     aml_value_destroy(value);
 }
 
+aml_node_t *aml_parent(aml_node_t *node) {
+    return node != NULL ? node->parent : NULL;
+}
+
+void aml_node_name(const aml_node_t *node, char out[5]) {
+    for (int i = 0; i < 4; i++) out[i] = node != NULL ? node->name[i] : '?';
+    out[4] = '\0';
+}
+
 aml_node_t *aml_lookup(aml_node_t *scope, const char *path) {
     aml_path_t p;
     if (!aml_path_from_text(path, &p)) return NULL;

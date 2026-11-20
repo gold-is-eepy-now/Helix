@@ -179,6 +179,7 @@ test: image tls-test-image
 	@BUILD_DIR="$(BUILD_DIR)" python3 tests/shell-test.py "$(TLS_TEST_IMAGE)"
 	@BUILD_DIR="$(BUILD_DIR)" python3 tests/usb-test.py "$(IMAGE)"
 	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/usb-hid-unit" tests/usb-hid-unit.c kernel/src/usb_hid.c && "$(BUILD_DIR)/test/usb-hid-unit"
+	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/acpi-spi-res-unit" tests/acpi-spi-res-unit.c kernel/src/acpi_spi_res.c && "$(BUILD_DIR)/test/acpi-spi-res-unit"
 	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/sha256-unit" tests/sha256-unit.c kernel/src/sha256.c && "$(BUILD_DIR)/test/sha256-unit"
 	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/crypto-unit" tests/crypto-unit.c kernel/src/sha256.c kernel/src/x25519.c kernel/src/chacha20poly1305.c && "$(BUILD_DIR)/test/crypto-unit"
 	@mkdir -p "$(BUILD_DIR)/test" && $(HOST_CC) -std=gnu11 -Wall -Wextra -Ikernel/src -o "$(BUILD_DIR)/test/hkdf-unit" tests/hkdf-unit.c kernel/src/hkdf.c kernel/src/sha256.c && "$(BUILD_DIR)/test/hkdf-unit"

@@ -36,6 +36,11 @@ struct spi_controller {
     spi_status_t (*transfer)(spi_controller_t *c, uint8_t cs, const uint8_t *tx, uint8_t *rx,
                              uint32_t len);
     void *priv;            /* the driver's own state */
+    /* The controller's ACPI address (_ADR), when the driver knows it. For a PCI function this is
+     * (device << 16) | function, as ACPI defines it. A slave whose parent has the same _ADR is
+     * wired to this controller; without a match the slave cannot be bound. */
+    bool has_acpi_adr;
+    uint32_t acpi_adr;
 };
 
 typedef struct {

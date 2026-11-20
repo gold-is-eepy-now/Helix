@@ -11,4 +11,8 @@ int compat_run_initcalls(void);
  * path (compat/src/input_selftest.c). Prints one line per check; returns failures. */
 int compat_input_selftest(void);
 
+/* Prints how an ACPI SPI slave (by _HID, e.g. "APP000D") is linked to a controller: its parent,
+ * its _CRS settings and whether the link succeeded, and why not. Sends nothing (spi command). */
+void compat_spi_print_link(const char *acpi_hid);
+
 #endif /* HELIX_LINUX_COMPAT_H */

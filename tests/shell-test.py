@@ -643,8 +643,18 @@ def main():
         check("applespi installs its GPE and registers its keyboard (no SPI transfer yet)",
               "[compat] input: registered 'Apple SPI Keyboard'", timeout=60)
         # SPI bridge: with no LPSS controller in QEMU, a message must fail with -ENODEV, not vanish.
-        check("SPI message with no controller fails with -ENODEV (explicit, not silent)",
-              "SPI message with no controller completes with -ENODEV, 0 bytes", timeout=60)
+        check("SPI message from an unlinked device fails with -ENODEV (explicit, not silent)",
+              "SPI message from an unlinked device completes with -ENODEV, 0 bytes", timeout=60)
+        # The spi command links APP000D to its controller without sending anything. The test
+        # SSDT puts APP000D under SPI1 with _ADR 0x001e0002; QEMU has no LPSS block there, so the
+        # link must fail with that exact reason, not succeed.
+        ser.send("spi\n")
+        check("spi: APP000D sits under SPI1 in the test namespace",
+              "spi: APP000D is under SPI1", timeout=60)
+        check("spi: the parent's _ADR is the LPSS address 0x001e0002",
+              "spi: SPI1 _ADR 0x001e0002", timeout=60)
+        check("spi: the link fails with no controller at that address (QEMU has none)",
+              "spi: not linked: no SPI controller at the parent's _ADR", timeout=60)
         check("SPI fake controller: a message moves bytes and reports status 0",
               "fake controller: 4-byte message completes with status 0", timeout=60)
         # FAT32: the second disk holds a volume made on the host. The boot disk is not FAT.

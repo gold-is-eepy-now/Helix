@@ -225,6 +225,10 @@ bool intel_lpss_gspi_init(void) {
     g_lpss.ctrl.set_mode = lpss_set_mode;
     g_lpss.ctrl.transfer = lpss_transfer;
     g_lpss.ctrl.priv = &g_lpss;
+    /* ACPI _ADR of a PCI function is (device << 16) | function. This is how a slave's parent
+     * in the AML namespace names this controller. */
+    g_lpss.ctrl.has_acpi_adr = true;
+    g_lpss.ctrl.acpi_adr = ((uint32_t)f.device << 16) | (uint32_t)f.function;
     g_lpss.ctrl.ready = true;
     if (!spi_register_controller(&g_lpss.ctrl)) {
         klog_note(KLOG_INPUT, "[spi] SPI bus table is full\n");

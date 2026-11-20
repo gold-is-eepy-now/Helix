@@ -55,15 +55,43 @@ def ret(data):
     return b"\xa4" + data                                             # ReturnOp
 
 
+def dword(v):
+    return b"\x0c" + struct.pack("<I", v)                             # DWordPrefix
+
+
+def buffer(data):
+    content = byte(len(data)) + data                                  # BufferSize, then the bytes
+    return b"\x11" + pkg_length(len(content)) + content               # BufferOp
+
+
+# A _CRS with one SpiSerialBus descriptor (ACPI 6.x, 6.4.3.8.2) and the end tag. Chip select 0,
+# clock phase 0 and polarity 0, 8-bit words, 1,000,000 Hz, 4-wire. The layout is the one in
+# kernel/src/acpi_spi_res.h; the parser's host test checks the same bytes.
+SPI_CRS = bytes([
+    0x8E, 0x12, 0x00,                 # large item 0x0E (serial bus), length 18
+    0x01, 0x00, 0x02, 0x00,           # revision 1, source index 0, bus type 2 (SPI), flags 0
+    0x00, 0x00,                       # type-specific flags: 4-wire, active-low chip select
+    0x01, 0x09, 0x00,                 # type revision 1, type data length 9
+    0x40, 0x42, 0x0F, 0x00,           # connection speed 1000000
+    0x08, 0x00, 0x00,                 # 8 bits, clock phase 0, clock polarity 0
+    0x00, 0x00,                       # device selection 0
+    0x79, 0x00,                       # end tag
+])
+
 ARG0 = b"\x68"
 ZERO = b"\x00"
 
-aml_body = scope(b"\x5c" + seg("_SB"), device("APPT",
-    name("_HID", string("APP000D")) +
-    name("_GPE", byte(0x10)) +
-    method("UIST", 0, ret(ZERO)) +
-    method("SIST", 0, ret(byte(1))) +
-    method("SIEN", 1, ret(ARG0))))
+# SPI1 is the LPSS controller in the ACPI tree (_ADR 0x001E0002: device 0x1E, function 2). APPT
+# hangs under it, so the link from the device to its controller is the one the real machine has.
+aml_body = scope(b"\x5c" + seg("_SB"), device("SPI1",
+    name("_ADR", dword(0x001E0002)) +
+    device("APPT",
+        name("_HID", string("APP000D")) +
+        name("_GPE", byte(0x10)) +
+        name("_CRS", buffer(SPI_CRS)) +
+        method("UIST", 0, ret(ZERO)) +
+        method("SIST", 0, ret(byte(1))) +
+        method("SIEN", 1, ret(ARG0)))))
 
 header_len = 36
 length = header_len + len(aml_body)

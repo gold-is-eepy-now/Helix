@@ -67,6 +67,13 @@ aml_status_t aml_eval(const char *path, const aml_value_t *args, unsigned nargs,
  * node pointer stays valid for the life of the system. */
 aml_node_t *aml_lookup(aml_node_t *scope, const char *path);
 
+/* The node's parent in the namespace tree, or NULL for the root. A device's parent is the
+ * object its ACPI path sits under, for example the SPI controller that holds an SPI slave. */
+aml_node_t *aml_parent(aml_node_t *node);
+
+/* Copies a node's 4-character name into out and adds a NUL. */
+void aml_node_name(const aml_node_t *node, char out[5]);
+
 /* aml_eval, with the path resolved relative to `scope` (NULL means the root). */
 aml_status_t aml_eval_at(aml_node_t *scope, const char *path, const aml_value_t *args, unsigned nargs,
                          aml_value_t *out);

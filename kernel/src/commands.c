@@ -1378,12 +1378,14 @@ static void cmd_spi(int argc, char **argv) {
     intel_lpss_gspi_info(&s);
     if (!s.found) {
         kprintf("spi: Intel LPSS GSPI 8086:9CE6 not found on this machine\n");
-        return;
+    } else {
+        kprintf("spi: Intel LPSS GSPI 8086:9CE6 at %02x:%02x.%u, BAR0 0x%llx\n",
+                s.bus, s.device, s.function, (unsigned long long)s.bar_phys);
+        kprintf("spi: ready %s, SCR %u, SSCR0 readback 0x%08x, SSSR 0x%08x\n",
+                s.ready ? "yes" : "no", (unsigned)s.scr, s.sscr0_readback, s.sssr);
     }
-    kprintf("spi: Intel LPSS GSPI 8086:9CE6 at %02x:%02x.%u, BAR0 0x%llx\n",
-            s.bus, s.device, s.function, (unsigned long long)s.bar_phys);
-    kprintf("spi: ready %s, SCR %u, SSCR0 readback 0x%08x, SSSR 0x%08x\n",
-            s.ready ? "yes" : "no", (unsigned)s.scr, s.sscr0_readback, s.sssr);
+    /* The link is printed even without a controller: that is the question the Air test answers. */
+    compat_spi_print_link("APP000D");
 }
 
 /* acpi: list the firmware's ACPI tables, with the length and checksum status of each. */

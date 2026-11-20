@@ -170,13 +170,13 @@ static int run_one(struct spi_message *m, struct spi_transfer *t) {
     return compat_spi_pump();
 }
 
-/* With no controller in the kernel table (QEMU without an LPSS block), the message must fail
- * with -ENODEV and say nothing was sent. Runs before the applespi tests. */
-static void test_spi_no_controller(void) {
-    if (spi_controller_count() != 0u) {
-        kprintf("inputtest: SPI no-controller check skipped (a controller is already registered)\n");
-        return;
-    }
+/* Test hooks from spi_shim.c: lend the bridge to a controller, then take the binding back. */
+void compat_spi_test_begin(spi_controller_t *c);
+void compat_spi_test_end(void);
+
+/* With no slave linked, a message completes with -ENODEV and sends nothing. This holds before
+ * the applespi scan and after it, because the message's device is not the linked one. */
+static void test_spi_unlinked(void) {
     struct spi_message m;
     struct spi_transfer t = { 0 };
     uint8_t buf[2] = { 1, 2 };
@@ -185,18 +185,13 @@ static void test_spi_no_controller(void) {
     t.cs_change = 1;
     run_one(&m, &t);
     check(m.status == -ENODEV && m.actual_length == 0,
-          "SPI message with no controller completes with -ENODEV, 0 bytes");
+          "SPI message from an unlinked device completes with -ENODEV, 0 bytes");
 }
 
-/* Registers the fake only when the table is empty, so the LPSS controller is never shadowed. */
+/* Lends the bridge to the fake controller for these checks only. The fake is not added to the
+ * kernel's controller table, so the real LPSS controller is never affected. */
 static void test_spi_fake_controller(void) {
-    if (spi_controller_count() == 0u) {
-        check(spi_register_controller(&g_fake), "fake SPI controller registered");
-    }
-    if (spi_controller_count() != 1u || spi_controller_at(0) != &g_fake) {
-        kprintf("inputtest: SPI fake-controller checks skipped (a real controller is registered)\n");
-        return;
-    }
+    compat_spi_test_begin(&g_fake);
 
     /* A 4-byte message: the reply is the complement of tx, and cs 0 / mode 0 reach the controller. */
     uint8_t tx[4] = { 0x10, 0x20, 0x30, 0x40 };
@@ -227,13 +222,15 @@ static void test_spi_fake_controller(void) {
     compat_spi_pump();
     check(m2.status == -EOPNOTSUPP && m2.actual_length == 0,
           "holding chip select across transfers is refused with -EOPNOTSUPP");
+
+    compat_spi_test_end();
 }
 
 int compat_input_selftest(void) {
     g_failures = 0;
     test_keyboard();
     test_touchpad();
-    test_spi_no_controller();
+    test_spi_unlinked();
     test_applespi_refuses();
     test_applespi_binds();
     test_spi_fake_controller();

@@ -55,11 +55,19 @@ Linux kernel sources (GPL-2.0), read during this work:
   The `chip_select` argument is accepted but not yet acted on.
 
 **Compat bridge (QEMU-tested only).** `compat/src/spi_shim.c` runs a message's transfers
-through `spi_configure` and `spi_transfer`, with chip select 0, mode 0 and 8 bits. It uses
-the controller only when exactly one is registered; otherwise the message fails with
-`-ENODEV`. A transfer that holds chip select before a later transfer is refused with
-`-EOPNOTSUPP`. The ACPI link from the Apple device to its controller is not parsed.
-Test: the `inputtest` checks listed in docs/08-linux-compat.md section 7.
+through `spi_configure` and `spi_transfer`. The chip select, clock phase and polarity come
+from the slave's `_CRS` SpiSerialBus descriptor (`kernel/src/acpi_spi_res.c`, host-tested in
+`tests/acpi-spi-res-unit.c`). The controller is the registered one whose ACPI address equals
+the slave's parent `_ADR` (`compat/src/spi_acpi.c`). Without a link the message fails with
+`-ENODEV`. 3-wire and non-8-bit slaves are refused. A transfer that holds chip select before
+a later transfer is refused with `-EOPNOTSUPP`. Test: the `inputtest` checks and the `spi`
+command output, listed in docs/08-linux-compat.md section 7.
+
+**Not verified on hardware.** The link depends on the real MacBook's ACPI tree: that
+APP000D's parent is the LPSS block with `_ADR` 0x001E0002, and that its `_CRS` is a buffer
+the interpreter can return. QEMU checks the path with a synthetic SSDT
+(`tests/gen-applespi-ssdt.py`), where the parent has no controller, so the expected result
+there is the explicit "no SPI controller at the parent's _ADR" failure.
 - **Device protocol.** The Apple top-case device does not necessarily use standard SPI
   commands. Nothing is sent to it.
 

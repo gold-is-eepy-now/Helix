@@ -157,10 +157,11 @@ module registers at boot. Its probe path runs; it refuses to start on this machi
 - `compat/src/spi_shim.c`: SPI drivers register; `compat_spi_add_device()` offers a
   device to the driver whose ACPI id matches. `spi_async()` queues messages, and
   `compat_spi_pump()` runs each one through Helix's kernel SPI layer (`spi_transfer`,
-  docs/17-spi.md). The bridge uses exactly one registered controller. With zero or
-  several it completes the message with `-ENODEV`, because the ACPI link from the device
-  to its controller is not parsed yet. Chip select 0 and mode 0 are fixed. A transfer that
-  asks to hold chip select across a later transfer is refused with `-EOPNOTSUPP`.
+  docs/17-spi.md). The slave is linked from ACPI (`compat/src/spi_acpi.c`): its `_CRS`
+  SpiSerialBus gives the chip select, clock phase and polarity, and its parent's `_ADR` must
+  equal a registered controller's ACPI address. Without that match the message fails with
+  `-ENODEV`, and `spi` says why. Only the linked device's messages are accepted. A transfer
+  that asks to hold chip select across a later transfer is refused with `-EOPNOTSUPP`.
   Controller errors map to `-ENODEV` (not ready), `-EINVAL` (bad argument) and `-EIO`
   (timeout or overrun).
 - `compat/src/acpi_shim.c`: every ACPI call returns `AE_NOT_SUPPORTED`.
@@ -171,10 +172,13 @@ module registers at boot. Its probe path runs; it refuses to start on this machi
 - `compat/src/input_selftest.c`: the `inputtest` shell command. It runs keyboard and
   touchpad reports through the shim, checks the Helix queues, and checks that the
   applespi probe is reached and returns `-ENODEV`. It also checks the SPI bridge: with no
-  controller a message fails with `-ENODEV`; then a fake controller (registered only when
-  the table is empty) checks completion, the reply bytes, chip select and mode, the
-  `-EIO` timeout path and the `-EOPNOTSUPP` refusal. The fake stays registered for that
-  boot, so `inputtest` is meant to run once per boot.
+  slave is linked a message fails with `-ENODEV`; then a fake controller, lent to the bridge
+  through a test hook (it is not added to the kernel's controller table), checks completion,
+  the reply bytes, chip select and mode, the `-EIO` timeout path and the `-EOPNOTSUPP`
+  refusal. The real slave's binding is put back afterwards.
+- The `spi` shell command prints the link for APP000D without sending anything: the parent
+  it sits under, the parent's `_ADR`, the `_CRS` settings, and either "linked" or the reason
+  it is not.
 - Warning flags for `compat_applespi.o` only (`kernel/Makefile`): upstream's
   designated initialisers and unused callback arguments are silenced for that file.
 
