@@ -504,9 +504,18 @@ bool fb_draw_wallpaper_spec(const fb_wall_t *spec) {
     if ((size_t)w * h > WALL_CAP) return false;
     if (!g_wall_ready || g_wall_fb != g_fb || g_wall_w != w || g_wall_h != h ||
         !wall_same(&g_wall_spec, spec)) {
-        for (uint32_t y = 0; y < h; y++) {
-            for (uint32_t x = 0; x < w; x++) {
-                g_wall[(size_t)y * w + x] = wall_at(spec, wall_pos(spec, x, y, w, h));
+        if (spec->dir == FB_WALL_VERTICAL) {
+            /* A vertical gradient is the same along each row: compute the colour once per row,
+             * not once per pixel. Under software emulation (no KVM) the per-pixel form is slow. */
+            for (uint32_t y = 0; y < h; y++) {
+                uint32_t c = wall_at(spec, wall_pos(spec, 0u, y, w, h));
+                for (uint32_t x = 0; x < w; x++) g_wall[(size_t)y * w + x] = c;
+            }
+        } else {
+            for (uint32_t y = 0; y < h; y++) {
+                for (uint32_t x = 0; x < w; x++) {
+                    g_wall[(size_t)y * w + x] = wall_at(spec, wall_pos(spec, x, y, w, h));
+                }
             }
         }
         g_wall_ready = true;

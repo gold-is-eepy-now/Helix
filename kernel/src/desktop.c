@@ -182,15 +182,21 @@ typedef struct {
     bool follow_theme;
     fb_wall_t wall;               /* unused when follow_theme */
 } wallpaper_t;
-#define WALL_COUNT 7u
+#define WALL_COUNT 13u
 static const wallpaper_t g_wallpapers[WALL_COUNT] = {
-    { "Theme default", true,  { FB_WALL_VERTICAL, 2u, { 0u, 0u, 0u, 0u } } },
-    { "Sunset",        false, { FB_WALL_VERTICAL, 3u, { 0xFF9A3Cu, 0xD6457Au, 0x3A1F6Bu, 0u } } },
-    { "Aurora",        false, { FB_WALL_VERTICAL, 3u, { 0x0F3D3Eu, 0x1FA58Au, 0x2B2F77u, 0u } } },
-    { "Dusk",          false, { FB_WALL_DIAGONAL, 2u, { 0x5B2A86u, 0xE0527Au, 0u, 0u } } },
-    { "Ocean",         false, { FB_WALL_DIAGONAL, 3u, { 0x03305Eu, 0x0A7FB8u, 0x5FD3E0u, 0u } } },
-    { "Forest",        false, { FB_WALL_VERTICAL, 2u, { 0x1E5631u, 0x9FD356u, 0u, 0u } } },
-    { "Candy",         false, { FB_WALL_DIAGONAL, 3u, { 0xFF7AB6u, 0xFFC36Bu, 0x7AE7C7u, 0u } } },
+    { "Theme default",   true,  { FB_WALL_VERTICAL, 2u, { 0u, 0u, 0u, 0u } } },
+    { "Sunset Bright",   false, { FB_WALL_VERTICAL, 3u, { 0xFFD27Au, 0xFF6F8Eu, 0xA65CE0u, 0u } } },
+    { "Sunset Dark",     false, { FB_WALL_VERTICAL, 3u, { 0x5A2A10u, 0x3A1030u, 0x120820u, 0u } } },
+    { "Aurora Bright",   false, { FB_WALL_VERTICAL, 3u, { 0x7FF5D0u, 0x3FD1B0u, 0x6E8BFFu, 0u } } },
+    { "Aurora Dark",     false, { FB_WALL_VERTICAL, 3u, { 0x0B3B3Au, 0x123C5Cu, 0x0A1030u, 0u } } },
+    { "Dusk Bright",     false, { FB_WALL_DIAGONAL, 2u, { 0xC77DFFu, 0xFF8FB1u, 0u, 0u } } },
+    { "Dusk Dark",       false, { FB_WALL_DIAGONAL, 2u, { 0x2A0F4Au, 0x5A1437u, 0u, 0u } } },
+    { "Ocean Bright",    false, { FB_WALL_DIAGONAL, 3u, { 0x7DE3F4u, 0x2FA7E0u, 0x1F6FD6u, 0u } } },
+    { "Ocean Dark",      false, { FB_WALL_DIAGONAL, 3u, { 0x03203Au, 0x06305Cu, 0x010B1Fu, 0u } } },
+    { "Forest Bright",   false, { FB_WALL_VERTICAL, 2u, { 0xC6F27Cu, 0x6DBF3Eu, 0u, 0u } } },
+    { "Forest Dark",     false, { FB_WALL_VERTICAL, 2u, { 0x0F2A18u, 0x041308u, 0u, 0u } } },
+    { "Candy Bright",    false, { FB_WALL_DIAGONAL, 3u, { 0xFFB3D9u, 0xFFE3A3u, 0xB5F5DBu, 0u } } },
+    { "Candy Dark",      false, { FB_WALL_DIAGONAL, 3u, { 0x6B1F4Eu, 0x5E4A14u, 0x1E5A4Au, 0u } } },
 };
 static unsigned g_wall_idx;           /* Settings > Wallpaper; in memory, like the theme */
 
