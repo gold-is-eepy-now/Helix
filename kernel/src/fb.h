@@ -63,4 +63,15 @@ void fb_draw_text(uint32_t x, uint32_t y, const char *s, uint32_t fg, uint32_t b
  * and copied, so repeated calls are cheap. False if the screen cannot use the cache. */
 bool fb_draw_wallpaper(uint32_t top_rgb, uint32_t bottom_rgb);
 
+/* A wallpaper spec: 2 to 4 colour stops (0xRRGGBB), laid out vertically or diagonally. */
+#define FB_WALL_MAX_STOPS 4u
+typedef enum { FB_WALL_VERTICAL, FB_WALL_DIAGONAL } fb_wall_dir_t;
+typedef struct {
+    fb_wall_dir_t dir;
+    uint32_t count;                    /* how many of stops[] are used */
+    uint32_t stops[FB_WALL_MAX_STOPS];
+} fb_wall_t;
+/* Draw a wallpaper from a spec. The result is cached; false if the screen cannot use the cache. */
+bool fb_draw_wallpaper_spec(const fb_wall_t *spec);
+
 #endif /* HELIX_FB_H */

@@ -45,11 +45,13 @@ changed rectangle after each draw. Without virtio-gpu the GOP framebuffer is use
 ## Desktop redesign, slice 2 (0.5.58, QEMU-tested only)
 
 - **Themes:** `theme_t` holds every colour the desktop uses. Five palettes: Helix Aero Blue (default), Helix Aero Dark, Helix Classic, Helix Light, Helix Dark. Settings and the `t` key cycle them.
+- **Wallpapers:** `fb_wall_t` is a gradient of 2 to 4 colour stops, laid out vertically or diagonally (`fb_draw_wallpaper_spec`, in `fb.c`). Integer arithmetic only, cached until the screen size or the spec changes. Settings has a Wallpaper button and the `w` key: Theme default (the theme's own two colours, the original look), Sunset, Aurora, Dusk, Ocean, Forest and Candy. The choice is in memory, so it resets at boot.
 - **Taskbar:** one button per window, including minimised ones. The focused or hovered button is lit, and a dot shows that the app is running. The tray glyphs are drawn only. A thin strip at the far right is Show Desktop (hides every window, or restores them all).
 - **Start menu:** two columns. The programs column has Pinned, Recent and All Programs, plus a search box that filters by name. The places column has My Computer, Network, Settings, About Helix, and Shut Down. Arrow keys move within a column and switch columns with Left and Right. Typing searches; Esc closes.
 - **Desktop menu:** right-click on empty desktop opens Refresh, Settings and About Helix. Any key or click closes it.
 - **Windows:** minimise, maximise and restore buttons in the title bar. Maximise fills the screen above the taskbar. Each window casts a solid two-layer shadow.
-- **Not done:** blur and translucency (no backbuffer), a configurable wallpaper, User and Documents places, window resizing, glossy application icons, and per-application styling beyond the window chrome.
+- **Not done:** blur and translucency (no backbuffer), User and Documents places, window resizing, glossy application icons, and per-application styling beyond the window chrome.
+- **Not checked on screen:** the new wallpapers (Sunset to Candy) were compiled and the shell suite passes, but no screendump of them has been taken yet.
 - **Checked:** QEMU screendumps of each theme, the Start menu, the desktop menu, minimise, maximise and Show Desktop. The shell suite (133), USB suite (19/19) and HID unit tests pass.
 - **Window controls, 0.5.59 (QEMU-tested only):** double-clicking a title bar within 500 ms toggles maximise. The bottom-right grip resizes a window (minimum 200x120) with an outline, like the move. Alt+Tab focuses the next shown window; Alt+F4 closes the focused one. The keyboard driver (`keyboard.c`) turns these into `SHELL_KEY_ALT_TAB` and `SHELL_KEY_ALT_F4`. USB keyboards do not send these yet. Alt+Tab has no switcher overlay yet.
 
