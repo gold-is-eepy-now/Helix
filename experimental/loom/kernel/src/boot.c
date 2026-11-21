@@ -78,6 +78,9 @@ void kmain(void) {
     bool cells_ok = cell_selftest();
     serial_puts(cells_ok ? "LOOM cells: PASS\n" : "LOOM cells: FAIL\n");
 
+    bool chan_ok = chan_selftest();
+    serial_puts(chan_ok ? "LOOM channels: PASS\n" : "LOOM channels: FAIL\n");
+
     bool demo_ok = loom_demo_run();
     serial_puts(demo_ok ? "LOOM demo: PASS\n" : "LOOM demo: FAIL\n");
     for (;;) __asm__ volatile ("cli; hlt");

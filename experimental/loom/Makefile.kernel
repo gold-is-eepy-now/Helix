@@ -19,7 +19,7 @@ LIB_SRC = src/field.c src/contract.c src/morph.c src/continuity.c src/weaver.c
 KSRC    = kernel/src/boot.c kernel/src/serial.c kernel/src/string.c kernel/src/kassert.c kernel/src/demo.c \
           kernel/src/pmm.c kernel/src/vm.c kernel/src/mm_test.c \
           kernel/src/gdt.c kernel/src/idt.c kernel/src/trap.S kernel/src/cell.c kernel/src/syscall.c \
-          kernel/src/cells.S kernel/src/cell_test.c
+          kernel/src/cells.S kernel/src/cell_test.c kernel/src/channel.c kernel/src/uaccess.c kernel/src/chan_test.c
 KOBJ    = $(patsubst kernel/src/%.c,$(KBUILD)/%.o,$(filter %.c,$(KSRC))) $(patsubst kernel/src/%.S,$(KBUILD)/%.o,$(filter %.S,$(KSRC))) $(patsubst src/%.c,$(KBUILD)/lib_%.o,$(LIB_SRC))
 
 .PHONY: kernel iso boot-test kernel-clean
