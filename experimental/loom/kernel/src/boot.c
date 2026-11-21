@@ -25,6 +25,8 @@ static volatile uint64_t limine_requests_start_marker[] = LIMINE_REQUESTS_START_
 __attribute__((used, section(".limine_requests_end")))
 static volatile uint64_t limine_requests_end_marker[] = LIMINE_REQUESTS_END_MARKER;
 
+uint64_t g_hhdm_offset;
+
 void kpanic(const char *msg) {
     serial_puts("LOOM PANIC: ");
     serial_puts(msg);
@@ -48,6 +50,7 @@ void kmain(void) {
 
     struct limine_hhdm_response *hhdm = hhdm_request.response;
     if (hhdm == NULL) kpanic("no HHDM response");
+    g_hhdm_offset = hhdm->offset;
     serial_puts("hhdm offset: ");
     serial_puthex64(hhdm->offset);
     serial_puts("\n");
@@ -61,6 +64,13 @@ void kmain(void) {
     serial_puts("\n");
 
     serial_puts("LOOM boot OK\n");
+
+    pmm_init(mm);
+    serial_puts("free frames: ");
+    serial_putu64(pmm_free_count());
+    serial_puts("\n");
+    bool mm_ok = mm_selftest();
+    serial_puts(mm_ok ? "LOOM mm: PASS\n" : "LOOM mm: FAIL\n");
 
     bool demo_ok = loom_demo_run();
     serial_puts(demo_ok ? "LOOM demo: PASS\n" : "LOOM demo: FAIL\n");
