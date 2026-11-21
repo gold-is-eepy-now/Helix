@@ -17,8 +17,10 @@ KFLAGS = -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie \
 # The rules come from the shared library (src/), compiled unchanged for the kernel.
 LIB_SRC = src/field.c src/contract.c src/morph.c src/continuity.c src/weaver.c
 KSRC    = kernel/src/boot.c kernel/src/serial.c kernel/src/string.c kernel/src/kassert.c kernel/src/demo.c \
-          kernel/src/pmm.c kernel/src/vm.c kernel/src/mm_test.c
-KOBJ    = $(patsubst kernel/src/%.c,$(KBUILD)/%.o,$(KSRC)) $(patsubst src/%.c,$(KBUILD)/lib_%.o,$(LIB_SRC))
+          kernel/src/pmm.c kernel/src/vm.c kernel/src/mm_test.c \
+          kernel/src/gdt.c kernel/src/idt.c kernel/src/trap.S kernel/src/cell.c kernel/src/syscall.c \
+          kernel/src/cells.S kernel/src/cell_test.c
+KOBJ    = $(patsubst kernel/src/%.c,$(KBUILD)/%.o,$(filter %.c,$(KSRC))) $(patsubst kernel/src/%.S,$(KBUILD)/%.o,$(filter %.S,$(KSRC))) $(patsubst src/%.c,$(KBUILD)/lib_%.o,$(LIB_SRC))
 
 .PHONY: kernel iso boot-test kernel-clean
 
@@ -27,6 +29,10 @@ kernel: $(KERNEL)
 $(KBUILD)/%.o: kernel/src/%.c
 	@mkdir -p $(KBUILD)
 	$(KCC) $(KFLAGS) -c $< -o $@
+
+$(KBUILD)/%.o: kernel/src/%.S
+	@mkdir -p $(KBUILD)
+	$(KCC) -ffreestanding -mno-red-zone -Ikernel/include -c $< -o $@
 
 $(KBUILD)/lib_%.o: src/%.c
 	@mkdir -p $(KBUILD)

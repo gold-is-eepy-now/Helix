@@ -37,6 +37,7 @@ void     vm_free_space(uint64_t pml4);
 
 /* Self-tests and the scenario */
 bool mm_selftest(void);
+bool cell_selftest(void);
 bool loom_demo_run(void);
 
 #endif

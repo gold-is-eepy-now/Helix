@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include "limine.h"
 #include "loom_kernel.h"
+#include "arch.h"
 
 __attribute__((used, section(".limine_requests")))
 static volatile uint64_t limine_base_revision[] = LIMINE_BASE_REVISION(6);
@@ -45,6 +46,8 @@ static uint64_t usable_bytes(const struct limine_memmap_response *m) {
 void kmain(void) {
     serial_init();
     serial_puts("LOOM kernel 0.1 (milestone: boot)\n");
+    gdt_init();
+    idt_init();
 
     if (!LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision)) kpanic("Limine base revision not supported");
 
@@ -71,6 +74,9 @@ void kmain(void) {
     serial_puts("\n");
     bool mm_ok = mm_selftest();
     serial_puts(mm_ok ? "LOOM mm: PASS\n" : "LOOM mm: FAIL\n");
+
+    bool cells_ok = cell_selftest();
+    serial_puts(cells_ok ? "LOOM cells: PASS\n" : "LOOM cells: FAIL\n");
 
     bool demo_ok = loom_demo_run();
     serial_puts(demo_ok ? "LOOM demo: PASS\n" : "LOOM demo: FAIL\n");
