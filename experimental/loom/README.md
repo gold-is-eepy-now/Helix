@@ -1,14 +1,17 @@
 # LOOM: experimental kernel architecture (simulator, milestone 1)
 
-LOOM is a research architecture, not a replacement for the Helix kernel. This directory holds its
-first deliverable: the core data structures, the kernel-side transition rules, a Weaver proposal
-function, a simulator that runs one video-playback Continuity under resource pressure, and tests.
+LOOM is a research architecture, not a replacement for the Helix kernel. This directory holds the
+core data structures, the kernel-side transition rules, a Weaver proposal function, a host simulator,
+host tests, and a bootable LOOM kernel that runs the same scenario inside the kernel.
 
 Scope, stated plainly:
 
-- Host C only. Nothing here runs on hardware, boots, or is linked into the Helix kernel.
+- The LOOM kernel boots only under QEMU with OVMF (TCG, no KVM on the build machine). Nothing is
+  tested on real hardware, and it is not linked into the Helix kernel.
 - The "frames" are counters and the resources are numbers. The demo shows decisions, not decoding.
-- Phases 4 to 6 of the brief (kernel prototype, dynamic execution on hardware, real drivers) are not started.
+- Not in the kernel yet: memory management beyond reading Limine's memory map, isolation of Cells
+  (no page tables, no user mode), a capability system beyond bitmasks, typed communication, and event
+  dispatch. These are Phase 4 items of the brief. Phases 5 and 6 are not started.
 
 ## Reproduce
 
@@ -26,6 +29,22 @@ Expected: `make test` ends with `loom-test: 39 checks, 0 failed` and exits 0. `m
 To check memory and undefined behaviour, build the two programs with
 `-fsanitize=address,undefined -fno-sanitize-recover=all` (the commands are the same as the Makefile's
 with that flag added).
+
+## Kernel boot (QEMU)
+
+Uses Limine, the bootloader Helix already downloads into `build/deps/limine-binary` (run `make deps`
+in the Helix tree first). Needs `xorriso` and OVMF.
+
+```sh
+cd experimental/loom
+make -f Makefile.kernel boot-test   # build the kernel and ISO, boot in QEMU, check the serial output
+```
+
+Expected serial output ends with `LOOM boot OK`, then the scenario's lines, then `LOOM demo: PASS`,
+and the target prints `boot-test: PASS`. The kernel is built with `gcc` (`KCC`) because the machine has
+no `x86_64-elf-gcc`. Its freestanding flags are in `Makefile.kernel`. Files: `kernel/linker.ld`,
+`kernel/src/boot.c` (Limine requests and entry), `serial.c` (COM1), `string.c`, `kassert.c`, `demo.c`.
+The rules themselves are the shared files in `src/`, compiled unchanged.
 
 ## Layout
 

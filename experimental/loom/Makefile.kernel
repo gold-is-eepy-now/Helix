@@ -1,0 +1,68 @@
+# LOOM kernel build. Included from the main Makefile; kept separate so the host simulator
+# builds without a bootloader or QEMU.
+#
+# KCC defaults to gcc: this machine has no x86_64-elf cross compiler. The flags below make a
+# freestanding x86_64 kernel with no SSE in kernel code, which is what the brief asks for.
+KCC        ?= gcc
+LIMINE_DIR ?= ../../build/deps/limine-binary
+KBUILD     = build/kernel
+KERNEL     = $(KBUILD)/loom-kernel.elf
+ISO        = build/loom.iso
+ISO_ROOT   = build/iso_root
+QEMU       ?= qemu-system-x86_64
+
+KFLAGS = -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie \
+         -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-80387 -mcmodel=kernel \
+         -fno-builtin -Wall -Wextra -Werror -O2 -g -Ikernel/include -Iinclude
+# The rules come from the shared library (src/), compiled unchanged for the kernel.
+LIB_SRC = src/field.c src/contract.c src/morph.c src/continuity.c src/weaver.c
+KSRC    = kernel/src/boot.c kernel/src/serial.c kernel/src/string.c kernel/src/kassert.c kernel/src/demo.c
+KOBJ    = $(patsubst kernel/src/%.c,$(KBUILD)/%.o,$(KSRC)) $(patsubst src/%.c,$(KBUILD)/lib_%.o,$(LIB_SRC))
+
+.PHONY: kernel iso boot-test kernel-clean
+
+kernel: $(KERNEL)
+
+$(KBUILD)/%.o: kernel/src/%.c
+	@mkdir -p $(KBUILD)
+	$(KCC) $(KFLAGS) -c $< -o $@
+
+$(KBUILD)/lib_%.o: src/%.c
+	@mkdir -p $(KBUILD)
+	$(KCC) $(KFLAGS) -c $< -o $@
+
+$(KERNEL): $(KOBJ) kernel/linker.ld
+	ld -nostdlib -static -z max-page-size=0x1000 -T kernel/linker.ld -o $@ $(KOBJ)
+
+iso: $(ISO)
+
+$(ISO): $(KERNEL)
+	@test -f $(LIMINE_DIR)/limine-bios-cd.bin || { echo "missing Limine binaries in $(LIMINE_DIR); run 'make deps' in the Helix tree"; exit 1; }
+	rm -rf $(ISO_ROOT)
+	mkdir -p $(ISO_ROOT)/boot/limine $(ISO_ROOT)/EFI/BOOT
+	cp $(KERNEL) $(ISO_ROOT)/boot/loom-kernel.elf
+	cp kernel/limine.conf $(ISO_ROOT)/boot/limine/limine.conf
+	cp $(LIMINE_DIR)/limine-uefi-cd.bin $(ISO_ROOT)/boot/limine/
+	cp $(LIMINE_DIR)/BOOTX64.EFI $(ISO_ROOT)/EFI/BOOT/
+	xorriso -as mkisofs -R -r -J \
+	  --efi-boot boot/limine/limine-uefi-cd.bin -efi-boot-part --efi-boot-image \
+	  --protective-msdos-label $(ISO_ROOT) -o $@ >/dev/null 2>&1
+	@echo "built $@"
+
+# Boots the ISO in QEMU with OVMF (UEFI, as Helix does; TCG when there is no KVM) and checks
+# the serial output for the success line.
+OVMF_CODE  ?= /usr/share/OVMF/OVMF_CODE_4M.fd
+OVMF_VARS  ?= /usr/share/OVMF/OVMF_VARS_4M.fd
+boot-test: $(ISO)
+	@mkdir -p build
+	@cp $(OVMF_VARS) build/loom-ovmf-vars.fd
+	@out=$$(timeout 90 $(QEMU) -M q35 -m 256 \
+	  -drive if=pflash,format=raw,unit=0,readonly=on,file=$(OVMF_CODE) \
+	  -drive if=pflash,format=raw,unit=1,file=build/loom-ovmf-vars.fd \
+	  -cdrom $(ISO) -display none -serial stdio -no-reboot 2>&1); \
+	echo "$$out"; \
+	echo "$$out" | grep -q "LOOM boot OK" && echo "$$out" | grep -q "LOOM demo: PASS" \
+	  && echo "boot-test: PASS" || { echo "boot-test: FAIL"; exit 1; }
+
+kernel-clean:
+	rm -rf build/kernel build/iso_root $(ISO)
