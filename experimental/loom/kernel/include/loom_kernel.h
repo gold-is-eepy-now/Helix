@@ -35,11 +35,18 @@ uint64_t vm_unmap_user(uint64_t pml4, uint64_t virt);
 void     vm_switch(uint64_t pml4);
 void     vm_free_space(uint64_t pml4);
 
+/* Cells (loader.c) */
+struct loom_cell;
+struct cap;
+bool cell_create(struct loom_cell *c, const uint8_t *start, const uint8_t *end, const struct cap *caps);
+void cell_destroy(struct loom_cell *c);
+
 /* Self-tests and the scenario */
 bool mm_selftest(void);
 bool cell_selftest(void);
 bool chan_selftest(void);
 bool user_selftest(void);
+bool weaver_selftest(void);
 bool loom_demo_run(void);
 
 #endif

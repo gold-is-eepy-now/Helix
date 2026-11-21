@@ -62,6 +62,7 @@ isr_common:
     andq $-16, %rsp           /* the C ABI wants a 16-byte aligned stack at the call */
     call trap_dispatch
     movq %rbx, %rsp
+isr_return:                   /* also the entry for resuming a saved frame (cell_enter_frame) */
     popq %r15
     popq %r14
     popq %r13
@@ -130,6 +131,25 @@ cell_enter:
     pushq $0x23
     pushq 16(%rdi)
     iretq
+
+/* int64_t cell_enter_frame(struct cell_ctx *c, struct trap_frame *f)
+ * Resumes a Cell at a saved trap frame: same kernel-side bookkeeping as cell_enter, then the common
+ * trap return pops the frame and iretq's back into the Cell. */
+    .globl cell_enter_frame
+cell_enter_frame:
+    pushq %rbp
+    pushq %rbx
+    pushq %r12
+    pushq %r13
+    pushq %r14
+    pushq %r15
+    movq %rsp, 0(%rdi)
+    movq %cr3, %rax
+    movq %rax, 32(%rdi)
+    movq 8(%rdi), %rax
+    movq %rax, %cr3
+    movq %rsi, %rsp           /* the frame sits where the common path pops from */
+    jmp isr_return
 
 /* void cell_leave(struct cell_ctx *c, int64_t status)
  * Undoes cell_enter: the kernel's address space and stack come back, and the callee-saved

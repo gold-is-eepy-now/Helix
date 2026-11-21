@@ -70,8 +70,8 @@ bool chan_selftest(void) {
 
     /* Cell A: handle 0 = SEND, handle 1 = RECV only, on the same channel. */
     struct cap caps_a[CELL_MAX_CAPS] = {0};
-    caps_a[0] = (struct cap){ true, CAP_SEND, (uint8_t)chan };
-    caps_a[1] = (struct cap){ true, CAP_RECV, (uint8_t)chan };
+    caps_a[0] = (struct cap){ .valid = true, .object = CAP_OBJ_CHANNEL, .rights = CAP_SEND, .index = (uint8_t)chan };
+    caps_a[1] = (struct cap){ .valid = true, .object = CAP_OBJ_CHANNEL, .rights = CAP_RECV, .index = (uint8_t)chan };
     uint8_t out_a[256];
     int64_t st_a = run_cell(cell_a_start, cell_a_end, caps_a, false, "hello from A", out_a);
 
@@ -86,7 +86,7 @@ bool chan_selftest(void) {
 
     /* Cell B: handle 0 = RECV on the same channel. It holds no SEND handle. It has its own secret. */
     struct cap caps_b[CELL_MAX_CAPS] = {0};
-    caps_b[0] = (struct cap){ true, CAP_RECV, (uint8_t)chan };
+    caps_b[0] = (struct cap){ .valid = true, .object = CAP_OBJ_CHANNEL, .rights = CAP_RECV, .index = (uint8_t)chan };
     uint8_t out_b[256];
     int64_t st_b = run_cell(cell_b_start, cell_b_end, caps_b, true, NULL, out_b);
 

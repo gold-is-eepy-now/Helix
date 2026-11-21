@@ -7,7 +7,7 @@
 #include "loom_kernel.h"
 
 #define CHAN_MAX    4
-#define CHAN_QUEUE  4
+#define CHAN_QUEUE  8
 #define EINVAL_RET  (-22)
 #define EAGAIN_RET  (-11)
 
@@ -49,3 +49,7 @@ int channel_recv(int ch, struct msg *out) {
     c->count--;
     return 0;
 }
+
+/* Wrappers for the system call path: the channel index comes from a capability, so it is in range. */
+int channel_send_checked(uint8_t ch, const struct msg *m) { return channel_send(ch, m); }
+int channel_recv_checked(uint8_t ch, struct msg *out)    { return channel_recv(ch, out); }

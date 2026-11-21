@@ -10,6 +10,7 @@
 #define SYS_RECV   3
 #define SYS_LOG    4
 #define SYS_YIELD  5
+#define SYS_PROPOSE 6
 
 struct msg {
     uint32_t type;
@@ -32,6 +33,7 @@ static inline int64_t sys_send(uint64_t h, uint32_t type, const void *payload) {
 }
 static inline int64_t sys_recv(uint64_t h, struct msg *out)       { return sys3(SYS_RECV, h, (uint64_t)out, 0); }
 static inline int64_t sys_yield(void)                              { return sys3(SYS_YIELD, 0, 0, 0); }
+static inline int64_t sys_propose(uint64_t h, uint32_t morph)     { return sys3(SYS_PROPOSE, h, morph, 0); }
 
 static inline void put_str(const char *s) {
     size_t n = 0;

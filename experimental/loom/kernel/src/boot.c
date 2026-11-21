@@ -84,6 +84,9 @@ void kmain(void) {
     bool user_ok = user_selftest();
     serial_puts(user_ok ? "LOOM user cells: PASS\n" : "LOOM user cells: FAIL\n");
 
+    bool weaver_ok = weaver_selftest();
+    serial_puts(weaver_ok ? "LOOM weaver cell: PASS\n" : "LOOM weaver cell: FAIL\n");
+
     bool demo_ok = loom_demo_run();
     serial_puts(demo_ok ? "LOOM demo: PASS\n" : "LOOM demo: FAIL\n");
     for (;;) __asm__ volatile ("cli; hlt");

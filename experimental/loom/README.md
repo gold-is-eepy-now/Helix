@@ -9,9 +9,12 @@ Scope, stated plainly:
 - The LOOM kernel boots only under QEMU with OVMF (TCG, no KVM on the build machine). Nothing is
   tested on real hardware, and it is not linked into the Helix kernel.
 - The "frames" are counters and the resources are numbers. The demo shows decisions, not decoding.
-- Not in the kernel yet: memory management beyond reading Limine's memory map, isolation of Cells
-  (no page tables, no user mode), a capability system beyond bitmasks, typed communication, and event
-  dispatch. These are Phase 4 items of the brief. Phases 5 and 6 are not started.
+- Booted in the kernel (QEMU only): physical frames and per-Cell page tables; Cells in ring 3 with
+  fault isolation; typed channels with capability handles; C Cells loaded from flat images; the
+  Weaver running as a separate Cell that proposes through a syscall, with the kernel deciding.
+- Not in the kernel yet: preemptive scheduling (Cells run one at a time, cooperatively), event
+  queues beyond per-tick delivery, Continuity registration owned by Cells (the registry is kernel
+  code), and the 39 host tests (they run only on the host). Phases 5 and 6 are not started.
 
 ## Reproduce
 
@@ -40,8 +43,9 @@ cd experimental/loom
 make -f Makefile.kernel boot-test   # build the kernel and ISO, boot in QEMU, check the serial output
 ```
 
-Expected serial output ends with `LOOM boot OK`, then the scenario's lines, then `LOOM demo: PASS`,
-and the target prints `boot-test: PASS`. The kernel is built with `gcc` (`KCC`) because the machine has
+The target checks for these success lines in order: `LOOM boot OK`, `LOOM mm: PASS`,
+`LOOM cells: PASS`, `LOOM channels: PASS`, `LOOM user cells: PASS`, `LOOM weaver cell: PASS`,
+`LOOM demo: PASS`, and then prints `boot-test: PASS`. The kernel is built with `gcc` (`KCC`) because the machine has
 no `x86_64-elf-gcc`. Its freestanding flags are in `Makefile.kernel`. Files: `kernel/linker.ld`,
 `kernel/src/boot.c` (Limine requests and entry), `serial.c` (COM1), `string.c`, `kassert.c`, `demo.c`.
 The rules themselves are the shared files in `src/`, compiled unchanged.
@@ -80,7 +84,9 @@ is not exactly one.
 
 ## Not done
 
-- No kernel code, no boot, no QEMU run. Nothing here is evidence about Helix or any hardware.
-- No Cells as separate execution units; no feedback loops, buffers, backpressure or deadlock detection.
+- Nothing here is evidence about Helix or any real hardware. Everything kernel-side ran only under QEMU/TCG.
+- No preemption: one Cell runs at a time, and a Cell runs only when the kernel resumes it.
+- No feedback loops, buffers, backpressure or deadlock detection.
 - No multithreading; the library is not re-entrant.
-- Capabilities are a bitmask, not Helix's object capabilities.
+- Capabilities are kernel handles with rights (SEND, RECV, PROPOSE), not Helix's object capabilities.
+- Loader limits: at most 16 code pages per Cell image, no bss in Cell images, physical memory used only below 4 GiB.

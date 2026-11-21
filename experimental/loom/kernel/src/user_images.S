@@ -8,4 +8,11 @@ hello_image_start:
     .incbin "build/user/hello.bin"
 hello_image_end:
 
+    .globl weaver_image_start
+    .globl weaver_image_end
+    .align 16
+weaver_image_start:
+    .incbin "build/user/weaver.bin"
+weaver_image_end:
+
     .section .note.GNU-stack,"",@progbits

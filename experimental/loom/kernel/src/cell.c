@@ -10,6 +10,7 @@
 #define CELL_FAULT_BASE  0x1000   /* exit status for a Cell killed by exception v: 0x1000 + v */
 
 static struct cell_ctx *g_cur;
+int64_t cell_enter_frame(struct cell_ctx *c, struct trap_frame *f);   /* trap.S */
 static uint8_t g_trap_stack[16384] __attribute__((aligned(16)));
 
 int64_t cell_run(struct cell_ctx *c) {
@@ -19,6 +20,12 @@ int64_t cell_run(struct cell_ctx *c) {
 }
 
 struct cell_ctx *cell_current(void) { return g_cur; }
+
+int64_t cell_resume(struct cell_ctx *c, struct trap_frame *f) {
+    g_cur = c;
+    tss_set_rsp0((uint64_t)(g_trap_stack + sizeof g_trap_stack));
+    return cell_enter_frame(c, f);
+}
 
 void syscall_dispatch(struct trap_frame *f);   /* syscall.c */
 
