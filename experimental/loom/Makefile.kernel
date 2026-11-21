@@ -16,10 +16,17 @@ KFLAGS = -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie \
          -fno-builtin -Wall -Wextra -Werror -O2 -g -Ikernel/include -Iinclude
 # The rules come from the shared library (src/), compiled unchanged for the kernel.
 LIB_SRC = src/field.c src/contract.c src/morph.c src/continuity.c src/weaver.c
+USERBUILD = build/user
+UCFLAGS = -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie -mno-red-zone \
+          -mno-sse -mno-sse2 -mno-mmx -mno-80387 -O2 -Wall -Wextra -Werror -Iuser
+USER_RUNTIME = $(USERBUILD)/start.o $(USERBUILD)/ulib.o
+USER_BINS = $(USERBUILD)/hello.bin
+
 KSRC    = kernel/src/boot.c kernel/src/serial.c kernel/src/string.c kernel/src/kassert.c kernel/src/demo.c \
           kernel/src/pmm.c kernel/src/vm.c kernel/src/mm_test.c \
           kernel/src/gdt.c kernel/src/idt.c kernel/src/trap.S kernel/src/cell.c kernel/src/syscall.c \
-          kernel/src/cells.S kernel/src/cell_test.c kernel/src/channel.c kernel/src/uaccess.c kernel/src/chan_test.c
+          kernel/src/cells.S kernel/src/cell_test.c kernel/src/channel.c kernel/src/uaccess.c kernel/src/chan_test.c \
+          kernel/src/loader.c kernel/src/user_test.c kernel/src/user_images.S
 KOBJ    = $(patsubst kernel/src/%.c,$(KBUILD)/%.o,$(filter %.c,$(KSRC))) $(patsubst kernel/src/%.S,$(KBUILD)/%.o,$(filter %.S,$(KSRC))) $(patsubst src/%.c,$(KBUILD)/lib_%.o,$(LIB_SRC))
 
 .PHONY: kernel iso boot-test kernel-clean
@@ -33,6 +40,23 @@ $(KBUILD)/%.o: kernel/src/%.c
 $(KBUILD)/%.o: kernel/src/%.S
 	@mkdir -p $(KBUILD)
 	$(KCC) -ffreestanding -mno-red-zone -Ikernel/include -c $< -o $@
+
+# Cells: C built with user flags, linked at 0x400000 and turned into flat images.
+$(USERBUILD)/%.o: user/%.c user/ulib.h
+	@mkdir -p $(USERBUILD)
+	$(KCC) $(UCFLAGS) -c $< -o $@
+
+$(USERBUILD)/start.o: user/start.S
+	@mkdir -p $(USERBUILD)
+	$(KCC) -ffreestanding -c $< -o $@
+
+$(USERBUILD)/%.elf: $(USERBUILD)/%.o $(USER_RUNTIME) user/user.ld
+	ld -nostdlib -static -T user/user.ld -o $@ $(USER_RUNTIME) $<
+
+$(USERBUILD)/%.bin: $(USERBUILD)/%.elf
+	objcopy -O binary $< $@
+
+$(KBUILD)/user_images.o: $(USER_BINS)
 
 $(KBUILD)/lib_%.o: src/%.c
 	@mkdir -p $(KBUILD)
