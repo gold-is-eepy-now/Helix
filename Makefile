@@ -46,7 +46,7 @@ IMAGE          := $(BUILD_DIR)/helix.img
 LINUX_SUBMODULE_DIR ?= third-party/linux
 LINUX_SUBMODULE_INITIALIZED ?= $(shell test -d "$(LINUX_SUBMODULE_DIR)" && echo yes || echo no)
 
-.PHONY: all kernel deps linux-submodule linux-drivers linux-drivers-ethernet linux-drivers-wifi linux-drivers-graphics linux-drivers-sound linux-drivers-kvm linux-drivers-virtio image iso disks run run-with-linux-drivers test test-with-linux-drivers clean install userspace-apps img-with-linux-drivers mac-darwin-compat mac-test
+.PHONY: all kernel deps bios-iso bios-test linux-submodule linux-drivers linux-drivers-ethernet linux-drivers-wifi linux-drivers-graphics linux-drivers-sound linux-drivers-kvm linux-drivers-virtio image iso disks run run-with-linux-drivers test test-with-linux-drivers clean install userspace-apps img-with-linux-drivers mac-darwin-compat mac-test
 
 all: image
 
@@ -155,6 +155,24 @@ iso: image
 	 ISO="$(BUILD_DIR)/helix.iso" \
 	 LIMINE_CONF="$(CURDIR)/limine.conf" \
 	 sh tools/mkiso.sh
+
+# Legacy BIOS bootable ISO (El Torito, Limine's BIOS stage). Same kernel and limine.conf
+# as `iso`; only the boot media differs. For machines and VMs without UEFI.
+bios-iso: image
+	@BUILD_DIR="$(BUILD_DIR)" \
+	 KERNEL="$(BUILD_DIR)/kernel" \
+	 LIMINE_DIR="$(LIMINE_DIR)" \
+	 ISO="$(BUILD_DIR)/helix-bios.iso" \
+	 LIMINE_CONF="$(CURDIR)/limine.conf" \
+	 sh tools/mkiso-bios.sh
+
+# Boots the legacy BIOS ISO in QEMU with SeaBIOS (no OVMF) and checks the serial banner.
+bios-test: bios-iso
+	@out=$$(timeout 90 qemu-system-x86_64 -M q35 -m 512 -cdrom "$(BUILD_DIR)/helix-bios.iso" \
+	  -display none -serial stdio -no-reboot 2>&1); \
+	echo "$$out" | tail -40; \
+	echo "$$out" | grep -q "HELIX OS" && echo "$$out" | grep -q "Boot successful." \
+	  && echo "bios-test: PASS (SeaBIOS, legacy BIOS ISO)" || { echo "bios-test: FAIL"; exit 1; }
 
 # Hypervisor disk formats (VDI/VMDK/VHD) converted from the raw image.
 disks: image

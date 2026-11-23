@@ -223,6 +223,8 @@ For more information, see `runtime/optional_drivers/kvm/`.
 ```sh
 make            # build the bootable disk image (build/helix.img)
 make iso        # build a bootable UEFI CD image (build/helix.iso)
+make bios-iso   # build a legacy BIOS CD image (build/helix-bios.iso), for machines without UEFI
+make bios-test  # boot the BIOS image in QEMU with SeaBIOS and check the banner
 make disks      # build VDI/VMDK/VHD hypervisor disk images
 make kernel     # build just the kernel ELF
 make run        # boot the image in QEMU (serial output on your terminal)
@@ -264,7 +266,7 @@ HELIX OS
 Native Object Kernel
 Boot successful.
 
-Helix OS 0.5.72-dev.20261117.MELDEV "Platter"
+Helix OS 0.5.75-dev.20261123 "Platter"
 
 [helix] console: serial + framebuffer
 [helix] memory:  462 MiB usable
