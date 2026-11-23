@@ -46,7 +46,7 @@ IMAGE          := $(BUILD_DIR)/helix.img
 LINUX_SUBMODULE_DIR ?= third-party/linux
 LINUX_SUBMODULE_INITIALIZED ?= $(shell test -d "$(LINUX_SUBMODULE_DIR)" && echo yes || echo no)
 
-.PHONY: all kernel deps bios-iso bios-test linux-submodule linux-drivers linux-drivers-ethernet linux-drivers-wifi linux-drivers-graphics linux-drivers-sound linux-drivers-kvm linux-drivers-virtio image iso disks run run-with-linux-drivers test test-with-linux-drivers clean install userspace-apps img-with-linux-drivers mac-darwin-compat mac-test
+.PHONY: all kernel deps bios-iso bios-test i686-kernel i686-iso i686-bios-test linux-submodule linux-drivers linux-drivers-ethernet linux-drivers-wifi linux-drivers-graphics linux-drivers-sound linux-drivers-kvm linux-drivers-virtio image iso disks run run-with-linux-drivers test test-with-linux-drivers clean install userspace-apps img-with-linux-drivers mac-darwin-compat mac-test
 
 all: image
 
@@ -173,6 +173,24 @@ bios-test: bios-iso
 	echo "$$out" | tail -40; \
 	echo "$$out" | grep -q "HELIX OS" && echo "$$out" | grep -q "Boot successful." \
 	  && echo "bios-test: PASS (SeaBIOS, legacy BIOS ISO)" || { echo "bios-test: FAIL"; exit 1; }
+
+# i686 (32-bit) kernel, stage I0: a separate build in kernel-i686/. It uses its own compiler
+# variable, because CC is the x86_64 cross compiler and cannot build -m32 code. Boots with
+# GRUB (Multiboot 1); Limine cannot load ELF32 kernels. See docs/27-i686-port.md.
+I686_CC ?= gcc
+i686-kernel:
+	@$(MAKE) -C kernel-i686 CC="$(I686_CC)" BUILD="$(CURDIR)/build/i686"
+
+i686-iso: i686-kernel
+	@BUILD_DIR="$(BUILD_DIR)" sh tools/mkiso-i686.sh
+
+# Boots the i686 BIOS ISO in qemu-system-i386 (SeaBIOS) and checks the serial banner.
+i686-bios-test: i686-iso
+	@out=$$(timeout 60 qemu-system-i386 -m 128 -cdrom "$(BUILD_DIR)/i686/helix-i686-bios.iso" \
+	  -display none -serial stdio -no-reboot 2>&1); \
+	echo "$$out" | tail -20; \
+	echo "$$out" | grep -q "HELIX OS i686" && echo "$$out" | grep -q "Boot successful." \
+	  && echo "i686-bios-test: PASS (SeaBIOS via GRUB, i686 Multiboot kernel)" || { echo "i686-bios-test: FAIL"; exit 1; }
 
 # Hypervisor disk formats (VDI/VMDK/VHD) converted from the raw image.
 disks: image

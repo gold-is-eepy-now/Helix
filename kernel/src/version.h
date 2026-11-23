@@ -3,7 +3,7 @@
 #define HELIX_VERSION_H
 
 #define HELIX_NAME    "Helix OS"
-#define HELIX_VERSION "0.5.76-dev.20261123"
+#define HELIX_VERSION "0.5.77-dev.20261123"
 #define HELIX_CODENAME "Platter"
 #define HELIX_BUILD_DATE "2026-11-23"
 #define HELIX_SHELL   "helixsh"
