@@ -160,7 +160,10 @@ $(foreach n,$(USER_BIN_NAMES),$(eval $(call USER_BIN_RULE,$(n))))
 
 $(USER_BLOB_S): $(USER_ELFS)
 	@mkdir -p $(dir $@)
-	@printf '%s\n' \
+	@# Write the whole file to a temporary name and rename it into place. The old recipe
+	@# appended with >> to $@, so any leftover or concurrent write put the symbols in twice
+	@# ("symbol ... is already defined"). A single rename always leaves one complete copy.
+	@{ printf '%s\n' \
 	  '.section .rodata' \
 	  '.balign 4096' \
 	  '.global user_blob_sh_start' \
@@ -174,11 +177,12 @@ $(USER_BLOB_S): $(USER_ELFS)
 	  '.incbin "$(abspath $(USER_INIT_ELF))"' \
 	  '.global user_blob_init_end' \
 	  'user_blob_init_end:' \
-	  '.section .rodata' > $@
-	@for n in $(USER_BIN_NAMES); do \
-	  printf '%s\n' '.balign 4096' ".global user_blob_$${n}_start" "user_blob_$${n}_start:" ".incbin \"$(abspath $(USER_BLOB_DIR))/$${n}.elf\"" ".global user_blob_$${n}_end" "user_blob_$${n}_end:" >> $@; \
-	done
-	@printf '%s\n' '.section .note.GNU-stack,"",@progbits' >> $@
+	  '.section .rodata'; \
+	for n in $(USER_BIN_NAMES); do \
+	  printf '%s\n' '.balign 4096' ".global user_blob_$${n}_start" "user_blob_$${n}_start:" ".incbin \"$(abspath $(USER_BLOB_DIR))/$${n}.elf\"" ".global user_blob_$${n}_end" "user_blob_$${n}_end:"; \
+	done; \
+	printf '%s\n' '.section .note.GNU-stack,"",@progbits'; \
+	} > $@.tmp && mv -f $@.tmp $@
 
 $(USER_BLOB_O): $(USER_BLOB_S)
 	@mkdir -p $(dir $@)
