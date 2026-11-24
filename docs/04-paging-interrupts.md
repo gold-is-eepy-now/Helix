@@ -34,7 +34,7 @@ down, or — at the last level — to a physical page, plus flag bits (present,
 writable, user, no-execute, …).
 
 Limine already built a table for us. Its physical address is in **CR3**. We
-adopt that table and modify it in place (`kernel/src/vmm.c`):
+adopt that table and modify it in place (`kernel/arch/x86_64/vmm.c`):
 
 - `vmm_map(virt, phys, flags)` — walk the four levels, allocating and zeroing a
   frame for any missing table, then write the leaf entry.
