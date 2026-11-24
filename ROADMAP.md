@@ -164,7 +164,7 @@ The kernel now has two threads: the boot thread (owns the guarded NX kernel
 stack) and a demo round-robin partner that yields in a loop. Context switches
 restore the full register set, `rip`, `rsp`, and RFLAGS from a saved context
 (`thread_context_t` + `thread_switch_to`/`thread_switch_load` in
-`kernel/src/thread_switch.S`), so resuming is an `iretq`-equivalent operation.
+`kernel/arch/x86_64/thread_switch.S`), so resuming is an `iretq`-equivalent operation.
 Timer preemption rebuilds the interrupted thread's context from the interrupt
 frame and hands the run queue to the next thread.
 

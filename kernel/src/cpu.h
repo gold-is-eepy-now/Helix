@@ -16,4 +16,8 @@ void cpu_brand(char *out);
 /* Enable EFER.NXE when the processor supports the NX page-table bit. */
 bool cpu_enable_nx(void);
 
+/* Architecture hook: turn on the no-execute bit in the CPU. Implemented per architecture in
+ * kernel/arch/<arch>/. x86_64 sets EFER.NXE. */
+void arch_enable_nxe(void);
+
 #endif /* HELIX_CPU_H */

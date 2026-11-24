@@ -84,7 +84,7 @@ Each 16-byte gate holds the handler address, a code-segment selector, and
 attributes. `idt.c` points every vector at a default stub, then installs the
 32 CPU-exception stubs and 16 IRQ stubs.
 
-The stubs live in `kernel/src/isr.S`. The CPU pushes an interrupt frame
+The stubs live in `kernel/arch/x86_64/isr.S`. The CPU pushes an interrupt frame
 (`RIP`, `CS`, `RFLAGS`, and an error code for some exceptions); our stubs push
 a dummy error code when there is none, then the vector number, then fall into
 `isr_common`, which saves all general-purpose registers and calls

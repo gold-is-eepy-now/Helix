@@ -74,9 +74,7 @@ bool cpu_enable_nx(void) {
     cpuid(0x80000001u, &max_ext, &b, &c, &d);
     if ((d & (1u << 20)) == 0) return false;
 
-    uint32_t low, high;
-    __asm__ volatile("rdmsr" : "=a"(low), "=d"(high) : "c"(0xC0000080u));
-    low |= 1u << 11; /* EFER.NXE */
-    __asm__ volatile("wrmsr" : : "a"(low), "d"(high), "c"(0xC0000080u) : "memory");
+    /* The NX enable bit lives in an architecture-specific register (x86_64: EFER.NXE). */
+    arch_enable_nxe();
     return true;
 }

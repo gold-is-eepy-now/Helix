@@ -69,8 +69,9 @@ ifeq ($(TOOLCHAIN),llvm)
     CFLAGS := $(filter-out -mgeneral-regs-only,$(CFLAGS))
 endif
 
-C_SOURCES := $(wildcard $(SRC_DIR)/*.c)
-S_SOURCES := $(wildcard $(SRC_DIR)/*.S)
+ARCH_DIR  := arch/x86_64
+C_SOURCES := $(wildcard $(SRC_DIR)/*.c) $(wildcard $(ARCH_DIR)/*.c)
+S_SOURCES := $(wildcard $(SRC_DIR)/*.S) $(wildcard $(ARCH_DIR)/*.S)
 
 # The ring-3 programs (userspace/): static ELFs built from libhelix plus their
 # source, each embedded in the kernel as a blob between user_blob_<name>_start and
@@ -107,10 +108,16 @@ COMPAT_DIR     := ../compat
 COMPAT_SOURCES := $(wildcard $(COMPAT_DIR)/src/*.c)
 COMPAT_OBJECTS := $(patsubst $(COMPAT_DIR)/src/%.c,$(BUILD_DIR)/obj/compat_%.o,$(COMPAT_SOURCES))
 
-OBJECTS := $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/obj/%.o,$(C_SOURCES)) \
-           $(patsubst $(SRC_DIR)/%.S,$(BUILD_DIR)/obj/%.o,$(S_SOURCES)) \
+# Objects are flat in obj/ by basename (no basename is used twice; checked by the rules below).
+OBJECTS := $(addprefix $(BUILD_DIR)/obj/,$(notdir $(C_SOURCES:.c=.o) $(S_SOURCES:.S=.o))) \
            $(USER_BLOB_O) $(COMPAT_OBJECTS)
-DEPFILES := $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/obj/%.d,$(C_SOURCES))
+DEPFILES := $(addprefix $(BUILD_DIR)/obj/,$(notdir $(C_SOURCES:.c=.d)))
+
+# The flat obj/ layout breaks silently if two sources share a basename (one object would
+# overwrite the other). Fail the build instead.
+ifneq ($(words $(sort $(notdir $(C_SOURCES) $(S_SOURCES)))),$(words $(notdir $(C_SOURCES) $(S_SOURCES))))
+$(error duplicate source basenames in $(SRC_DIR) and $(ARCH_DIR))
+endif
 
 -include $(DEPFILES)
 
@@ -139,6 +146,16 @@ $(BUILD_DIR)/obj/compat_%.o: $(COMPAT_DIR)/src/%.c
 $(BUILD_DIR)/obj/%.o: $(SRC_DIR)/%.S
 	@mkdir -p $(dir $@)
 	$(CC) -c $< -o $@
+
+# Arch sources include the shared headers in src/ by name. A quoted include searches the
+# including file's own directory first, so src/ must be on the path explicitly.
+$(BUILD_DIR)/obj/%.o: $(ARCH_DIR)/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -I$(SRC_DIR) -c $< -o $@
+
+$(BUILD_DIR)/obj/%.o: $(ARCH_DIR)/%.S
+	@mkdir -p $(dir $@)
+	$(CC) -I$(SRC_DIR) -c $< -o $@
 
 $(USER_SH_ELF): $(USER_RT_HDRS) $(USER_RT_SRCS) $(USER_DIR)/shell/shell.c
 	@mkdir -p $(dir $@)
