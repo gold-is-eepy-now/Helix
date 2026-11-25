@@ -61,7 +61,8 @@ static bool heap_grow(size_t min_payload) {
         return false;
     }
 
-    block_t *block = (block_t *)(phys + g_hhdm);
+    /* Narrow to uintptr_t first: on i686 a 64-bit integer cannot be cast straight to a pointer. */
+    block_t *block = (block_t *)(uintptr_t)(phys + g_hhdm);
     block->size = frames * PAGE_SIZE - sizeof(block_t);
     block->free = true;
     block->next = NULL;

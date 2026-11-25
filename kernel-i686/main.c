@@ -6,9 +6,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "heap.h"
+#include "paging.h"
 #include "pmm.h"
 
 bool mm_selftest(void);
+bool paging_selftest(void);
+bool heap_selftest(void);
 
 #define COM1 0x3F8
 #define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002u
@@ -119,6 +123,17 @@ void kmain(uint32_t multiboot_magic, uint32_t multiboot_info) {
     build_regions((const struct multiboot_info *)(uintptr_t)multiboot_info);
     pmm_init(g_regions, g_region_count, 0);   /* identity map: phys == virt */
     serial_puts(mm_selftest() ? "HELIX i686 mm: PASS\n" : "HELIX i686 mm: FAIL\n");
+
+    /* Identity-map RAM up to the highest usable byte, then run the paging and heap tests. */
+    uint64_t top = 0;
+    for (size_t i = 0; i < g_region_count; i++) {
+        uint64_t end = g_regions[i].base + g_regions[i].length;
+        if (end > top) top = end;
+    }
+    serial_puts(paging_init(top) ? "HELIX i686 paging init: OK\n" : "HELIX i686 paging init: FAIL\n");
+    serial_puts(paging_selftest() ? "HELIX i686 paging: PASS\n" : "HELIX i686 paging: FAIL\n");
+    heap_init(0);                            /* identity map: phys + 0 */
+    serial_puts(heap_selftest() ? "HELIX i686 heap: PASS\n" : "HELIX i686 heap: FAIL\n");
 
     serial_puts("Boot successful.\n");
     for (;;) {
