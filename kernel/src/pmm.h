@@ -8,16 +8,25 @@
 #ifndef HELIX_PMM_H
 #define HELIX_PMM_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-struct limine_memmap_response;
-
 #define PAGE_SIZE 4096u
 
-/* Build the frame bitmap from the bootloader memory map, placing its backing
- * storage in a reserved usable run reachable through the HHDM. */
-void pmm_init(struct limine_memmap_response *memmap, uint64_t hhdm_offset);
+/* One span of physical memory, as the boot code reports it. The boot protocol
+ * (Limine on x86_64, Multiboot on i686) is translated into this list by the
+ * boot code, so the allocator does not depend on either protocol. */
+struct pmm_region {
+    uint64_t base;      /* physical start */
+    uint64_t length;    /* bytes */
+    bool     usable;    /* true: may be handed out; false: reserved by firmware or the kernel */
+};
+
+/* Build the frame bitmap from a list of regions. The bitmap's storage is placed in one
+ * usable run and reached through `hhdm_offset`: physical P is at P + hhdm_offset. An
+ * identity-mapped kernel (i686 stage I2) passes 0. */
+void pmm_init(const struct pmm_region *regions, size_t count, uint64_t hhdm_offset);
 
 /* Allocate one frame; returns its physical address, or 0 if out of memory. */
 uintptr_t pmm_alloc_frame(void);

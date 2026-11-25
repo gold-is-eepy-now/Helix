@@ -189,8 +189,9 @@ i686-bios-test: i686-iso
 	@out=$$(timeout 60 qemu-system-i386 -m 128 -cdrom "$(BUILD_DIR)/i686/helix-i686-bios.iso" \
 	  -display none -serial stdio -no-reboot 2>&1); \
 	echo "$$out" | tail -20; \
-	echo "$$out" | grep -q "HELIX OS i686" && echo "$$out" | grep -q "Boot successful." \
-	  && echo "i686-bios-test: PASS (SeaBIOS via GRUB, i686 Multiboot kernel)" || { echo "i686-bios-test: FAIL"; exit 1; }
+	echo "$$out" | grep -q "HELIX OS i686" && echo "$$out" | grep -q "HELIX i686 mm: PASS" \
+	  && echo "$$out" | grep -q "Boot successful." \
+	  && echo "i686-bios-test: PASS (SeaBIOS via GRUB; frame allocator self-test)" || { echo "i686-bios-test: FAIL"; exit 1; }
 
 # Hypervisor disk formats (VDI/VMDK/VHD) converted from the raw image.
 disks: image

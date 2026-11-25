@@ -11,6 +11,7 @@ PHDRS
 SECTIONS
 {
     . = 0x00100000;
+    __kernel_start = .;
 
     .text : {
         KEEP(*(.multiboot))     /* the loader needs this header near the start */
@@ -24,6 +25,9 @@ SECTIONS
         *(COMMON)
         *(.bss .bss.*)
     } :data
+
+    /* The memory allocator must not hand out the kernel image; it reads these two symbols. */
+    __kernel_end = .;
 
     /DISCARD/ : { *(.comment) *(.note*) }
 }

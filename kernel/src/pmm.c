@@ -3,8 +3,6 @@
 
 #include <stdbool.h>
 
-#include <limine.h>
-
 #include "kstring.h"
 
 #define LOW_RESERVED_FRAMES (1024u * 1024u / PAGE_SIZE)
@@ -36,7 +34,7 @@ uint64_t pmm_hhdm_offset(void) {
     return g_hhdm_offset;
 }
 
-void pmm_init(struct limine_memmap_response *memmap, uint64_t hhdm_offset) {
+void pmm_init(const struct pmm_region *regions, size_t count, uint64_t hhdm_offset) {
     g_hhdm_offset = hhdm_offset;
     g_bitmap = NULL;
     g_bitmap_bytes = 0;
@@ -47,14 +45,16 @@ void pmm_init(struct limine_memmap_response *memmap, uint64_t hhdm_offset) {
     g_allocated = 0;
     g_search_hint = 0;
 
-    if (memmap == NULL || hhdm_offset == 0) {
+    /* An empty list means no memory was reported. A zero offset is valid: it is the
+     * identity map (i686), so it is not an error. */
+    if (regions == NULL || count == 0) {
         return;
     }
 
     /* Find the complete physical span before sizing the bitmap. */
-    for (uint64_t i = 0; i < memmap->entry_count; i++) {
-        const struct limine_memmap_entry *entry = memmap->entries[i];
-        if (entry->type != LIMINE_MEMMAP_USABLE || entry->length > UINT64_MAX - entry->base) {
+    for (uint64_t i = 0; i < count; i++) {
+        const struct pmm_region *entry = &regions[i];
+        if (!entry->usable || entry->length > UINT64_MAX - entry->base) {
             continue;
         }
         uint64_t end = entry->base + entry->length;
@@ -78,9 +78,9 @@ void pmm_init(struct limine_memmap_response *memmap, uint64_t hhdm_offset) {
 
     /* Place the bitmap inside one usable run; it is then reserved like any
      * other kernel allocation and is reachable through Limine's HHDM. */
-    for (uint64_t i = 0; i < memmap->entry_count; i++) {
-        const struct limine_memmap_entry *entry = memmap->entries[i];
-        if (entry->type != LIMINE_MEMMAP_USABLE || entry->length > UINT64_MAX - entry->base) {
+    for (uint64_t i = 0; i < count; i++) {
+        const struct pmm_region *entry = &regions[i];
+        if (!entry->usable || entry->length > UINT64_MAX - entry->base) {
             continue;
         }
         uint64_t first = (entry->base + PAGE_SIZE - 1) / PAGE_SIZE;
@@ -102,9 +102,9 @@ void pmm_init(struct limine_memmap_response *memmap, uint64_t hhdm_offset) {
     }
 
     memset(g_bitmap, 0xFF, g_bitmap_bytes); /* everything starts reserved */
-    for (uint64_t i = 0; i < memmap->entry_count; i++) {
-        const struct limine_memmap_entry *entry = memmap->entries[i];
-        if (entry->type != LIMINE_MEMMAP_USABLE || entry->length > UINT64_MAX - entry->base) {
+    for (uint64_t i = 0; i < count; i++) {
+        const struct pmm_region *entry = &regions[i];
+        if (!entry->usable || entry->length > UINT64_MAX - entry->base) {
             continue;
         }
         uint64_t first = (entry->base + PAGE_SIZE - 1) / PAGE_SIZE;

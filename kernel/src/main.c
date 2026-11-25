@@ -328,6 +328,26 @@ static void kernel_main_continue(void) {
     kernel_idle_loop();
 }
 
+/* The PMM takes a neutral region list (pmm.h). Limine's entries are copied into it here;
+ * the boot table is static because it is used before the heap exists. */
+static struct pmm_region g_pmm_regions[256];
+
+static size_t pmm_regions_from_limine(const struct limine_memmap_response *map) {
+    if (map == NULL) {
+        return 0;
+    }
+    if (map->entry_count > sizeof g_pmm_regions / sizeof g_pmm_regions[0]) {
+        panic("memory map has more entries than the boot table holds");
+    }
+    for (uint64_t i = 0; i < map->entry_count; i++) {
+        const struct limine_memmap_entry *e = map->entries[i];
+        g_pmm_regions[i].base = e->base;
+        g_pmm_regions[i].length = e->length;
+        g_pmm_regions[i].usable = (e->type == LIMINE_MEMMAP_USABLE);
+    }
+    return (size_t)map->entry_count;
+}
+
 void kmain(void) {
     /* 1. Did the bootloader understand our protocol revision? */
     if (!LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision)) {
@@ -363,7 +383,8 @@ void kmain(void) {
     uint64_t hhdm_offset = (hhdm_request.response != NULL)
                          ? hhdm_request.response->offset
                          : 0;
-    pmm_init(memmap_request.response, hhdm_offset);
+    size_t region_count = pmm_regions_from_limine(memmap_request.response);
+    pmm_init(g_pmm_regions, region_count, hhdm_offset);
     heap_init(hhdm_offset);
     object_manager_init();
 
