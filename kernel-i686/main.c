@@ -1,44 +1,25 @@
-/* main.c — i686 kernel, stage I2a: check the Multiboot magic, build the frame list from the
- * Multiboot memory map, run the frame allocator self-test, print over COM1, halt.
+/* main.c — i686 kernel: check the Multiboot magic, build the frame list from the Multiboot
+ * memory map, run the memory self-tests, bring up the interrupt subsystem and its tests,
+ * print over COM1, halt.
  *
  * Why COM1 first: serial is the simplest output that works before any framebuffer or
  * memory code exists, and QEMU's -serial stdio shows it directly. */
 #include <stddef.h>
 #include <stdint.h>
 
+#include "gdt.h"
 #include "heap.h"
+#include "intr_test.h"
+#include "io.h"
 #include "paging.h"
 #include "pmm.h"
+#include "serial.h"
 
 bool mm_selftest(void);
 bool paging_selftest(void);
 bool heap_selftest(void);
 
-#define COM1 0x3F8
 #define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002u
-
-static inline void outb(uint16_t port, uint8_t value) {
-    __asm__ volatile("outb %0, %1" : : "a"(value), "Nd"(port));
-}
-
-static inline uint8_t inb(uint16_t port) {
-    uint8_t value;
-    __asm__ volatile("inb %1, %0" : "=a"(value) : "Nd"(port));
-    return value;
-}
-
-/* Wait until the transmit holding register is empty (line status bit 5), then send. */
-static void serial_putc(char c) {
-    while ((inb(COM1 + 5) & 0x20) == 0) { }
-    outb(COM1, (uint8_t)c);
-}
-
-static void serial_puts(const char *s) {
-    while (*s) {
-        if (*s == '\n') serial_putc('\r');
-        serial_putc(*s++);
-    }
-}
 
 /* Multiboot 1 information block (only the fields we read). flags bit 6 means the memory
  * map is present. */
@@ -118,6 +99,7 @@ void kmain(uint32_t multiboot_magic, uint32_t multiboot_info) {
         serial_puts("HELIX i686: not loaded by a Multiboot loader\n");
         for (;;) { __asm__ volatile("cli; hlt"); }
     }
+    gdt_init();                              /* our own segments before interrupts */
     serial_puts("HELIX OS i686\n");
 
     build_regions((const struct multiboot_info *)(uintptr_t)multiboot_info);
@@ -134,6 +116,12 @@ void kmain(uint32_t multiboot_magic, uint32_t multiboot_info) {
     serial_puts(paging_selftest() ? "HELIX i686 paging: PASS\n" : "HELIX i686 paging: FAIL\n");
     heap_init(0);                            /* identity map: phys + 0 */
     serial_puts(heap_selftest() ? "HELIX i686 heap: PASS\n" : "HELIX i686 heap: FAIL\n");
+
+    /* Interrupts: IDT, PIC remap, 100 Hz PIT. The breakpoint test runs with IF clear; the
+     * timer test enables interrupts for a short while and then disables them again. */
+    interrupts_init(100);
+    serial_puts(breakpoint_selftest() ? "HELIX i686 idt: PASS\n" : "HELIX i686 idt: FAIL\n");
+    serial_puts(timer_selftest() ? "HELIX i686 timer: PASS\n" : "HELIX i686 timer: FAIL\n");
 
     serial_puts("Boot successful.\n");
     for (;;) {

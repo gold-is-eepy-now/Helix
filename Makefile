@@ -192,8 +192,10 @@ i686-bios-test: i686-iso
 	echo "$$out" | grep -q "HELIX OS i686" && echo "$$out" | grep -q "HELIX i686 mm: PASS" \
 	  && echo "$$out" | grep -q "HELIX i686 paging: PASS" \
 	  && echo "$$out" | grep -q "HELIX i686 heap: PASS" \
+	  && echo "$$out" | grep -q "HELIX i686 idt: PASS" \
+	  && echo "$$out" | grep -q "HELIX i686 timer: PASS" \
 	  && echo "$$out" | grep -q "Boot successful." \
-	  && echo "i686-bios-test: PASS (SeaBIOS via GRUB; frame allocator, PAE paging and heap self-tests)" || { echo "i686-bios-test: FAIL"; exit 1; }
+	  && echo "i686-bios-test: PASS (SeaBIOS via GRUB; frame allocator, PAE paging, heap, IDT and PIT timer self-tests)" || { echo "i686-bios-test: FAIL"; exit 1; }
 
 # Hypervisor disk formats (VDI/VMDK/VHD) converted from the raw image.
 disks: image
